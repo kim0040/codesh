@@ -44,8 +44,13 @@ export function awarenessBridge(session: DocSession, fileId: string) {
         });
       }
 
+      /** Layout may only be read in a measure phase, never inside an update. */
       sendViewport() {
-        session.publish({ viewport: visibleLines(this.view) });
+        this.view.requestMeasure({
+          key: this,
+          read: () => visibleLines(this.view),
+          write: (viewport) => session.publish({ viewport }),
+        });
       }
 
       destroy() {

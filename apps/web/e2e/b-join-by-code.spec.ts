@@ -46,7 +46,7 @@ test("a code that does not exist says so and keeps the user on the start page", 
   try {
     await user.page.goto("/");
     await user.page.getByRole("group", { name: /6/ }).locator("input").first().click();
-    await user.page.keyboard.type("000000", { delay: 30 });
+    await user.page.keyboard.type("912345", { delay: 30 });
     await expect(user.page.getByRole("alert")).toContainText("doesn't exist");
     expect(new URL(user.page.url()).pathname).toBe("/");
   } finally {

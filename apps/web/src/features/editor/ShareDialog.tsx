@@ -27,6 +27,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Expand, Radio, Send, UserMinus, Users, X } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { removeAwarenessStates } from "y-protocols/awareness";
 import { api } from "../../lib/api";
 import { usePresence } from "../../lib/events";
 import { copyText, groupCode, shareUrl } from "../../lib/format";
@@ -519,8 +520,13 @@ function AccessTab() {
   });
   const kick = useMutation({
     mutationFn: (v: { clientId: string; ban: boolean }) => api.kick(ctx.share.id, v as never),
-    onSuccess: (_d, v) =>
-      toast({ title: v.ban ? t("toast.banned") : t("toast.kicked"), tone: "success" }),
+    onSuccess: (_d, v) => {
+      // The server drops them from the document at once; their awareness entry would otherwise
+      // linger in this list until it times out.
+      const gone = ctx.participants.find((person) => person.clientId === v.clientId);
+      if (gone) removeAwarenessStates(ctx.session.awareness, gone.awarenessIds, "kick");
+      toast({ title: v.ban ? t("toast.banned") : t("toast.kicked"), tone: "success" });
+    },
     onError: () => toast({ title: t("error.generic"), tone: "danger" }),
   });
   const pendingList = useQueryPending(ctx.share.id, Boolean(access?.requireApproval));

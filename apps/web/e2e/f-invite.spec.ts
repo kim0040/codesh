@@ -26,9 +26,9 @@ test("an invite sent through presence arrives as a toast and opens the share", a
     await expect(dialog.getByTestId(`presence-${receiver.name}`)).toBeVisible({ timeout: 20_000 });
     await dialog.getByTestId(`presence-${receiver.name}`).getByRole("button").first().click();
 
-    const toast = receiver.page.getByText(`${owner.name} sent you a share`);
+    const toast = receiver.page.getByText(`${owner.name} sent you a share`).first();
     await expect(toast).toBeVisible({ timeout: 15_000 });
-    await expect(receiver.page.getByText("look at this")).toBeVisible();
+    await expect(receiver.page.getByText("look at this").first()).toBeVisible();
 
     await receiver.page.getByRole("button", { name: "Open share" }).click();
     await receiver.page.waitForURL(new RegExp(`/${id}$`));

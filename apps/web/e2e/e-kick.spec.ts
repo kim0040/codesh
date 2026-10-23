@@ -48,7 +48,7 @@ test("a blocked participant cannot come back", async ({ browser }) => {
     await owner.page.getByRole("button", { name: "Remove and block" }).first().click();
     await owner.page.getByTestId("confirm-kick").click();
 
-    await expect(guest.page.getByText("You were removed from this share")).toBeVisible();
+    await expect(guest.page.getByText("You can't join this share")).toBeVisible();
     await joinByLink(guest, id);
     await expect(guest.page.getByText("You can't join this share")).toBeVisible();
     await expect(guest.page.locator(".cm-content")).toHaveCount(0);

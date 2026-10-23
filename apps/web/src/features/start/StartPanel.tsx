@@ -93,7 +93,7 @@ function JoinByCode() {
       else await navigate({ to: "/lab/$id", params: { id: target.labId } });
     } catch (e) {
       setError(
-        isApiError(e, "not_found") || isApiError(e, "expired")
+        isApiError(e, "not_found") || isApiError(e, "expired") || isApiError(e, "validation")
           ? t("error.not_found")
           : t(isApiError(e, "rate_limited") ? "error.rate_limited" : "error.network"),
       );

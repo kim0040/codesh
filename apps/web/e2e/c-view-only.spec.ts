@@ -38,7 +38,7 @@ test("the view link cannot type, the edit link can", async ({ browser }) => {
     await waitForEditor(viewer.page);
     await expect(viewer.page.getByTestId("banner-readonly")).toBeVisible();
     await expect.poll(() => editorText(viewer.page)).toContain("locked text");
-    await expect(viewer.page.locator(".cm-content")).toHaveAttribute("contenteditable", "false");
+    await expect(viewer.page.locator(".cm-content")).toHaveAttribute("aria-readonly", "true");
     await viewer.page.locator(".cm-content").click();
     await viewer.page.keyboard.type("INTRUDER");
     await owner.page.waitForTimeout(800);

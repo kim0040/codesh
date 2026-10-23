@@ -32,6 +32,8 @@ export default defineConfig({
         RATE_LIMIT_CREATE_PER_MIN: "100000",
       },
       reuseExistingServer: false,
+      stdout: "pipe",
+      stderr: "pipe",
       timeout: 60_000,
     },
     {
@@ -41,6 +43,8 @@ export default defineConfig({
       port: COLLAB_PORT,
       env: { ...shared, PORT: String(COLLAB_PORT), COLLAB_INSTANCE_ID: "e2e" },
       reuseExistingServer: false,
+      stdout: "pipe",
+      stderr: "pipe",
       timeout: 60_000,
     },
     {
@@ -52,6 +56,8 @@ export default defineConfig({
         COLLAB_PORT: String(COLLAB_PORT),
       },
       reuseExistingServer: false,
+      stdout: "pipe",
+      stderr: "pipe",
       timeout: 120_000,
     },
   ],

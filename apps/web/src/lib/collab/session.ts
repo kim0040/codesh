@@ -170,7 +170,8 @@ export class DocSession {
         this.everConnected = true;
         this.patch({ denied: null });
         if (scope === "readonly" && !this.state.readOnly) this.patch({ readOnly: true });
-        this.refreshStatus();
+        // The provider sets `isAuthenticated` after this callback returns.
+        queueMicrotask(() => this.refreshStatus());
       },
       onAuthenticationFailed: ({ reason }) => this.handleDenied(reason),
       onSynced: ({ state }) => {
@@ -185,9 +186,17 @@ export class DocSession {
       onUnsyncedChanges: ({ number }) => this.patch({ unsynced: number }),
       onClose: ({ event }) => {
         const reason = event.reason;
+        if (reason === "provider_initiated" && !this.destroyed && provider === this.provider) {
+          // The server answering a Close sent by an earlier provider of this same document
+          // (a React remount, a resync). It names the document, so it reaches this provider
+          // too: join again over the open socket.
+          void provider.onOpen(new Event("open"));
+          return;
+        }
         if (reason === "kicked" || reason === "deleted") {
           this.patch({ closed: reason });
-          provider.disconnect();
+          // Leave the document, but keep the shared socket for other documents of this tab.
+          provider.detach();
         }
         this.refreshStatus();
       },

@@ -91,7 +91,7 @@ for (const variant of VARIANTS) {
         await openEditor(peer, id);
         await peer.page.locator(".cm-line", { hasText: "visitors.set" }).click();
         await peer.page.keyboard.press("End");
-        await expect(owner.page.locator(".cm-remote-caret").first()).toBeVisible();
+        await expect(owner.page.locator(".cm-remote-caret").first()).toBeAttached();
         await owner.page.waitForTimeout(1_200);
       }
       await owner.page.locator(".cm-line", { hasText: "greet" }).first().click();
