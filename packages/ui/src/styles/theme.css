@@ -1,0 +1,161 @@
+/*
+ * Tailwind v4 theme. `inline` makes utilities read the runtime variables from tokens.css, so
+ * `bg-panel` follows `data-theme` on any ancestor instead of being frozen at :root.
+ * Usage in an app: `@import "tailwindcss"; @import "@codesh/ui/styles.css";`
+ */
+@custom-variant coarse (@media (pointer: coarse));
+
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-white: #ffffff;
+  --color-ink: #0a0c10;
+
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+  --color-scrim: var(--scrim);
+
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-line-control: var(--border-control);
+
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-disabled: var(--fg-disabled);
+
+  --color-fill-hover: var(--fill-hover);
+  --color-fill-active: var(--fill-active);
+  --color-fill-selected: var(--fill-selected);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--focus);
+
+  --color-success: var(--success);
+  --color-success-hover: var(--success-hover);
+  --color-success-active: var(--success-active);
+  --color-success-fg: var(--success-fg);
+  --color-success-text: var(--success-text);
+  --color-success-soft: var(--success-soft);
+
+  --color-warning: var(--warning);
+  --color-warning-hover: var(--warning-hover);
+  --color-warning-active: var(--warning-active);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-text: var(--warning-text);
+  --color-warning-soft: var(--warning-soft);
+
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-active: var(--danger-active);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-text: var(--danger-text);
+  --color-danger-soft: var(--danger-soft);
+
+  --color-info: var(--info);
+  --color-info-hover: var(--info-hover);
+  --color-info-active: var(--info-active);
+  --color-info-fg: var(--info-fg);
+  --color-info-text: var(--info-text);
+  --color-info-soft: var(--info-soft);
+
+  --color-participant-1: var(--participant-1);
+  --color-participant-2: var(--participant-2);
+  --color-participant-3: var(--participant-3);
+  --color-participant-4: var(--participant-4);
+  --color-participant-5: var(--participant-5);
+  --color-participant-6: var(--participant-6);
+  --color-participant-7: var(--participant-7);
+  --color-participant-8: var(--participant-8);
+  --color-participant-9: var(--participant-9);
+  --color-participant-10: var(--participant-10);
+  --color-participant-11: var(--participant-11);
+  --color-participant-12: var(--participant-12);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+
+  /*
+   * Type scale. Names say where the size is used. Pretendard (UI, Hangul + Latin): generous
+   * line-heights because Hangul blocks are visually dense, slight negative tracking only on
+   * larger sizes. Code is JetBrains Mono at a fixed 1.6 so rows stay on the pixel grid.
+   */
+  --text-*: initial;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.5;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.5;
+  --text-body-sm: 0.875rem;
+  --text-body-sm--line-height: 1.6;
+  --text-body: 1rem;
+  --text-body--line-height: 1.65;
+  --text-title-sm: 1.0625rem;
+  --text-title-sm--line-height: 1.45;
+  --text-title-sm--letter-spacing: -0.01em;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.4;
+  --text-title--letter-spacing: -0.015em;
+  --text-heading: 1.75rem;
+  --text-heading--line-height: 1.25;
+  --text-heading--letter-spacing: -0.02em;
+  --text-display: 2.5rem;
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.025em;
+  --text-hero: clamp(2.5rem, 1.6rem + 4.2vw, 4.25rem);
+  --text-hero--line-height: 1.08;
+  --text-hero--letter-spacing: -0.03em;
+  --text-code-sm: 0.75rem;
+  --text-code-sm--line-height: 1.6;
+  --text-code: 0.8125rem;
+  --text-code--line-height: 1.6;
+
+  --radius-*: initial;
+  --radius-xs: var(--rad-xs);
+  --radius-sm: var(--rad-sm);
+  --radius-md: var(--rad-md);
+  --radius-lg: var(--rad-lg);
+  --radius-xl: var(--rad-xl);
+  --radius-full: var(--rad-full);
+
+  --shadow-*: initial;
+  --shadow-1: var(--elev-1);
+  --shadow-2: var(--elev-2);
+  --shadow-3: var(--elev-3);
+  --shadow-4: var(--elev-4);
+
+  --ease-*: initial;
+  --ease-out: var(--easing-out);
+  --ease-in: var(--easing-in);
+  --ease-in-out: var(--easing-in-out);
+  --ease-spring: var(--easing-spring);
+
+  --breakpoint-*: initial;
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 80rem;
+
+  --animate-*: initial;
+  --animate-spin: spin 700ms linear infinite;
+  --animate-pulse: pulse 1.6s var(--easing-in-out) infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
