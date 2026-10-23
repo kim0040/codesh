@@ -1,0 +1,196 @@
+/*
+ * codesh design tokens. Dark is the default; light follows `prefers-color-scheme: light`;
+ * `data-theme="dark|light"` on <html> (or on any subtree) overrides both.
+ *
+ * Every colour is `light-dark(<light>, <dark>)`, so a token is declared once and resolves against
+ * the `color-scheme` of the element that uses it. Contrast of every text/surface pair is asserted
+ * in tokens.test.ts; change a value there and the test tells you what broke.
+ *
+ * Roles, not hues: components reference these names only. One accent (violet), four status hues
+ * used for their meaning only, everything else neutral so syntax colours stay the loudest thing.
+ */
+
+:root {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+  }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root {
+  /* ── Surfaces: page → panel → raised → overlay (each step one elevation up) ── */
+  --bg: light-dark(#f3f4f7, #0a0c11);
+  --panel: light-dark(#fcfcfe, #111419);
+  --raised: light-dark(#ffffff, #181c22);
+  --overlay: light-dark(#ffffff, #20242b);
+  --scrim: light-dark(rgb(15 18 25 / 0.42), rgb(0 0 0 / 0.6));
+
+  /* ── Lines: --border is decorative; --border-control is a 3:1 UI boundary (inputs, switches) ── */
+  --border: light-dark(#dcdee2, #2b2e34);
+  --border-strong: light-dark(#c1c4c9, #3e434a);
+  --border-control: light-dark(#7d8086, #70757d);
+
+  /* ── Text levels, all ≥ 4.5:1 on every surface ── */
+  --fg: light-dark(#181b20, #e9ebef);
+  --fg-2: light-dark(#44484f, #b4b7be);
+  --fg-3: light-dark(#5b616a, #9498a0);
+  --fg-disabled: light-dark(#8a8e96, #5f646c);
+
+  /* ── Neutral state fills (alpha, so they work on any surface) ── */
+  --fill-hover: color-mix(in oklab, var(--fg) 6%, transparent);
+  --fill-active: color-mix(in oklab, var(--fg) 10%, transparent);
+  --fill-selected: color-mix(in oklab, var(--fg) 8%, transparent);
+
+  /* ── Accent: filled = the one primary action; -text = links and selected labels ── */
+  --accent: light-dark(#6149d2, #6652d4);
+  --accent-hover: light-dark(#573cc4, #715ee0);
+  --accent-active: light-dark(#4f2fb8, #5e49c9);
+  --accent-fg: #ffffff;
+  --accent-text: light-dark(#573bc3, #b7b5fd);
+  --accent-soft: light-dark(#eaebff, #26224a);
+  --focus: light-dark(#5e45cd, #a6a1fc);
+
+  /* ── Status: success / warning / danger / info. solid + fg for fills, text + soft for tints ── */
+  --success: light-dark(#0a7736, #4bad66);
+  --success-hover: light-dark(#05692f, #5abc73);
+  --success-active: light-dark(#035e28, #3da05a);
+  --success-fg: light-dark(#ffffff, #0a0c10);
+  --success-text: light-dark(#09672e, #75df8f);
+  --success-soft: light-dark(#dcf7e1, #0c2e16);
+
+  --warning: #f2b924;
+  --warning-hover: light-dark(#e2ad1b, #fdc435);
+  --warning-active: light-dark(#d6a319, #e9b10c);
+  --warning-fg: #0a0c10;
+  --warning-text: light-dark(#7d5409, #f4c352);
+  --warning-soft: light-dark(#fff1cc, #382500);
+
+  --danger: light-dark(#c71e29, #c9222c);
+  --danger-hover: light-dark(#b40d1f, #d63237);
+  --danger-active: light-dark(#a00a1a, #be0f22);
+  --danger-fg: #ffffff;
+  --danger-text: light-dark(#bb061e, #fd9693);
+  --danger-soft: light-dark(#ffe9e7, #461214);
+
+  --info: light-dark(#00739b, #34a3d3);
+  --info-hover: light-dark(#076487, #46b0e2);
+  --info-active: light-dark(#065878, #2295c6);
+  --info-fg: light-dark(#ffffff, #0a0c10);
+  --info-text: light-dark(#03668b, #6dcaf8);
+  --info-soft: light-dark(#dff2fd, #052a3b);
+
+  /* ── Participants: cursors, selections, avatars. One set that holds ≥ 3:1 on both themes. ──
+   * `-fg` is the label colour for text drawn on the colour (≥ 4.5:1). Mirrors @codesh/highlight. */
+  --participant-1: #c24558;
+  --participant-1-fg: #ffffff;
+  --participant-2: #118d52;
+  --participant-2-fg: #0a0c10;
+  --participant-3: #9b56b8;
+  --participant-3-fg: #ffffff;
+  --participant-4: #8c8308;
+  --participant-4-fg: #0a0c10;
+  --participant-5: #2e6fcd;
+  --participant-5-fg: #ffffff;
+  --participant-6: #d26124;
+  --participant-6-fg: #0a0c10;
+  --participant-7: #098b86;
+  --participant-7-fg: #0a0c10;
+  --participant-8: #b74a8e;
+  --participant-8-fg: #ffffff;
+  --participant-9: #5f8807;
+  --participant-9-fg: #0a0c10;
+  --participant-10: #6b5fc9;
+  --participant-10-fg: #ffffff;
+  --participant-11: #af7810;
+  --participant-11-fg: #0a0c10;
+  --participant-12: #077aa1;
+  --participant-12-fg: #ffffff;
+
+  /* ── Radii. Concentric: outer = inner + padding. Control 6 inside a 4px-padded menu (10)
+   * inside a 4px-padded dialog (14). ── */
+  --rad-xs: 3px;
+  --rad-sm: 4px;
+  --rad-md: 6px;
+  --rad-lg: 10px;
+  --rad-xl: 14px;
+  --rad-full: 9999px;
+
+  /* ── Elevation: 1 = control, 2 = card, 3 = menu/popover/toast, 4 = dialog/sheet ── */
+  --elev-1: 0 1px 2px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.5));
+  --elev-2:
+    0 1px 2px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.4)),
+    0 2px 6px -1px light-dark(rgb(16 24 40 / 0.08), rgb(0 0 0 / 0.45));
+  --elev-3:
+    0 2px 6px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.4)),
+    0 10px 24px -6px light-dark(rgb(16 24 40 / 0.16), rgb(0 0 0 / 0.6));
+  --elev-4:
+    0 4px 12px light-dark(rgb(16 24 40 / 0.08), rgb(0 0 0 / 0.45)),
+    0 24px 56px -12px light-dark(rgb(16 24 40 / 0.26), rgb(0 0 0 / 0.72));
+  /* Inset top highlight that gives raised dark surfaces an edge without a heavier border. */
+  --edge: inset 0 1px 0 light-dark(rgb(255 255 255 / 0.7), rgb(255 255 255 / 0.04));
+
+  /* ── Spacing: 4px base; Tailwind's `--spacing` multiplies the same unit ── */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+
+  /* ── Motion: short and purposeful. Everything collapses under prefers-reduced-motion. ── */
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --duration-slow: 260ms;
+  --easing-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --easing-in: cubic-bezier(0.5, 0, 0.9, 0.4);
+  --easing-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* A touch of overshoot for small things that appear (switch thumb, toast). */
+  --easing-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+
+  /* ── Stacking ── */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+  --z-tooltip: 60;
+
+  /* ── Type ── */
+  --font-ui:
+    "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  --font-code:
+    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+    "D2Coding", monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0.01ms;
+    --duration-fast: 0.01ms;
+    --duration-normal: 0.01ms;
+    --duration-slow: 0.01ms;
+  }
+}

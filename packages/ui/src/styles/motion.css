@@ -1,0 +1,284 @@
+/*
+ * Enter/exit animations for Radix `data-state` surfaces. Durations and easings come from the
+ * motion tokens, which collapse to ~0 under prefers-reduced-motion, so nothing here needs its
+ * own reduced-motion branch except the looping indicators at the bottom.
+ */
+@layer components {
+  /* Popovers, menus, selects, tooltips: scale from the trigger. */
+  .ui-pop[data-state="open"],
+  .ui-pop[data-state="delayed-open"],
+  .ui-pop[data-state="instant-open"] {
+    animation: ui-pop-in var(--duration-normal) var(--easing-out);
+  }
+  .ui-pop[data-state="closed"] {
+    animation: ui-pop-out var(--duration-fast) var(--easing-in) forwards;
+  }
+
+  .ui-tip[data-state="delayed-open"] {
+    animation: ui-tip-in var(--duration-fast) var(--easing-out);
+  }
+  .ui-tip[data-state="instant-open"] {
+    animation: none;
+  }
+  .ui-tip[data-state="closed"] {
+    animation: ui-pop-out var(--duration-instant) var(--easing-in) forwards;
+  }
+
+  /* Scrim behind dialogs and sheets. */
+  .ui-fade[data-state="open"] {
+    animation: ui-fade-in var(--duration-normal) var(--easing-out);
+  }
+  .ui-fade[data-state="closed"] {
+    animation: ui-fade-out var(--duration-fast) var(--easing-in) forwards;
+  }
+
+  /* Dialog: rise 8px and scale from 0.97. */
+  .ui-dialog[data-state="open"] {
+    animation: ui-dialog-in var(--duration-normal) var(--easing-out);
+  }
+  .ui-dialog[data-state="closed"] {
+    animation: ui-dialog-out var(--duration-fast) var(--easing-in) forwards;
+  }
+
+  /* Sheets slide in from their edge. */
+  .ui-sheet-right[data-state="open"] {
+    animation: ui-slide-in-right var(--duration-slow) var(--easing-out);
+  }
+  .ui-sheet-right[data-state="closed"] {
+    animation: ui-slide-out-right var(--duration-normal) var(--easing-in) forwards;
+  }
+  .ui-sheet-left[data-state="open"] {
+    animation: ui-slide-in-left var(--duration-slow) var(--easing-out);
+  }
+  .ui-sheet-left[data-state="closed"] {
+    animation: ui-slide-out-left var(--duration-normal) var(--easing-in) forwards;
+  }
+  .ui-sheet-bottom[data-state="open"] {
+    animation: ui-slide-in-bottom var(--duration-slow) var(--easing-out);
+  }
+  .ui-sheet-bottom[data-state="closed"] {
+    animation: ui-slide-out-bottom var(--duration-normal) var(--easing-in) forwards;
+  }
+
+  .ui-collapse[data-state="open"] {
+    animation: ui-collapse-down var(--duration-normal) var(--easing-out);
+  }
+  .ui-collapse[data-state="closed"] {
+    animation: ui-collapse-up var(--duration-fast) var(--easing-in);
+  }
+
+  .ui-shake {
+    animation: ui-shake var(--duration-slow) var(--easing-in-out);
+  }
+
+  /* Indeterminate progress bar sweeps; the reduced-motion form is a static partial bar. */
+  .ui-indeterminate {
+    animation: ui-indeterminate 1.4s var(--easing-in-out) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-indeterminate {
+      animation: none;
+      inset-inline-start: 0;
+      width: 40%;
+    }
+  }
+}
+
+@keyframes ui-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes ui-pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@keyframes ui-tip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(2px);
+  }
+}
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ui-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ui-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+@keyframes ui-dialog-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+@keyframes ui-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes ui-slide-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes ui-slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes ui-slide-out-left {
+  to {
+    transform: translateX(-100%);
+  }
+}
+@keyframes ui-slide-in-bottom {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes ui-slide-out-bottom {
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes ui-collapse-down {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+@keyframes ui-collapse-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+@keyframes ui-shake {
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+@keyframes ui-indeterminate {
+  0% {
+    inset-inline-start: -40%;
+    width: 40%;
+  }
+  60% {
+    inset-inline-start: 100%;
+    width: 40%;
+  }
+  100% {
+    inset-inline-start: 100%;
+    width: 40%;
+  }
+}
+
+/*
+ * Toast stack. Newest toast sits at the bottom; older ones peek out above it, scaled down
+ * (--n = position from the newest). Hovering or focusing inside the viewport expands the stack
+ * to full size (--offset = sum of newer toast heights) and, via Radix, pauses every timer.
+ */
+@layer components {
+  .ui-toast {
+    position: absolute;
+    inset-inline: 1rem;
+    bottom: 1rem;
+    z-index: calc(100 - var(--n));
+    transform-origin: 50% 100%;
+    transform: translateY(calc(var(--n) * -0.75rem)) scale(calc(1 - var(--n) * 0.05));
+    transition:
+      transform var(--duration-slow) var(--easing-out),
+      opacity var(--duration-normal) var(--easing-out),
+      height var(--duration-slow) var(--easing-out);
+    height: var(--h);
+    opacity: 1;
+  }
+  .ui-toast[data-n="0"] {
+    height: auto;
+  }
+  .ui-toast[data-hidden="true"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .ui-toast:not([data-n="0"]) .ui-toast-body {
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--easing-out);
+  }
+  .ui-toast-viewport:hover .ui-toast,
+  .ui-toast-viewport:focus-within .ui-toast {
+    transform: translateY(calc(var(--offset) * -1));
+    height: auto;
+    opacity: 1;
+  }
+  .ui-toast-viewport:hover .ui-toast-body,
+  .ui-toast-viewport:focus-within .ui-toast-body {
+    opacity: 1;
+  }
+  .ui-toast[data-state="open"] {
+    animation: ui-toast-in var(--duration-slow) var(--easing-spring);
+  }
+  .ui-toast[data-state="closed"] {
+    animation: ui-toast-out var(--duration-normal) var(--easing-in) forwards;
+  }
+  .ui-toast[data-swipe="move"] {
+    translate: var(--radix-toast-swipe-move-x) 0;
+    transition: none;
+  }
+  .ui-toast[data-swipe="cancel"] {
+    translate: 0 0;
+    transition: translate var(--duration-normal) var(--easing-out);
+  }
+  .ui-toast[data-swipe="end"] {
+    animation: ui-toast-swipe-out var(--duration-normal) var(--easing-out) forwards;
+  }
+}
+
+@keyframes ui-toast-in {
+  from {
+    opacity: 0;
+    translate: 0 1rem;
+  }
+}
+@keyframes ui-toast-out {
+  to {
+    opacity: 0;
+    translate: 0 0.5rem;
+  }
+}
+@keyframes ui-toast-swipe-out {
+  from {
+    translate: var(--radix-toast-swipe-end-x) 0;
+  }
+  to {
+    translate: 110% 0;
+    opacity: 0;
+  }
+}
