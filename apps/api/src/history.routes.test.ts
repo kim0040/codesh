@@ -4,7 +4,6 @@ import { readContent } from "./docs.js";
 import {
   createHarness,
   createShare,
-  eventually,
   type Harness,
   integration,
   storedDoc,
@@ -19,19 +18,6 @@ describe.skipIf(!integration)("history and restore", () => {
     h = await createHarness();
   });
   afterAll(() => h.close());
-
-  /** Plays collab: edits the stored document and appends the change to the update log. */
-  async function edit(id: string, change: (doc: Y.Doc) => void) {
-    const doc = await storedDoc(h.stores, id);
-    const before = Y.encodeStateVector(doc);
-    doc.transact(() => change(doc));
-    const seq = (await h.stores.updates.lastSeq(id)) + 1;
-    await h.stores.updates.append(
-      id,
-      [{ seq, data: Y.encodeStateAsUpdate(doc, before) }],
-      new Date(),
-    );
-  }
 
   async function keepHistory(id: string, seq: number, at = new Date()) {
     const doc = await storedDoc(h.stores, id);
@@ -93,87 +79,74 @@ describe.skipIf(!integration)("history and restore", () => {
     }
   });
 
-  it("restores an earlier state as a normal update on top of the current one", async () => {
+  it("asks collab to restore the entry and mirrors its title and size in the record", async () => {
     const owner = h.client();
     const { id } = await createShare(owner, {
       title: "Draft",
-      files: [
-        { path: "main.py", content: "print('v1')\n" },
-        { path: "old.py", content: "legacy = True\n" },
-      ],
+      files: [{ path: "main.py", content: "print('v1')\n" }],
     });
     await keepHistory(id, 1);
-    const v1 = readContent(await storedDoc(h.stores, id));
-
-    // Later edits: change main, delete old.py, add new.py, retitle.
-    await edit(id, (doc) => {
-      doc.getText("file:main").insert(0, "# v2\n");
-      doc.getMap("meta").set("title", "Final");
-      const oldId = v1.files[1]?.id as string;
-      doc.getMap("files").delete(oldId);
-      const entry = new Y.Map<unknown>();
-      doc.getMap("files").set("NEWFILE1", entry);
-      entry.set("path", "new.py");
-      entry.set("language", "python");
-      entry.set("order", 2);
-      doc.getText("file:NEWFILE1").insert(0, "added = True\n");
-    });
-    const beforeRestore = await storedDoc(h.stores, id);
-    expect(readContent(beforeRestore).title).toBe("Final");
-    const docChannel = await h.subscribe(`doc:${id}`);
+    await h.stores.shares.update(id, { title: "Final", sizeBytes: 999 });
     const lastSeqBefore = await h.stores.updates.lastSeq(id);
+    h.collab.commands.length = 0;
 
     const response = await owner.post(`/api/shares/${id}/restore`, { seq: 1 });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true });
 
-    // The stored document now reads like the old one.
-    const restored = readContent(await storedDoc(h.stores, id));
-    expect(restored.title).toBe("Draft");
-    expect(restored.files.map((f) => [f.id, f.path, f.content])).toEqual(
-      v1.files.map((f) => [f.id, f.path, f.content]),
-    );
-    // It is one more entry in the log, and history is still there.
-    expect(await h.stores.updates.lastSeq(id)).toBe(lastSeqBefore + 1);
-    expect((await h.stores.snapshots.list(id, "history")).map((s) => s.seq)).toEqual([1]);
-    expect(await h.stores.shares.get(id)).toMatchObject({ title: "Draft" });
-
-    // A live client holding the pre-restore state converges by applying that one update.
-    const entries = await h.stores.updates.read(id, lastSeqBefore);
-    expect(entries).toHaveLength(1);
-    const live = new Y.Doc();
-    Y.applyUpdate(live, Y.encodeStateAsUpdate(beforeRestore));
-    Y.applyUpdate(live, (entries[0] as { data: Uint8Array }).data);
-    expect(readContent(live)).toEqual(restored);
-
-    // And collab instances holding the document are sent the same update.
-    const message = (await eventually(() => docChannel.messages[0])) as { update: string };
-    const viaChannel = new Y.Doc();
-    Y.applyUpdate(viaChannel, Y.encodeStateAsUpdate(beforeRestore));
-    Y.applyUpdate(viaChannel, new Uint8Array(Buffer.from(message.update, "base64")));
-    expect(readContent(viaChannel)).toEqual(restored);
-    docChannel.stop();
+    // The API only asks; collab writes the update (§6.11).
+    expect(h.collab.commands).toMatchObject([{ kind: "restore", seq: 1 }]);
+    expect(await h.stores.updates.lastSeq(id)).toBe(lastSeqBefore);
+    expect(await h.stores.snapshots.list(id, "history")).toHaveLength(1);
+    expect(await h.stores.shares.get(id)).toMatchObject({
+      title: "Draft",
+      sizeBytes: "print('v1')\n".length,
+    });
   });
 
-  it("numbers the restore update above the newest compact snapshot", async () => {
-    const owner = h.client();
-    const { id } = await createShare(owner, { files: [{ path: "a.txt", content: "one" }] });
-    await keepHistory(id, 1);
-    await edit(id, (doc) => doc.getText("file:main").insert(3, " two"));
-    // Collab compacted: the snapshot at seq 1 holds everything and the log was emptied.
-    const doc = await storedDoc(h.stores, id);
-    await h.stores.snapshots.put({
-      shareId: id,
-      seq: 7,
-      state: new Uint8Array(Y.encodeStateAsUpdate(doc)),
-      at: new Date(),
-      kind: "compact",
-    });
-    await h.stores.updates.deleteUpTo(id, 7);
+  it("changes nothing and answers 503 when collab does not reply", async () => {
+    const quiet = await createHarness({ collab: "none", commandTimeoutMs: 150 });
+    try {
+      const owner = quiet.client();
+      const { id } = await createShare(owner, { title: "Draft" });
+      const doc = await storedDoc(quiet.stores, id);
+      await quiet.stores.snapshots.put({
+        shareId: id,
+        seq: 1,
+        state: new Uint8Array(Y.encodeStateAsUpdate(doc)),
+        at: new Date(),
+        kind: "history",
+      });
+      await quiet.stores.shares.update(id, { title: "Later" });
 
-    expect((await owner.post(`/api/shares/${id}/restore`, { seq: 1 })).statusCode).toBe(200);
-    expect(await h.stores.updates.lastSeq(id)).toBe(8);
-    expect(readContent(await storedDoc(h.stores, id)).files[0]?.content).toBe("one");
+      const response = await owner.post(`/api/shares/${id}/restore`, { seq: 1 });
+      expect(response.statusCode).toBe(503);
+      expect(errorCode(response)).toBe("unavailable");
+      expect(await quiet.stores.shares.get(id)).toMatchObject({ title: "Later" });
+    } finally {
+      await quiet.close();
+    }
+  });
+
+  it("turns a refusal from collab into the matching error", async () => {
+    const owner = h.client();
+    const { id } = await createShare(owner);
+    await keepHistory(id, 1);
+    const cases = [
+      ["snapshot_not_found", 404, "not_found"],
+      ["too_large", 413, "too_large"],
+      ["failed", 503, "unavailable"],
+    ] as const;
+    try {
+      for (const [error, status, code] of cases) {
+        h.collab.reply = () => ({ ok: false, error });
+        const response = await owner.post(`/api/shares/${id}/restore`, { seq: 1 });
+        expect(response.statusCode, error).toBe(status);
+        expect(errorCode(response), error).toBe(code);
+      }
+    } finally {
+      h.collab.reply = () => ({ ok: true });
+    }
   });
 
   it("answers 404 for an unknown history entry and validates the body", async () => {

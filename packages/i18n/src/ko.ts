@@ -762,4 +762,6 @@ export const ko: KoDictionary = {
   "error.expired.hint": "새 공유를 만들고, 저장해서 보관하세요.",
   "error.validation": "입력한 내용을 확인해 주세요",
   "error.validation.hint": "표시된 항목을 고친 뒤 다시 시도해 주세요.",
+  "error.unavailable": "실시간 편집 서버가 응답하지 않아요",
+  "error.unavailable.hint": "아무것도 바뀌지 않았어요. 잠시 후 다시 시도해 주세요.",
 };

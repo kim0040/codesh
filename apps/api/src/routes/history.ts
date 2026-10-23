@@ -9,7 +9,7 @@ import {
 import * as Y from "yjs";
 import { findShare, requireOwner } from "../access.js";
 import type { Ctx } from "../ctx.js";
-import { applyServerChange, contentBytes, readContent, restoreInto } from "../docs.js";
+import { contentBytes, readContent, sendCommand } from "../docs.js";
 import { notFound } from "../errors.js";
 import { type App, OK } from "./types.js";
 
@@ -55,11 +55,11 @@ export function historyRoutes(app: App, ctx: Ctx): void {
       const snapshot = await ctx.stores.snapshots.get(share.id, "history", request.body.seq);
       if (!snapshot) throw notFound("No such history entry");
 
-      // CRDT state only grows, so "going back" is a new edit that rewrites the text to match.
+      // CRDT state only grows, so "going back" is a new edit that collab writes (§6.11).
+      await sendCommand(ctx, share.id, { kind: "restore", seq: request.body.seq });
       const past = new Y.Doc();
       Y.applyUpdate(past, snapshot.state);
       const target = readContent(past);
-      await applyServerChange(ctx, share.id, (doc) => restoreInto(doc, target));
       await ctx.stores.shares.update(share.id, {
         title: target.title,
         language: target.language,

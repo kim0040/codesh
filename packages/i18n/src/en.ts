@@ -759,6 +759,8 @@ export const en = {
   "error.expired.hint": "Start a new share and save it to keep it.",
   "error.validation": "Some of what you entered isn't valid",
   "error.validation.hint": "Check the highlighted fields and try again.",
+  "error.unavailable": "Live editing isn't responding",
+  "error.unavailable.hint": "Nothing was changed. Wait a moment, then try again.",
 } as const;
 
 export type DictionaryKey = keyof typeof en;

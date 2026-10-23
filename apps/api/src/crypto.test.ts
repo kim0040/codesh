@@ -1,12 +1,7 @@
+import { createHmac } from "node:crypto";
+import { signCollabToken, verifyCollabToken } from "@codesh/shared";
 import { describe, expect, it } from "vitest";
-import {
-  hashPin,
-  randomKey,
-  safeEqual,
-  signCollabToken,
-  verifyCollabToken,
-  verifyPin,
-} from "./crypto.js";
+import { hashPin, randomKey, safeEqual, verifyPin } from "./crypto.js";
 
 const payload = {
   shareId: "abcd1234",
@@ -39,23 +34,33 @@ describe("PIN hashing", () => {
   });
 });
 
-describe("collab token", () => {
-  it("round-trips and has the documented shape", () => {
-    const token = signCollabToken(payload, "secret");
-    expect(token).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
-    expect(verifyCollabToken(token, "secret", 1_000)).toEqual(payload);
+/** The format of §8 written out with node:crypto, independent of the Web Crypto code in shared. */
+const referenceSign = (value: unknown, secret: string) => {
+  const body = Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+};
+
+function referenceVerify(token: string, secret: string) {
+  const [body, signature] = token.split(".") as [string, string];
+  const expected = createHmac("sha256", secret).update(body).digest("base64url");
+  if (signature !== expected) return null;
+  return JSON.parse(Buffer.from(body, "base64url").toString());
+}
+
+describe("collab token format", () => {
+  it("is signed by shared and verified by an independent implementation", async () => {
+    for (const name of ["Min", "민수 🙂"]) {
+      const token = await signCollabToken({ ...payload, name }, "secret");
+      expect(referenceVerify(token, "secret")).toEqual({ ...payload, name });
+      expect(referenceVerify(token, "other")).toBeNull();
+    }
   });
 
-  it("rejects a wrong secret, tampering, expiry and garbage", () => {
-    const token = signCollabToken(payload, "secret");
-    const [body, signature] = token.split(".") as [string, string];
-    const forged = Buffer.from(JSON.stringify({ ...payload, role: "owner" })).toString("base64url");
-    expect(verifyCollabToken(token, "other", 1_000)).toBeNull();
-    expect(verifyCollabToken(`${forged}.${signature}`, "secret", 1_000)).toBeNull();
-    expect(verifyCollabToken(`${body}.${signature}x`, "secret", 1_000)).toBeNull();
-    expect(verifyCollabToken(token, "secret", payload.exp)).toBeNull();
-    for (const bad of ["", "a", "a.b.c", "!!.??"]) {
-      expect(verifyCollabToken(bad, "secret", 1_000), bad).toBeNull();
+  it("is verified by shared when an independent implementation signed it", async () => {
+    for (const name of ["Min", "민수 🙂"]) {
+      const token = referenceSign({ ...payload, name }, "secret");
+      expect(await verifyCollabToken(token, "secret", 1_000)).toEqual({ ...payload, name });
+      expect(await verifyCollabToken(token, "other", 1_000)).toBeNull();
     }
   });
 });

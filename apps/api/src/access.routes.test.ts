@@ -1,5 +1,5 @@
+import { verifyCollabToken } from "@codesh/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { verifyCollabToken } from "./crypto.js";
 import {
   type Client,
   createHarness,
@@ -43,7 +43,8 @@ describe.skipIf(!integration)("join: edit key", () => {
     const withKey = await guest.post(`/api/shares/${id}/join`, { editKey });
     expect(withKey.json<{ role: string; token: string }>().role).toBe("edit");
     expect(
-      verifyCollabToken(withKey.json<{ token: string }>().token, h.config.collabSecret)?.role,
+      (await verifyCollabToken(withKey.json<{ token: string }>().token, h.config.collabSecret))
+        ?.role,
     ).toBe("edit");
   });
 

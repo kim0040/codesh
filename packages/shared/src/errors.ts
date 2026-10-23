@@ -11,6 +11,7 @@ export const ERROR_CODES = [
   "too_large",
   "expired",
   "validation",
+  "unavailable",
 ] as const;
 
 export const errorCodeSchema = z.enum(ERROR_CODES);
@@ -28,6 +29,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   too_large: 413,
   expired: 410,
   validation: 400,
+  unavailable: 503,
 };
 
 export const errorResponseSchema = z.object({

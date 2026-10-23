@@ -1,11 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { apiChannels, apiKeys, DEFAULT_FILE_ID, generateFileId, keys, YDOC } from "@codesh/shared";
-import { DuplicateSeqError } from "@codesh/storage";
+import {
+  apiKeys,
+  COLLAB_COMMAND_ERRORS,
+  type CollabCommand,
+  type CollabCommandError,
+  type CollabCommandReply,
+  channels,
+  collabCommandReplySchema,
+  DEFAULT_FILE_ID,
+  generateFileId,
+  YDOC,
+} from "@codesh/shared";
 import * as Y from "yjs";
 import type { Ctx } from "./ctx.js";
+import { ApiError, invalid, notFound, tooLarge } from "./errors.js";
 import { firstLines, utf8Length } from "./files.js";
 
-/** Server-side access to the Y.Doc of a share (§4): build, read, and apply changes made by the API. */
+/**
+ * Server-side access to the Y.Doc of a share (§4): build and read it, and ask collab to change it.
+ * Only apps/collab writes `share_updates` (§6.11); the API never appends to the update log.
+ */
 
 export interface NewFile {
   path: string;
@@ -108,119 +122,62 @@ export async function storeInitialState(ctx: Ctx, shareId: string, doc: Y.Doc): 
   });
 }
 
-const RELEASE_LOCK = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
-return 0
-`;
+/** A command without its `requestId`, which `sendCommand` adds. */
+export type CommandBody = CollabCommand extends infer C
+  ? C extends unknown
+    ? Omit<C, "requestId">
+    : never
+  : never;
+
+const unavailable = () => new ApiError("unavailable", "The collaboration service did not answer");
+
+function commandError(error: CollabCommandError | undefined): ApiError {
+  switch (error) {
+    case COLLAB_COMMAND_ERRORS.notFound:
+      return notFound("Share not found");
+    case COLLAB_COMMAND_ERRORS.snapshotNotFound:
+      return notFound("No such history entry");
+    case COLLAB_COMMAND_ERRORS.fileNotFound:
+      return notFound("No such file");
+    case COLLAB_COMMAND_ERRORS.tooLarge:
+      return tooLarge("The document would become too large");
+    case COLLAB_COMMAND_ERRORS.invalid:
+      return invalid("The change was refused");
+    default:
+      return unavailable();
+  }
+}
 
 /**
- * Appends an update as a normal entry of the update log. The next seq is above both the last
- * entry and the newest compact snapshot, because collab ignores entries at or below the snapshot.
- * While no collab instance owns the document, the API holds `doclock:<id>` so none can start
- * writing underneath it. The update is also published on `doc:<id>` for an instance that holds the
- * document in memory; applying a Yjs update twice is harmless.
+ * Asks collab to change a document (§6.11): publishes on `cmd:<shareId>` and waits for the reply on
+ * `cmd-reply:<requestId>`. The reply channel is subscribed before publishing, so a fast reply is
+ * never missed. A refused command becomes the matching API error; no reply within
+ * `COLLAB_COMMAND_TIMEOUT_MS` is `unavailable` (503).
  */
-export async function persistUpdate(ctx: Ctx, shareId: string, update: Uint8Array): Promise<void> {
-  const lockKey = keys.docLock(shareId);
-  const token = `api:${randomUUID()}`;
-  const locked = (await ctx.valkey.set(lockKey, token, "PX", 5000, "NX")) === "OK";
+export async function sendCommand(ctx: Ctx, shareId: string, body: CommandBody): Promise<void> {
+  const requestId = randomUUID();
+  const command = { ...body, requestId } as CollabCommand;
+  let settle!: (reply: CollabCommandReply | "timeout") => void;
+  const outcome = new Promise<CollabCommandReply | "timeout">((resolve) => {
+    settle = resolve;
+  });
+  const stop = await ctx.hub.subscribe(channels.cmdReply(requestId), (message) => {
+    try {
+      const reply = collabCommandReplySchema.safeParse(JSON.parse(message));
+      if (reply.success) settle(reply.data);
+    } catch {
+      // Not JSON: not from collab.
+    }
+  });
+  const timer = setTimeout(() => settle("timeout"), ctx.commandTimeoutMs);
   try {
-    for (let attempt = 0; ; attempt++) {
-      const [last, snapshot] = await Promise.all([
-        ctx.stores.updates.lastSeq(shareId),
-        ctx.stores.snapshots.latest(shareId, "compact"),
-      ]);
-      const seq = Math.max(last, snapshot?.seq ?? 0) + 1;
-      try {
-        await ctx.stores.updates.append(shareId, [{ seq, data: update }], new Date());
-        break;
-      } catch (error) {
-        if (!(error instanceof DuplicateSeqError) || attempt >= 7) throw error;
-      }
-    }
+    await ctx.valkey.publish(channels.cmd(shareId), JSON.stringify(command));
+    const reply = await outcome;
+    if (reply === "timeout") throw unavailable();
+    if (!reply.ok) throw commandError(reply.error);
   } finally {
-    if (locked) await ctx.valkey.eval(RELEASE_LOCK, 1, lockKey, token).catch(() => undefined);
-  }
-  await ctx.valkey.publish(
-    apiChannels.doc(shareId),
-    JSON.stringify({ update: Buffer.from(update).toString("base64") }),
-  );
-}
-
-/**
- * Runs `change` on the stored document and persists what it changed as one update.
- * Returns false when nothing changed.
- */
-export async function applyServerChange(
-  ctx: Ctx,
-  shareId: string,
-  change: (doc: Y.Doc) => void,
-): Promise<boolean> {
-  const doc = await loadDoc(ctx, shareId);
-  const before = Y.encodeStateVector(doc);
-  doc.transact(() => change(doc), "api");
-  const update = Y.encodeStateAsUpdate(doc, before);
-  // An update that carries no structs and no deletions is the two bytes [0, 0].
-  if (update.byteLength <= 2) return false;
-  await persistUpdate(ctx, shareId, update);
-  return true;
-}
-
-const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
-const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
-
-/** Turns `text` into `next` with one delete and one insert around the common prefix and suffix. */
-export function replaceText(text: Y.Text, next: string): void {
-  const current = text.toString();
-  if (current === next) return;
-  const limit = Math.min(current.length, next.length);
-  let start = 0;
-  while (start < limit && current.charCodeAt(start) === next.charCodeAt(start)) start++;
-  let endCurrent = current.length;
-  let endNext = next.length;
-  while (
-    endCurrent > start &&
-    endNext > start &&
-    current.charCodeAt(endCurrent - 1) === next.charCodeAt(endNext - 1)
-  ) {
-    endCurrent--;
-    endNext--;
-  }
-  // Never cut a surrogate pair in half.
-  if (start > 0 && isHighSurrogate(current.charCodeAt(start - 1))) start--;
-  if (endCurrent < current.length && isLowSurrogate(current.charCodeAt(endCurrent))) {
-    endCurrent++;
-    endNext++;
-  }
-  if (endCurrent > start) text.delete(start, endCurrent - start);
-  if (endNext > start) text.insert(start, next.slice(start, endNext));
-}
-
-/** Edits `doc` so that its meta, files and file contents equal `target`. Comments are left alone. */
-export function restoreInto(doc: Y.Doc, target: DocContent): void {
-  const meta = doc.getMap<unknown>(YDOC.meta);
-  if (meta.get("title") !== target.title) meta.set("title", target.title);
-  if (meta.get("language") !== target.language) meta.set("language", target.language);
-
-  const files = doc.getMap<unknown>(YDOC.files);
-  const wanted = new Set(target.files.map((file) => file.id));
-  for (const id of [...files.keys()]) {
-    if (wanted.has(id)) continue;
-    files.delete(id);
-    const text = doc.getText(YDOC.fileText(id));
-    text.delete(0, text.length);
-  }
-  for (const file of target.files) {
-    let entry = files.get(file.id);
-    if (!(entry instanceof Y.Map)) {
-      entry = new Y.Map<unknown>();
-      files.set(file.id, entry);
-    }
-    const map = entry as Y.Map<unknown>;
-    if (map.get("path") !== file.path) map.set("path", file.path);
-    if (map.get("language") !== file.language) map.set("language", file.language);
-    if (map.get("order") !== file.order) map.set("order", file.order);
-    replaceText(doc.getText(YDOC.fileText(file.id)), file.content);
+    clearTimeout(timer);
+    stop();
   }
 }
 

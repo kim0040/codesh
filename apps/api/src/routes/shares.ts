@@ -31,7 +31,7 @@ import {
 } from "../access.js";
 import { hashPin, randomKey, safeEqual } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
-import { applyServerChange, loadDoc, readContent, sharePreview } from "../docs.js";
+import { loadDoc, readContent, sendCommand, sharePreview } from "../docs.js";
 import { forbidden, invalid, notFound } from "../errors.js";
 import { attachment, basename, sanitizePath } from "../files.js";
 import { announceShare, removeNearby } from "../presence.js";
@@ -156,7 +156,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       if (role === null) throw forbidden("Not admitted");
       await noteActivity(ctx, share);
       await ctx.audit(request, "share.join", share.id);
-      return { token: mintToken(ctx, share, session, role), role };
+      return { token: await mintToken(ctx, share, session, role), role };
     },
   );
 
@@ -210,6 +210,16 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       }
       if (body.locked !== undefined && body.locked !== share.locked) patch.locked = body.locked;
 
+      // Title and language live in the document too; collab writes them (§6.11), so a refusal or
+      // an unreachable collab leaves the share untouched.
+      if (body.title !== undefined || body.language !== undefined) {
+        await sendCommand(ctx, share.id, {
+          kind: "meta",
+          ...(body.title !== undefined ? { title: body.title } : {}),
+          ...(body.language !== undefined ? { language: body.language } : {}),
+        });
+      }
+
       let updated = await ctx.stores.shares.update(share.id, patch);
       if (!updated) throw notFound("Share not found");
 
@@ -222,13 +232,6 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       }
       if (body.saved !== undefined) await syncExpiry(ctx, updated);
 
-      if (body.title !== undefined || body.language !== undefined) {
-        await applyServerChange(ctx, share.id, (doc) => {
-          const meta = doc.getMap<unknown>("meta");
-          if (body.title !== undefined) meta.set("title", body.title);
-          if (body.language !== undefined) meta.set("language", body.language);
-        });
-      }
       if (clearGrants) await ctx.valkey.del(apiKeys.grants(share.id));
       if (patch.locked !== undefined) await ctx.publishPerm(share.id, "lock");
       if (askRejoin) await ctx.publishPerm(share.id, "role");
