@@ -80,6 +80,8 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 8. Slow clients: if a connection's buffered amount exceeds 4 MB, close it with code 4408; the client reconnects and resyncs.
 9. Nearby previews: on change (throttled to 2 s), publish `{id, title, language, participants, preview: first 8 lines of main file}` into Valkey hash `nearby:item:<id>` (EX 60) when `access.nearby` is true.
 10. `lastActiveAt` is written at most once per minute per doc.
+11. Only apps/collab writes `share_updates`. Other services change document content through Valkey channel `cmd:<shareId>` with `{requestId, kind: 'restore', seq}` (restore history snapshot `seq`) or `{requestId, kind: 'replace', state: base64}` (apply a full Y state as a diff); collab opens the doc (direct connection if not loaded), applies the change as a normal update and replies on `cmd-reply:<requestId>` with `{ok, error?}` within 5 s. Initial content of a brand-new share (uploads, fork, CLI push) is written by the API as a `compact` snapshot at seq 0 before any client connects.
+12. A client whose update was refused (read-only or `too_large`) must drop its local Y.Doc and resync (`packages/shared/src/collab.ts`).
 
 ## 7. Valkey keys and channels
 
