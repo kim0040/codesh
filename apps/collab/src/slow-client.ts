@@ -1,0 +1,29 @@
+import { SLOW_CLIENT_CLOSE_CODE } from "@codesh/shared";
+
+/** The parts of a `ws` socket the guard needs (Hocuspocus hands out a proxy of it). */
+export interface GuardedSocket {
+  send(data: never, ...rest: never[]): void;
+  close(code?: number, reason?: string): void;
+  readonly readyState: number;
+  readonly bufferedAmount?: number;
+}
+
+const OPEN = 1;
+const guarded = new WeakSet<object>();
+
+/**
+ * §6.8: once more than `limitBytes` wait in a socket's send buffer, close it with 4408. The client
+ * reconnects and resyncs from the current state instead of the server queueing every update.
+ */
+export function guardSlowClient(socket: GuardedSocket, limitBytes: number, onClose?: () => void) {
+  if (guarded.has(socket)) return;
+  guarded.add(socket);
+  const send = socket.send.bind(socket) as (...args: unknown[]) => void;
+  (socket as unknown as { send: (...args: unknown[]) => void }).send = (...args: unknown[]) => {
+    send(...args);
+    if (socket.readyState === OPEN && (socket.bufferedAmount ?? 0) > limitBytes) {
+      socket.close(SLOW_CLIENT_CLOSE_CODE, "slow client");
+      onClose?.();
+    }
+  };
+}
