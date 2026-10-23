@@ -1,0 +1,102 @@
+# codesh edge: static web app, /api (incl. SSE) and /collab (WebSocket) -- docs/ARCHITECTURE.md §1.
+#
+# SITE_ADDRESS  ":80" (default) serves plain HTTP. A host name (codesh.corp) turns on HTTPS;
+#               put a `tls ...` directive for it in /etc/caddy/tls/*.caddy (see deploy/README.md).
+# TRUSTED_PROXIES  CIDRs of a load balancer in front of Caddy whose X-Forwarded-For is kept.
+#               Without one Caddy replaces the header with the client address it sees.
+
+{
+	admin localhost:2019
+	servers {
+		trusted_proxies static {$TRUSTED_PROXIES:127.0.0.1/32}
+	}
+}
+
+{$SITE_ADDRESS::80} {
+	import /etc/caddy/tls/*.caddy
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+	}
+
+	# Prometheus endpoints, for the intranet only (also read by scripts/load).
+	@metrics_api {
+		path /metrics/api
+		remote_ip private_ranges
+	}
+	handle @metrics_api {
+		rewrite * /metrics
+		reverse_proxy api:3001
+	}
+	@metrics_collab {
+		path /metrics/collab
+		remote_ip private_ranges
+	}
+	handle @metrics_collab {
+		rewrite * /metrics
+		reverse_proxy {
+			dynamic a {
+				name collab
+				port 3002
+				refresh 5s
+			}
+		}
+	}
+	handle /metrics/* {
+		respond "Forbidden" 403
+	}
+
+	handle /healthz {
+		reverse_proxy api:3001
+	}
+
+	# REST and the SSE stream. flush_interval -1 sends every event as it is written.
+	handle /api/* {
+		reverse_proxy api:3001 {
+			flush_interval -1
+		}
+	}
+
+	# WebSocket. Every collab replica is an upstream (compose DNS returns one A record per
+	# replica); `doc` in the query string picks the replica, so one document normally lives
+	# on one instance (§1).
+	handle /collab* {
+		reverse_proxy {
+			dynamic a {
+				name collab
+				port 3002
+				refresh 5s
+			}
+			lb_policy query doc
+			health_uri /healthz
+			health_interval 5s
+			health_timeout 2s
+			flush_interval -1
+		}
+	}
+
+	# Hashed build output: cached for a year.
+	handle /assets/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		encode zstd gzip
+		file_server
+	}
+
+	# Everything else is the SPA: files that exist (index.html, the service worker, manifest,
+	# icons) are revalidated on every load; any other path gets index.html.
+	handle {
+		root * /srv
+		header Cache-Control "no-cache"
+		encode zstd gzip
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle_errors {
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}

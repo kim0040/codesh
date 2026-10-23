@@ -1,0 +1,21 @@
+# Build context of the production images (deploy/docker-compose.yml): the repo root.
+.git
+.github
+.box-out
+.turbo
+.data
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/playwright-report
+**/test-results
+docs
+.env
+.env.*
+!.env.example
+deploy/.env
+deploy/dist
+deploy/backups
+*.log
+.DS_Store
