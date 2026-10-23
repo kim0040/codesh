@@ -102,7 +102,7 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 
 Every pub/sub channel is prefixed with the optional env `CODESH_NS` (keys are isolated by Valkey database index instead, but pub/sub ignores it). Tests give each file its own namespace via `scripts/vitest-namespace.ts`; production leaves it empty or sets one per deployment sharing a Valkey.
 
-Network group `net`: the room name when the client IP falls in a configured room CIDR (`settings.rooms: [{name, cidrs}]`), else the IPv4 /24 (`settings.subnetPrefixV4`, default 24) or IPv6 /64. Client IP is the socket address unless the socket address is in `TRUST_PROXY` CIDRs, then the left-most untrusted `X-Forwarded-For` entry.
+Network group `net`: the room name when the client IP falls in a configured room CIDR (`settings.rooms: [{name, cidrs}]`), else the IPv4 /24 (`settings.subnetPrefixV4`, default 24) or IPv6 /64. Client IP is the socket address unless the socket address is in `TRUST_PROXY` CIDRs, then the right-most untrusted `X-Forwarded-For` entry (walking from the right; it cannot be spoofed).
 
 ## 8. Sessions and tokens
 
