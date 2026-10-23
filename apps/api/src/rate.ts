@@ -29,3 +29,18 @@ export async function rateLimit(
     throw new ApiError("rate_limited", "Too many requests", { "Retry-After": String(ttl) });
   }
 }
+
+/**
+ * Gives back one hit of `rateLimit`, for requests that turned out to be fine (a correct token).
+ * Reserving first and releasing afterwards keeps the limit atomic against parallel guesses.
+ */
+export async function rateRelease(ctx: Ctx, ip: string, bucket: string): Promise<void> {
+  await ctx.valkey.eval(RELEASE, 1, keys.rateLimit(ip, bucket));
+}
+
+const RELEASE = `
+if redis.call('EXISTS', KEYS[1]) == 1 and redis.call('DECR', KEYS[1]) <= 0 then
+  redis.call('DEL', KEYS[1])
+end
+return 1
+`;

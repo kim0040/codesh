@@ -135,6 +135,24 @@ describe.skipIf(!integration)("GET /api/events", () => {
     expect(list.find((p: Person) => p.name === "Robert")?.color).toBe("#102030");
   });
 
+  it("keeps a rename when the open stream refreshes the presence card", async () => {
+    const ann = await net.client().named("Ann6");
+    const bob = await net.neighbour(ann, 206).named("Before");
+    const bobId = await bob.clientId();
+    const annStream = await stream(ann);
+    await stream(bob);
+    await annStream.next("presence", (list) => list.some((p: Person) => p.name === "Before"));
+    await bob.patch("/api/session", { name: "After" });
+    await annStream.next("presence", (list) => list.some((p: Person) => p.name === "After"));
+    // Several refresh ticks of Bob's stream (it still holds the session with the old name).
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await h.valkey.hget(`presence:user:${bobId}`, "name")).toBe("After");
+    const names = annStream.events
+      .filter((e) => e.event === "presence")
+      .flatMap((e) => (e.data as Person[]).map((p) => p.name));
+    expect(names.slice(names.lastIndexOf("After") + 1)).not.toContain("Before");
+  });
+
   it("delivers an invite to the chosen user only, with sender, title and note", async () => {
     const ann = await net.client().named("Ann4");
     const bob = await net.neighbour(ann, 204).named("Bob4");

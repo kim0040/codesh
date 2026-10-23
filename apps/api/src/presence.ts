@@ -16,10 +16,16 @@ const PRESENCE_WINDOW_MS = PRESENCE_USER_TTL_SECONDS * 1000;
 const NEARBY_LIMIT = 50;
 const SHARE_NET_TTL_SECONDS = 7 * 24 * 3600;
 
-/** Marks the session online: ZSET entries for its net and for everyone, plus the user card. */
+/**
+ * Marks the session online: ZSET entries for its net and for everyone, plus the user card.
+ * Name and color come from the stored profile, not from `session`: an SSE stream keeps the
+ * session it opened with, and must not turn a rename back into the old name.
+ */
 export async function touchPresence(ctx: Ctx, session: Session): Promise<void> {
   const now = Date.now();
   const card = keys.presenceUser(session.clientId);
+  const profile = await ctx.valkey.hgetall(apiKeys.profile(session.clientId));
+  const current = { ...session, name: profile.name || session.name };
   await ctx.valkey
     .multi()
     .zadd(keys.presenceNet(session.net), now, session.clientId)
@@ -27,8 +33,8 @@ export async function touchPresence(ctx: Ctx, session: Session): Promise<void> {
     .zadd(apiKeys.presenceAll, now, session.clientId)
     .zremrangebyscore(apiKeys.presenceAll, "-inf", now - PRESENCE_WINDOW_MS)
     .hset(card, {
-      name: displayName(session),
-      color: session.color,
+      name: displayName(current),
+      color: profile.color || session.color,
       net: session.net,
       room: session.room ?? "",
     })

@@ -32,7 +32,16 @@ export class Hub {
       this.channels.set(channel, entry);
     }
     entry.handlers.add(handler);
-    await entry.ready;
+    try {
+      await entry.ready;
+    } catch (error) {
+      // A failed SUBSCRIBE must not stay in the map: the next subscriber retries it.
+      entry.handlers.delete(handler);
+      if (entry.handlers.size === 0 && this.channels.get(channel) === entry) {
+        this.channels.delete(channel);
+      }
+      throw error;
+    }
     return () => {
       const current = this.channels.get(channel);
       if (!current) return;

@@ -48,6 +48,12 @@ export const oidcAdapter: OidcAdapter = {
   },
 };
 
+/** Every `{{username}}` of the template, with the name escaped; `$` in a name stays literal. */
+export function userFilter(template: string, username: string): string {
+  const escaped = escapeLdapFilter(username);
+  return template.replaceAll("{{username}}", () => escaped);
+}
+
 export const ldapAdapter: LdapAdapter = {
   async authenticate(config, username, password) {
     // An empty password makes many servers treat the bind as anonymous and succeed.
@@ -57,7 +63,7 @@ export const ldapAdapter: LdapAdapter = {
     try {
       if (config.startTls) await search.startTLS(tls);
       if (config.bindDn) await search.bind(config.bindDn, config.bindPassword ?? "");
-      const filter = config.userFilter.replace("{{username}}", escapeLdapFilter(username));
+      const filter = userFilter(config.userFilter, username);
       const { searchEntries } = await search.search(config.baseDn, {
         scope: "sub",
         filter,

@@ -14,7 +14,7 @@ import { safeEqual } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
 import { forbidden, invalid, notFound } from "../errors.js";
 import { isValidCidr } from "../net.js";
-import { rateLimit } from "../rate.js";
+import { rateLimit, rateRelease } from "../rate.js";
 import type { App } from "./types.js";
 
 /** Rejects settings the API could not act on, and normalises the login provider blocks. */
@@ -46,11 +46,15 @@ export function adminRoutes(app: App, ctx: Ctx): void {
   const adminOnly = async (request: FastifyRequest) => {
     const expected = ctx.config.adminToken;
     if (expected === "") throw notFound("Not found");
-    // Guessing the token is brute force like any other: count every attempt.
-    await rateLimit(ctx, request.session.ip, "login", ctx.config.rateLimit.loginPerMinute);
+    // Guessing the token is brute force like any other: the attempt is reserved before the check
+    // (so parallel guesses are counted) and given back when the token is right, so the console's
+    // own requests do not use up the limit.
+    const { ip } = request.session;
+    await rateLimit(ctx, ip, "login", ctx.config.rateLimit.loginPerMinute);
     const header = request.headers.authorization ?? "";
     const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
     if (!safeEqual(token, expected)) throw forbidden("Invalid admin token");
+    await rateRelease(ctx, ip, "login");
   };
 
   app.get(
