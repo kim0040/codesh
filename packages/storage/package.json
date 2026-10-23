@@ -4,11 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "CODESH_REQUIRE_SERVICES=1 vitest run"
   },
   "dependencies": {
     "@codesh/shared": "workspace:*",
