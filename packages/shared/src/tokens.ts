@@ -19,5 +19,7 @@ export const permMessageSchema = z.object({
   version: z.number().int().nonnegative(),
   kind: z.enum(["role", "kick", "lock", "delete"]),
   clientId: clientIdSchema.optional(),
+  /** With `kind: 'role'` and `clientId`: the new role. Without it, collab asks the client to rejoin. */
+  role: roleSchema.optional(),
 });
 export type PermMessage = z.infer<typeof permMessageSchema>;

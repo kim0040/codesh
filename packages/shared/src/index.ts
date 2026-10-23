@@ -1,3 +1,5 @@
+export * from "./collab.js";
+export * from "./collab-token.js";
 export * from "./constants.js";
 export * from "./document.js";
 export * from "./errors.js";

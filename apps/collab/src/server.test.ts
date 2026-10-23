@@ -1,14 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { createCollabServer } from "./server.js";
+import type { CollabServer } from "./server.js";
+import { Harness, servicesAvailable } from "./testing/harness.js";
 
-describe("collab server", () => {
-  const server = createCollabServer({ port: 0, address: "127.0.0.1", quiet: true });
+const available = await servicesAvailable();
+
+describe.runIf(available)("collab server routes", () => {
+  let harness: Harness;
+  let server: CollabServer;
 
   beforeAll(async () => {
-    await server.listen();
+    harness = await Harness.create();
+    server = await harness.startServer();
   });
-  afterAll(() => server.destroy());
+  afterAll(() => harness?.close());
 
   const connect = (path: string) =>
     new Promise<"open" | "error">((resolve) => {
@@ -24,6 +29,20 @@ describe("collab server", () => {
     const response = await fetch(`${server.httpURL}/healthz`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it("exposes Prometheus metrics", async () => {
+    const response = await fetch(`${server.httpURL}/metrics`);
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    for (const name of [
+      "codesh_collab_connections",
+      "codesh_collab_documents_loaded",
+      "codesh_collab_flush_seconds",
+      "codesh_collab_updates_total",
+    ]) {
+      expect(body).toContain(name);
+    }
   });
 
   it("answers other HTTP paths with 404", async () => {

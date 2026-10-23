@@ -27,6 +27,12 @@ const EXCEPTIONS = {
   dev: new Set(["Unlicense", "MPL-2.0"]), // lightningcss (build-time only, unmodified), dependency of Tailwind v4
 };
 
+// Single packages whose package.json license field is wrong. Keyed by name@version so an update is re-checked.
+const PACKAGE_EXCEPTIONS = new Set([
+  // package.json says "UNLICENSED" but LICENSE.md is MIT (fork of mike-marcacci/redlock); dependency of @hocuspocus/extension-redis
+  "@sesamecare-oss/redlock@1.4.0",
+]);
+
 /**
  * Evaluates an SPDX expression: `OR` passes when any alternative is allowed,
  * `AND` needs every operand, `X WITH Y` is judged by `X`.
@@ -90,7 +96,9 @@ export function findOffenders(scope, byLicense) {
   for (const [license, packages] of Object.entries(byLicense)) {
     if (isAllowed(license, allowed)) continue;
     for (const pkg of packages) {
-      offenders.push({ scope, license, name: pkg.name, versions: pkg.versions.join(", ") });
+      const versions = pkg.versions.filter((v) => !PACKAGE_EXCEPTIONS.has(`${pkg.name}@${v}`));
+      if (versions.length === 0) continue;
+      offenders.push({ scope, license, name: pkg.name, versions: versions.join(", ") });
     }
   }
   return offenders;
