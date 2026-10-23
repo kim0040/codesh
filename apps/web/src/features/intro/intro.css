@@ -1,0 +1,1313 @@
+/*
+ * Intro page. Plain CSS on the shared design tokens, so it renders the same whether or not the
+ * app's Tailwind theme is loaded. Everything is scoped under .ix.
+ *
+ * House rules for this page: sizes come from a five-step type scale, surfaces are separated by a
+ * step in tone (no hairlines, no shadows), the six-cell shape is the one recurring motif, and
+ * only opacity and transform move.
+ */
+@import "@codesh/ui/tokens.css";
+@import "@codesh/ui/fonts.css";
+
+.ix {
+  /* Five type steps. */
+  --ix-display: clamp(2.25rem, 0.55rem + 6.6vw, 6rem);
+  --ix-h2: clamp(1.875rem, 1rem + 3.4vw, 3.75rem);
+  --ix-title: clamp(1.25rem, 1.05rem + 0.9vw, 1.75rem);
+  --ix-lead: clamp(1.0625rem, 1rem + 0.35vw, 1.3125rem);
+  --ix-body: 1rem;
+  --ix-small: 0.875rem;
+
+  --ix-gutter: clamp(16px, 4vw, 40px);
+  --ix-section: clamp(72px, 11vw, 160px);
+  --ix-radius: var(--rad-xl);
+  --ix-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ix-code-size: 13px;
+
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--ix-body);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
+  overflow-x: clip;
+}
+
+.ix *,
+.ix *::before,
+.ix *::after {
+  box-sizing: border-box;
+}
+
+.ix :lang(ko) {
+  word-break: keep-all;
+  line-break: strict;
+}
+.ix :lang(ko),
+.ix :lang(en) {
+  overflow-wrap: break-word;
+}
+
+:where(.ix) :is(h1, h2, h3, p, ul, ol, figure, pre) {
+  margin: 0;
+}
+:where(.ix) :is(ul, ol) {
+  padding: 0;
+  list-style: none;
+}
+:where(.ix) :is(h1, h2) {
+  text-wrap: balance;
+}
+:where(.ix) p {
+  text-wrap: pretty;
+}
+:where(.ix) button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+:where(.ix) a {
+  color: inherit;
+}
+.ix :focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.ix-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ix-skip {
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-start: 8px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: var(--rad-md);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.ix-skip:focus-visible {
+  transform: none;
+}
+
+.ix-wrap {
+  width: 100%;
+  max-width: 1400px;
+  margin-inline: auto;
+  padding-inline: var(--ix-gutter);
+}
+
+/* ── Type ── */
+
+.ix-h1 {
+  font-size: var(--ix-display);
+  font-weight: 760;
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+}
+.ix-h2 {
+  max-width: 14em;
+  font-size: var(--ix-h2);
+  font-weight: 730;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+/* The English line is two lines wide from tablet up; keeping the box that tall stops the page
+   from jumping when the webfont replaces the fallback and the wrap changes. */
+@media (min-width: 640px) {
+  .ix-h1:lang(en) {
+    min-height: 2.08em;
+  }
+}
+.ix-lead {
+  max-width: 32em;
+  font-size: var(--ix-lead);
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+
+/* ── Buttons and fields ── */
+
+.ix-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--rad-md);
+  background: var(--fill-active);
+  color: var(--fg);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 140ms var(--ix-ease),
+    transform 140ms var(--ix-ease);
+}
+.ix-btn:hover {
+  background: color-mix(in oklab, var(--fg) 14%, transparent);
+}
+.ix-btn:active {
+  transform: scale(0.98);
+}
+.ix-btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.ix-btn-primary:hover {
+  background: var(--accent-hover);
+}
+.ix-btn-sm {
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: var(--ix-small);
+}
+.ix-input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--rad-md);
+  background: var(--raised);
+  color: var(--fg);
+  font: inherit;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Header ── */
+
+.ix-header-row {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 40px);
+  min-height: 68px;
+}
+.ix-brand {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  text-decoration: none;
+}
+.ix-nav {
+  display: flex;
+  gap: clamp(14px, 2.4vw, 28px);
+  margin-inline-end: auto;
+  font-size: var(--ix-small);
+  font-weight: 560;
+}
+.ix-nav a {
+  padding-block: 10px;
+  color: var(--fg-2);
+  text-decoration: none;
+}
+.ix-nav a:hover {
+  color: var(--fg);
+}
+
+:where(.ix) fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ix-seg-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: calc(var(--rad-md) + 3px);
+  background: var(--fill-hover);
+}
+.ix-seg-control button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--rad-md);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--ix-small);
+  font-weight: 560;
+  transition: background-color 140ms var(--ix-ease);
+}
+.ix-seg-control button:hover {
+  background: var(--fill-hover);
+  color: var(--fg);
+}
+.ix-seg-control button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--fg);
+}
+
+/* ── Hero ── */
+
+.ix-hero {
+  padding-block: clamp(20px, 4vw, 56px) clamp(56px, 8vw, 112px);
+}
+.ix-hero-lead {
+  margin-top: clamp(14px, 2vw, 24px);
+}
+.ix-hero-grid {
+  display: grid;
+  gap: 20px;
+  margin-top: clamp(28px, 4vw, 52px);
+  align-items: start;
+}
+.ix-hero-start,
+.ix-hero-demo {
+  min-width: 0;
+}
+@media (min-width: 1000px) {
+  .ix-hero-grid {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 28px;
+  }
+}
+
+/* Stand-in for the start panel until src/features/start/StartPanel.tsx exists. */
+.ix-standin {
+  display: grid;
+  gap: 20px;
+  padding: clamp(20px, 2.4vw, 28px);
+  border-radius: var(--ix-radius);
+  background: var(--panel);
+}
+.ix-standin .ix-btn {
+  width: 100%;
+}
+.ix-standin-form {
+  display: grid;
+  gap: 8px;
+}
+.ix-standin-form label {
+  font-size: var(--ix-small);
+  color: var(--fg-2);
+}
+.ix-standin-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.ix-standin-error {
+  min-height: 1.5em;
+  font-size: var(--ix-small);
+  color: var(--danger-text);
+}
+
+/* ── Demo editor (a real interface fragment: it keeps its own borders) ── */
+
+.ix-ed {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--ix-radius);
+  background: var(--ed-bg);
+  color: var(--ed-fg);
+  font-size: var(--ix-small);
+  line-height: 1.5;
+}
+.ix-ed-top,
+.ix-ed-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: color-mix(in oklab, var(--ed-fg) 6%, var(--ed-bg));
+}
+.ix-ed-top {
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 0 8px 0 6px;
+}
+.ix-ed-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ix-ed-tabs::-webkit-scrollbar {
+  display: none;
+}
+.ix-ed-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--rad-md);
+  background: transparent;
+  color: color-mix(in oklab, var(--ed-fg) 72%, var(--ed-bg));
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  transition: background-color 140ms var(--ix-ease);
+}
+button.ix-ed-tab:hover {
+  background: color-mix(in oklab, var(--ed-fg) 9%, transparent);
+  color: var(--ed-fg);
+}
+.ix-ed-tab[aria-pressed="true"],
+.ix-ed-tab[data-on] {
+  background: var(--ed-bg);
+  color: var(--ed-fg);
+}
+.ix-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ed-fg) 30%, transparent);
+}
+.ix-ed-people {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.ix-ed-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+}
+.ix-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.ix-ed-pause {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--rad-md);
+  background: transparent;
+  color: var(--ed-fg);
+  font-size: 1rem;
+}
+.ix-ed-pause:hover {
+  background: color-mix(in oklab, var(--ed-fg) 10%, transparent);
+}
+.ix-ed-body {
+  height: 272px;
+  background: var(--ed-bg);
+}
+.ix-ed-status {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 0.8125rem;
+  color: color-mix(in oklab, var(--ed-fg) 78%, var(--ed-bg));
+  font-variant-numeric: tabular-nums;
+}
+.ix-ed-state,
+.ix-ed-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ix-ed-lang {
+  margin-inline-start: auto;
+}
+.ix-ed-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+/* Remote cursors, in the editor and in the drawings */
+.ix-caret {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.3em;
+  vertical-align: text-bottom;
+}
+.ix-caret::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 -1px;
+  width: 2px;
+  background: var(--c);
+}
+.ix-caret-name {
+  position: absolute;
+  inset-inline-start: -1px;
+  bottom: 100%;
+  padding: 0 6px;
+  border-radius: 4px 4px 4px 0;
+  background: var(--c);
+  color: var(--l);
+  font: 600 11px / 17px var(--font-ui);
+  font-style: normal;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ix-caret[data-who="b"] .ix-caret-name {
+  top: 100%;
+  bottom: auto;
+  border-radius: 0 4px 4px 4px;
+}
+
+/* Syntax colours outside CodeMirror */
+.tk[data-k="keyword"] {
+  color: var(--ed-keyword);
+  font-weight: 500;
+}
+.tk[data-k="string"] {
+  color: var(--ed-string);
+}
+.tk[data-k="comment"] {
+  color: var(--ed-comment);
+  font-style: italic;
+}
+.tk[data-k="number"] {
+  color: var(--ed-number);
+}
+.tk[data-k="type"] {
+  color: var(--ed-type);
+}
+.tk[data-k="function"] {
+  color: var(--ed-function);
+}
+.tk[data-k="variable"] {
+  color: var(--ed-variable);
+}
+.tk[data-k="property"] {
+  color: var(--ed-property);
+}
+.tk[data-k="operator"] {
+  color: var(--ed-operator);
+}
+.tk-bar {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+.tk-bar[data-k="keyword"] {
+  background: var(--ed-keyword);
+}
+.tk-bar[data-k="string"] {
+  background: var(--ed-string);
+}
+.tk-bar[data-k="comment"] {
+  background: var(--ed-comment);
+}
+.tk-bar[data-k="number"] {
+  background: var(--ed-number);
+}
+.tk-bar[data-k="type"] {
+  background: var(--ed-type);
+}
+.tk-bar[data-k="function"] {
+  background: var(--ed-function);
+}
+.tk-bar[data-k="property"] {
+  background: var(--ed-property);
+}
+.tk-bar[data-k="operator"] {
+  background: var(--ed-operator);
+}
+
+.ix-code {
+  overflow: hidden;
+  padding: 20px 22px;
+  border-radius: calc(var(--ix-radius) - 4px);
+  background: var(--ed-bg);
+  color: var(--ed-fg);
+  font-family: var(--font-code);
+  font-size: var(--ix-code-size);
+  line-height: 1.75;
+  font-variant-ligatures: none;
+  white-space: pre;
+}
+.ix-code code {
+  font-family: inherit;
+}
+
+/* ── Sections ── */
+
+.ix-section {
+  padding-block: var(--ix-section);
+  scroll-margin-top: 0;
+}
+.ix-section {
+  --ix-tile: var(--panel);
+}
+.ix-section-panel {
+  background: var(--panel);
+  --ix-tile: var(--raised);
+}
+
+/* Scroll reveal: opacity and transform only. Content stays visible without script or with reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .ix [data-reveal] {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0);
+    transition:
+      opacity 640ms var(--ix-ease),
+      transform 640ms var(--ix-ease);
+    transition-delay: var(--d, 0ms);
+  }
+  .ix [data-reveal][data-in] {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── How it works: one bar, three stages ── */
+
+.ix-bar {
+  display: flex;
+  gap: 6px;
+  margin-top: clamp(40px, 6vw, 72px);
+}
+.ix-stage-seg {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: clamp(32px, 6vw, 88px);
+  min-width: 0;
+  min-height: clamp(260px, 30vh, 340px);
+  padding: clamp(18px, 2vw, 28px);
+  border-radius: var(--ix-radius);
+  background: var(--c);
+  color: var(--l);
+}
+.ix-stage-seg[data-step="1"] {
+  flex: 1 1 0;
+  --c: var(--participant-5);
+  --l: var(--participant-5-fg);
+}
+.ix-stage-seg[data-step="2"] {
+  flex: 1.3 1 0;
+  --c: var(--participant-7);
+  --l: var(--participant-7-fg);
+}
+.ix-stage-seg[data-step="3"] {
+  flex: 2.6 1 0;
+  --c: var(--participant-6);
+  --l: var(--participant-6-fg);
+}
+.ix-seg-time {
+  font-size: clamp(1.5rem, 1rem + 1.9vw, 2.75rem);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+.ix-seg-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.ix-seg-text p {
+  max-width: 22em;
+  font-size: 1.0625rem;
+}
+@media (max-width: 767px) {
+  .ix-bar {
+    flex-direction: column;
+  }
+  .ix-bar .ix-stage-seg[data-step] {
+    flex: none;
+    min-height: 0;
+    gap: 28px;
+  }
+  .ix-stage-seg[data-step="3"] {
+    min-height: 200px;
+  }
+}
+
+/* ── Intranet: an index with one fixed preview frame ── */
+
+.ix-fast {
+  display: grid;
+  gap: clamp(32px, 5vw, 64px);
+  align-items: start;
+}
+.ix-fast-copy {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.ix-ways {
+  display: grid;
+  gap: 2px;
+  margin-top: clamp(12px, 2vw, 28px);
+}
+.ix-way h3 {
+  margin: 0;
+}
+
+.ix-way-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--ix-title);
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  text-align: start;
+  transition: color 180ms var(--ix-ease);
+}
+.ix-way-btn:hover,
+.ix-way[data-on] .ix-way-btn {
+  color: var(--fg);
+}
+.ix-stage {
+  container-type: inline-size;
+  display: grid;
+  aspect-ratio: 5 / 4;
+  min-width: 0;
+  padding: clamp(16px, 3vw, 40px);
+  border-radius: var(--ix-radius);
+  background: var(--accent-soft);
+}
+.ix-stage-art {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  height: 100%;
+  animation: ix-swap 360ms var(--ix-ease) both;
+}
+.ix-stage-draw {
+  display: grid;
+  flex: 1;
+  place-items: center;
+}
+.ix-stage-text {
+  min-height: 3.3em;
+  max-width: 30em;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--fg);
+}
+@keyframes ix-swap {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.985);
+  }
+}
+@media (max-width: 899px) {
+  /* Heading, intro, drawing, then the list: the drawing sits right above what changes it. */
+  .ix-fast-copy {
+    display: contents;
+  }
+  .ix-fast .ix-ways {
+    order: 2;
+    margin-top: 0;
+  }
+  .ix-stage {
+    order: 1;
+    aspect-ratio: auto;
+    height: 420px;
+  }
+}
+@media (min-width: 900px) {
+  .ix-fast {
+    grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+  }
+  .ix-stage {
+    order: 0;
+    position: sticky;
+    top: 24px;
+  }
+}
+
+.ix-art {
+  display: grid;
+  gap: 18px;
+  justify-items: center;
+  width: 100%;
+  font-size: var(--ix-small);
+}
+.ix-art-caption,
+.ix-art-title {
+  font-size: 1.0625rem;
+  font-weight: 650;
+  color: var(--accent-text);
+}
+.ix-art-title {
+  justify-self: start;
+}
+.ix-cells {
+  display: inline-flex;
+  gap: 0.14em;
+  font-size: clamp(1.6rem, 6.4vw, 4.5rem);
+  line-height: 1;
+}
+.ix-cells[data-size="sm"] {
+  font-size: 2.25rem;
+}
+.ix-cells[data-size="lg"] {
+  font-size: min(14cqw, 6.5rem);
+}
+.ix-cell {
+  display: grid;
+  place-items: center;
+  width: 0.88em;
+  aspect-ratio: 4 / 5;
+  border-radius: 0.2em;
+  background: var(--c);
+  color: var(--l);
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.ix-qr {
+  width: min(58cqw, 300px);
+  border-radius: 12px;
+}
+.ix-rows {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.ix-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 0 18px;
+  border-radius: var(--rad-lg);
+  background: var(--raised);
+  color: var(--fg);
+}
+.ix-row[data-hot] {
+  background: var(--panel);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.ix-row-name {
+  font-size: 1.0625rem;
+  font-weight: 650;
+}
+.ix-row-meta,
+.ix-row-people {
+  color: var(--fg-2);
+  font-size: 0.8125rem;
+}
+.ix-row-people {
+  margin-inline-start: auto;
+}
+.ix-row-go {
+  padding: 5px 12px;
+  border-radius: var(--rad-md);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+@media (max-width: 520px) {
+  .ix-row-meta {
+    display: none;
+  }
+}
+.ix-art-send .ix-rows {
+  max-width: 340px;
+}
+.ix-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
+  padding: 12px 16px;
+  border-radius: var(--rad-lg);
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+}
+.ix-screens {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+.ix-screen {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  aspect-ratio: 16 / 10;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--ed-bg);
+}
+.ix-screen-line {
+  display: flex;
+  gap: 4px;
+  height: 5px;
+}
+
+/* ── Features ── */
+
+.ix-tiles {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: clamp(40px, 6vw, 72px);
+}
+.ix-tile {
+  grid-column: span 12;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: clamp(24px, 3vw, 40px);
+  min-width: 0;
+  padding: clamp(18px, 2.2vw, 30px);
+  border-radius: var(--ix-radius);
+  background: var(--ix-tile);
+}
+@media (min-width: 768px) {
+  .ix-tile[data-span="7"] {
+    grid-column: span 7;
+  }
+  .ix-tile[data-span="5"] {
+    grid-column: span 5;
+  }
+}
+.ix-tile-title {
+  margin-bottom: 6px;
+  font-size: var(--ix-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+.ix-tile-text p {
+  max-width: 46ch;
+  color: var(--fg-2);
+}
+.ix-fx {
+  display: grid;
+  gap: 16px;
+  min-height: 200px;
+  align-content: center;
+}
+.ix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ix-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px 7px 12px;
+  border-radius: 999px;
+  background: var(--fill-hover);
+  color: var(--fg-2);
+  font-size: 0.875rem;
+  font-weight: 560;
+}
+.ix-chip .ix-dot,
+.ix-filetab .ix-dot,
+.ix-row .ix-dot,
+.ix-toast .ix-dot {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fg) 30%, transparent);
+}
+.ix-fx-merge .ix-code {
+  padding-block: 40px 28px;
+}
+.ix-tile .ix-code {
+  font-size: calc(var(--ix-code-size) + 1px);
+}
+.ix-fx-access {
+  justify-items: start;
+  gap: 22px;
+}
+.ix-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+.ix-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.ix-pin-label {
+  font-weight: 700;
+  color: var(--fg-2);
+}
+.ix-filetabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ix-filetab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: var(--rad-md);
+  background: var(--fill-hover);
+  color: var(--fg-2);
+  font-size: 0.875rem;
+  font-weight: 560;
+}
+.ix-filetab[data-on] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.ix-timeline {
+  width: 100%;
+  height: 180px;
+}
+.ix-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ix-file,
+.ix-zip {
+  padding: 10px 18px;
+  border-radius: var(--rad-md);
+  background: var(--fill-hover);
+  color: var(--fg-2);
+  font-size: 0.9375rem;
+  font-weight: 560;
+}
+.ix-zip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 700;
+}
+
+/* ── Difference ── */
+
+.ix-diff {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.ix-diff-head,
+.ix-claim {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 40px;
+  min-width: 0;
+  min-height: clamp(220px, 20vw, 300px);
+  padding: clamp(18px, 2.2vw, 30px);
+  border-radius: var(--ix-radius);
+  grid-column: span 2;
+  background: var(--ix-tile);
+}
+.ix-diff-head {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.ix-diff-title {
+  max-width: 10em;
+}
+.ix-claim[data-span="1"] {
+  grid-column: span 1;
+}
+.ix-claim-title {
+  font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.375rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+.ix-claim p {
+  margin-top: 8px;
+  max-width: 28em;
+  font-size: 1.0625rem;
+  color: var(--fg-2);
+}
+@media (max-width: 1023px) {
+  .ix-diff {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ix-claim[data-span="2"] {
+    grid-column: span 2;
+  }
+  .ix-diff-head {
+    grid-column: span 2;
+    min-height: 0;
+  }
+}
+@media (max-width: 599px) {
+  .ix-diff {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ix-diff-head,
+  .ix-claim,
+  .ix-claim[data-span="1"],
+  .ix-claim[data-span="2"] {
+    grid-column: auto;
+    min-height: 0;
+    gap: 28px;
+  }
+}
+
+/* ── FAQ ── */
+
+.ix-faq {
+  display: grid;
+  gap: clamp(28px, 5vw, 64px);
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .ix-faq {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+  }
+  .ix-faq-title {
+    position: sticky;
+    top: 24px;
+  }
+}
+.ix-faq-list {
+  display: grid;
+  gap: 6px;
+}
+.ix-faq-item {
+  border-radius: var(--ix-radius);
+  background: var(--panel);
+  transition: background-color 200ms var(--ix-ease);
+}
+.ix-faq-item[data-open] {
+  background: var(--raised);
+}
+.ix-faq-item h3 {
+  margin: 0;
+}
+.ix-faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 64px;
+  padding: 14px clamp(18px, 2vw, 26px);
+  border: 0;
+  border-radius: var(--ix-radius);
+  background: transparent;
+  font-size: 1.125rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  text-align: start;
+}
+.ix-faq-icon {
+  flex: none;
+  font-size: 1.25rem;
+  transition: transform 260ms var(--ix-ease);
+}
+.ix-faq-item[data-open] .ix-faq-icon {
+  transform: rotate(45deg);
+}
+.ix-faq-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms var(--ix-ease);
+}
+.ix-faq-item[data-open] .ix-faq-panel {
+  grid-template-rows: 1fr;
+}
+.ix-faq-panel > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.ix-faq-panel p {
+  max-width: 58ch;
+  padding: 0 clamp(18px, 2vw, 26px) 22px;
+  color: var(--fg-2);
+}
+.ix-faq-item:not([data-open]) .ix-faq-panel {
+  visibility: hidden;
+  transition:
+    grid-template-rows 300ms var(--ix-ease),
+    visibility 0s 300ms;
+}
+
+/* ── Footer ── */
+
+.ix-footer {
+  padding-block: clamp(56px, 8vw, 112px) clamp(24px, 3vw, 40px);
+  background: var(--panel);
+}
+.ix-name {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  align-items: end;
+  gap: clamp(3px, 0.6vw, 8px);
+  height: clamp(150px, 27vw, 380px);
+}
+.ix-name-cell {
+  display: flex;
+  align-items: flex-end;
+  padding: 0 0 clamp(2px, 0.6vw, 10px) clamp(8px, 1.4vw, 22px);
+  border-radius: clamp(10px, 1.6vw, 24px);
+  background: var(--c);
+  color: var(--l);
+  font-size: clamp(3rem, 14.5vw, 13rem);
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 0.82;
+  overflow: hidden;
+}
+.ix-name-cell:nth-child(1) {
+  height: 100%;
+}
+.ix-name-cell:nth-child(2) {
+  height: 78%;
+}
+.ix-name-cell:nth-child(3) {
+  height: 92%;
+}
+.ix-name-cell:nth-child(4) {
+  height: 66%;
+}
+.ix-name-cell:nth-child(5) {
+  height: 86%;
+}
+.ix-name-cell:nth-child(6) {
+  height: 100%;
+}
+.ix-footer-grid {
+  display: grid;
+  gap: 28px;
+  margin-top: clamp(40px, 5vw, 64px);
+}
+@media (min-width: 800px) {
+  .ix-footer-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 48px;
+  }
+}
+.ix-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  font-weight: 600;
+}
+.ix-footer-links a {
+  padding-block: 8px;
+  text-decoration: none;
+}
+.ix-footer-links a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.ix-footer-notes {
+  display: grid;
+  gap: 8px;
+  color: var(--fg-2);
+  font-size: var(--ix-small);
+}
+.ix-footer-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+  margin-top: clamp(40px, 5vw, 64px);
+}
+.ix-footer-version {
+  margin-inline-end: auto;
+  color: var(--fg-3);
+  font-size: var(--ix-small);
+  font-variant-numeric: tabular-nums;
+}
+.ix-footer-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* ── Load-in and reduced motion ── */
+
+@media (prefers-reduced-motion: no-preference) {
+  .ix-h1 {
+    animation: ix-rise 700ms var(--ix-ease) both;
+  }
+  .ix-hero-lead {
+    animation: ix-rise-fade 700ms 90ms var(--ix-ease) both;
+  }
+  .ix-hero-start {
+    animation: ix-rise-fade 700ms 170ms var(--ix-ease) both;
+  }
+  .ix-hero-demo {
+    animation: ix-rise-fade 800ms 260ms var(--ix-ease) both;
+  }
+  @keyframes ix-rise {
+    from {
+      transform: translate3d(0, 14px, 0);
+    }
+  }
+  @keyframes ix-rise-fade {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 18px, 0);
+    }
+  }
+}
+
+@media (max-width: 639px) {
+  .ix {
+    --ix-code-size: 12px;
+  }
+  .ix-nav-how {
+    display: none;
+  }
+  .ix-ed-person-name {
+    display: none;
+  }
+  .ix-ed-person {
+    display: none;
+  }
+  .ix-ed-ms {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* biome-ignore-start lint/complexity/noImportantStyles: the reduced-motion override must beat component styles */
+  .ix *,
+  .ix *::before,
+  .ix *::after {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  /* biome-ignore-end lint/complexity/noImportantStyles: reduced-motion override */
+}

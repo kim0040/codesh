@@ -127,9 +127,21 @@ importers:
 
   apps/web:
     dependencies:
+      '@codemirror/state':
+        specifier: 6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: 6.43.15
+        version: 6.43.15
+      '@codesh/highlight':
+        specifier: workspace:*
+        version: link:../../packages/highlight
       '@codesh/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@codesh/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@fontsource-variable/jetbrains-mono':
         specifier: 5.3.0
         version: 5.3.0
