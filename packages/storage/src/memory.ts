@@ -91,11 +91,12 @@ class MemoryShareStore implements ShareStore {
 
   async touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number) {
     const share = this.shares.get(id);
-    if (!share) return;
+    if (!share) return false;
     share.lastActiveAt = new Date(at);
     share.updatedAt = new Date(at);
     if (!share.saved) share.expiresAt = new Date(expiresAtIfUnsaved);
     if (sizeBytes !== undefined) share.sizeBytes = sizeBytes;
+    return true;
   }
 
   async addBan(id: string, clientId: string) {
@@ -201,6 +202,16 @@ class MemorySnapshotStore implements SnapshotStore {
 
   async deleteBelow(shareId: string, kind: SnapshotKind, seq: number) {
     return this.removeWhere((s) => s.shareId === shareId && s.kind === kind && s.seq < seq);
+  }
+
+  async keepNewest(shareId: string, kind: SnapshotKind, count: number) {
+    const kept = new Set(
+      this.snapshots
+        .filter((s) => s.shareId === shareId && s.kind === kind)
+        .sort((a, b) => b.seq - a.seq)
+        .slice(0, count),
+    );
+    return this.removeWhere((s) => s.shareId === shareId && s.kind === kind && !kept.has(s));
   }
 
   async deleteOlderThan(kind: SnapshotKind, before: Date) {

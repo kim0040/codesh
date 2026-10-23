@@ -103,9 +103,9 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
         await shares.create(share("saved001", { saved: true, savedBy: [OWNER], expiresAt: null }));
         const at = later(60_000);
         const expiry = later(25 * 3600_000);
-        await shares.touch("unsaved1", at, expiry, 42);
-        await shares.touch("saved001", at, expiry);
-        await shares.touch("missing1", at, expiry);
+        expect(await shares.touch("unsaved1", at, expiry, 42)).toBe(true);
+        expect(await shares.touch("saved001", at, expiry)).toBe(true);
+        expect(await shares.touch("missing1", at, expiry)).toBe(false);
         expect(await shares.get("unsaved1")).toMatchObject({
           lastActiveAt: at,
           updatedAt: at,
@@ -244,6 +244,23 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
         expect(await snapshots.shareIds()).toEqual(["abcd1234"]);
         await snapshots.deleteForShare("abcd1234");
         expect(await snapshots.shareIds()).toEqual([]);
+      });
+
+      it("keeps only the newest snapshots of one share and kind", async () => {
+        const { snapshots } = await open();
+        const put = (shareId: string, seq: number, kind: "compact" | "history") =>
+          snapshots.put({ shareId, seq, kind, at: T0, state: new Uint8Array([seq]) });
+        for (const seq of [5, 1, 4, 2, 3]) await put("abcd1234", seq, "history");
+        await put("abcd1234", 1, "compact");
+        await put("other123", 1, "history");
+
+        expect(await snapshots.keepNewest("abcd1234", "history", 3)).toBe(2);
+        expect((await snapshots.list("abcd1234", "history")).map((s) => s.seq)).toEqual([3, 4, 5]);
+        expect(await snapshots.keepNewest("abcd1234", "history", 3)).toBe(0);
+        expect(await snapshots.keepNewest("abcd1234", "history", 10)).toBe(0);
+        expect(await snapshots.keepNewest("missing1", "history", 1)).toBe(0);
+        expect(await snapshots.list("abcd1234", "compact")).toHaveLength(1);
+        expect(await snapshots.list("other123", "history")).toHaveLength(1);
       });
     });
 
