@@ -7,7 +7,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from "@fastify/type-provider-zod";
-import Fastify, { type FastifyServerOptions } from "fastify";
+import Fastify, { type FastifyRequest, type FastifyServerOptions } from "fastify";
 import { Ctx, type Deps } from "./ctx.js";
 import { ApiError, forbidden } from "./errors.js";
 import { rateLimit } from "./rate.js";
@@ -28,6 +28,30 @@ import { clientIp, loadSession } from "./session.js";
 
 /** Paths a visitor without a login may use even when `settings.guestAllowed` is false. */
 const OPEN_WITHOUT_LOGIN = ["/api/session", "/api/auth/", "/api/admin/"];
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * CSRF guard for requests that change something. `SameSite=Lax` does not cover sibling hosts of
+ * the intranet domain, and a cross-origin form can post multipart or empty bodies. A request is
+ * accepted when it carries `X-Codesh: 1` (a custom header cannot be set by a cross-site form, and
+ * a cross-site `fetch` with it needs a CORS preflight this server never grants) or when its
+ * `Origin` is the app's own. The admin API is exempt: it needs a bearer token no browser adds.
+ */
+function crossSite(request: FastifyRequest, publicUrl: string): boolean {
+  if (SAFE_METHODS.has(request.method) || request.url.startsWith("/api/admin/")) return false;
+  if (request.headers["x-codesh"] === "1") return false;
+  const { origin, host } = request.headers;
+  if (typeof origin !== "string") return true;
+  try {
+    const parsed = new URL(origin);
+    return (
+      parsed.host !== host && (publicUrl === "" || parsed.origin !== new URL(publicUrl).origin)
+    );
+  } catch {
+    return true;
+  }
+}
 
 /** Hard ceiling for one multipart request; the real limit is `settings.maxUploadMB` per request. */
 const MULTIPART_CEILING_BYTES = 4 * 1024 * 1024 * 1024;
@@ -54,6 +78,9 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
   app.addHook("onRequest", async (request, reply) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
     if (!request.url.startsWith("/api/")) return;
+    if (crossSite(request, ctx.config.publicUrl)) {
+      throw forbidden("Cross-site requests are not accepted; send X-Codesh: 1");
+    }
     await rateLimit(ctx, clientIp(ctx, request), "api", ctx.config.rateLimit.apiPerMinute);
     request.session = await loadSession(ctx, request, reply);
     const settings = await ctx.settings();

@@ -101,6 +101,8 @@ export class Client {
       remoteAddress: "127.0.0.1",
       headers: {
         "x-forwarded-for": this.ip,
+        // What the web app sends on every request that changes something (CSRF guard).
+        ...(method === "GET" ? {} : { "x-codesh": "1" }),
         ...(this.jar.size > 0 ? { cookie: this.cookieHeader } : {}),
         ...options.headers,
       },
