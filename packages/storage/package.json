@@ -7,10 +7,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@codesh/shared": "workspace:*"
+    "@codesh/shared": "workspace:*",
+    "mongodb": "7.7.0"
   },
   "devDependencies": {
     "@types/node": "22.20.5"
