@@ -9,6 +9,7 @@ import {
   collabCommandReplySchema,
   DEFAULT_FILE_ID,
   generateFileId,
+  type ShareRecord,
   YDOC,
 } from "@codesh/shared";
 import * as Y from "yjs";
@@ -181,14 +182,25 @@ export async function sendCommand(ctx: Ctx, shareId: string, body: CommandBody):
   }
 }
 
-/** First lines of the main file for lists, cached briefly so a list of shares loads few documents. */
-export async function sharePreview(ctx: Ctx, shareId: string): Promise<string> {
-  const key = apiKeys.preview(shareId);
+/**
+ * First lines of the main file for lists. Valkey caches it for a minute; behind that it is kept in
+ * the share record, which is current while nobody touched the share since (collab sets
+ * `updatedAt` on activity), so a list of 100 shares does not load 100 documents on a cold cache.
+ */
+export async function sharePreview(
+  ctx: Ctx,
+  share: Pick<ShareRecord, "id" | "updatedAt" | "preview" | "previewAt">,
+): Promise<string> {
+  const key = apiKeys.preview(share.id);
   const cached = await ctx.valkey.get(key);
   if (cached !== null) return cached;
-  const content = readContent(await loadDoc(ctx, shareId));
-  const main = content.files.find((file) => file.id === DEFAULT_FILE_ID) ?? content.files[0];
-  const preview = main ? firstLines(main.content) : "";
+  let preview = share.preview;
+  if (preview === undefined || !share.previewAt || share.updatedAt > share.previewAt) {
+    const at = new Date();
+    const content = readContent(await loadDoc(ctx, share.id));
+    preview = previewOf(content);
+    await ctx.stores.shares.update(share.id, { preview, previewAt: at }).catch(() => undefined);
+  }
   await ctx.valkey.set(key, preview, "EX", 60);
   return preview;
 }

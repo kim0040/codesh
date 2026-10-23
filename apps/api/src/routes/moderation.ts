@@ -11,6 +11,7 @@ import {
 import { findShare, requireOwner } from "../access.js";
 import type { Ctx } from "../ctx.js";
 import { invalid, notFound } from "../errors.js";
+import { syncExpiry } from "../shares.js";
 import { type App, OK } from "./types.js";
 
 /** Owner tools: removing people and answering join requests. */
@@ -33,7 +34,14 @@ export function moderationRoutes(app: App, ctx: Ctx): void {
       // Without the grant the client has to pass PIN and approval again to come back.
       await ctx.valkey.hdel(apiKeys.grants(share.id), clientId);
       await ctx.valkey.hdel(keys.pending(share.id), clientId);
-      if (ban) await ctx.stores.shares.addBan(share.id, clientId);
+      if (ban) {
+        await ctx.stores.shares.addBan(share.id, clientId);
+        // A banned client could neither unsave the share nor would its entry ever let the share expire.
+        const settings = await ctx.settings();
+        const expiresAt = new Date(Date.now() + settings.anonymousTtlHours * 3600 * 1000);
+        const unsaved = await ctx.stores.shares.removeSaved(share.id, clientId, expiresAt);
+        if (unsaved) await syncExpiry(ctx, unsaved);
+      }
       await ctx.publishPerm(share.id, "kick", clientId);
       await ctx.publishUser(clientId, {
         event: "kicked",

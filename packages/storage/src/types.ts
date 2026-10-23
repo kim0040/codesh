@@ -28,6 +28,8 @@ export type ShareUpdate = Partial<
     | "joinCode"
     | "locked"
     | "sizeBytes"
+    | "preview"
+    | "previewAt"
   >
 > & { access?: Partial<Access> };
 

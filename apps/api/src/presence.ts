@@ -155,3 +155,25 @@ export async function listNearby(ctx: Ctx, net: string): Promise<NearbyItem[]> {
   if (stale.length > 0) await ctx.valkey.zrem(zset, ...stale);
   return items;
 }
+
+/**
+ * `listNearby` for the refresh ticks of SSE streams: every stream of a network group asks for the
+ * same list, so it is computed once per `nearbyCacheMs` (and shared while in flight) instead of
+ * once per stream and tick, which would be a MongoDB query per stream every 20 seconds.
+ */
+export function listNearbyCached(ctx: Ctx, net: string): Promise<NearbyItem[]> {
+  const now = Date.now();
+  const hit = ctx.nearbyCache.get(net);
+  if (hit && now - hit.at < ctx.nearbyCacheMs) return hit.list;
+  for (const [key, entry] of ctx.nearbyCache) {
+    if (now - entry.at >= ctx.nearbyCacheMs) ctx.nearbyCache.delete(key);
+  }
+  const list = listNearby(ctx, net);
+  const entry = { at: now, list };
+  ctx.nearbyCache.set(net, entry);
+  // A failed lookup is not remembered.
+  list.catch(() => {
+    if (ctx.nearbyCache.get(net) === entry) ctx.nearbyCache.delete(net);
+  });
+  return list;
+}

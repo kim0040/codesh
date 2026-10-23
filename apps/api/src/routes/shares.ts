@@ -34,7 +34,7 @@ import {
 import { hashPin, randomKey, safeEqual } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
 import { loadDoc, readContent, sendCommand, sharePreview } from "../docs.js";
-import { forbidden, invalid, notFound } from "../errors.js";
+import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { attachment, basename, sanitizePath } from "../files.js";
 import { announceShare, removeNearby } from "../presence.js";
 import { displayName } from "../session.js";
@@ -92,25 +92,38 @@ export function shareRoutes(app: App, ctx: Ctx): void {
     "/api/shares",
     { schema: { response: { 200: listSharesResponseSchema } } },
     async (request) => {
-      const { clientId } = request.session;
+      const { session } = request;
+      const { clientId } = session;
       const now = Date.now();
       const shares = (await ctx.stores.shares.listForClient(clientId))
         .filter((share) => !share.expiresAt || share.expiresAt.getTime() > now)
         .slice(0, LIST_LIMIT);
-      return mapLimit(
-        shares,
-        8,
-        async (share): Promise<ShareListItem> => ({
+      const items = await mapLimit(shares, 8, async (share): Promise<ShareListItem | null> => {
+        const owner = share.ownerId === clientId;
+        // A saved entry must not outlive the access: banned clients lose the share from the list,
+        // and clients who now need a PIN or approval see neither title nor code until admitted.
+        let hidden = false;
+        if (!owner) {
+          try {
+            const access = await accessOf(ctx, share, session);
+            hidden = access.needsPin || access.needsApproval;
+          } catch (error) {
+            if (error instanceof ApiError && error.code === "banned") return null;
+            throw error;
+          }
+        }
+        return {
           id: share.id,
-          title: share.title,
-          language: share.language,
-          role: share.ownerId === clientId ? "owner" : share.access.default,
+          title: hidden ? "" : share.title,
+          language: hidden ? "" : share.language,
+          role: owner ? "owner" : share.access.default,
           saved: share.savedBy.includes(clientId),
           updatedAt: share.updatedAt.toISOString(),
           expiresAt: share.expiresAt ? share.expiresAt.toISOString() : null,
-          preview: await sharePreview(ctx, share.id).catch(() => ""),
-        }),
-      );
+          preview: hidden ? "" : await sharePreview(ctx, share).catch(() => ""),
+        };
+      });
+      return items.filter((item) => item !== null);
     },
   );
 
@@ -260,7 +273,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       if (patch.locked !== undefined) await ctx.publishPerm(share.id, "lock");
       if (askRejoin) await ctx.publishPerm(share.id, "role");
       if (updated.access.nearby && !share.access.nearby) {
-        await announceShare(ctx, updated, session.net, await sharePreview(ctx, share.id));
+        await announceShare(ctx, updated, session.net, await sharePreview(ctx, updated));
       } else if (!updated.access.nearby && share.access.nearby) {
         await removeNearby(ctx, share.id);
       }

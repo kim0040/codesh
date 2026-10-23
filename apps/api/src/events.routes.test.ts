@@ -268,6 +268,35 @@ describe.skipIf(!integration)("GET /api/events", () => {
     });
   });
 
+  it("asks for the nearby list once per network group, not once per stream and tick", async () => {
+    const shared = await createHarness({ presenceRefreshMs: 40, nearbyCacheMs: 60_000 });
+    const url = await shared.listen();
+    const group = shared.network();
+    const streams: { close(): void }[] = [];
+    try {
+      const first = group.client();
+      await createShare(first, { title: "Visible" });
+      let lookups = 0;
+      const original = shared.stores.shares.existing.bind(shared.stores.shares);
+      shared.stores.shares.existing = async (ids) => {
+        lookups++;
+        return original(ids);
+      };
+      const clients = [first, group.client(), group.client(), group.client()];
+      const opened = await Promise.all(clients.map((client) => client.events(url)));
+      streams.push(...opened);
+      for (const events of opened) {
+        expect(await events.next("nearby")).toMatchObject([{ title: "Visible" }]);
+      }
+      // Many refresh ticks of four streams.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(lookups).toBe(1);
+    } finally {
+      for (const events of streams) events.close();
+      await shared.close();
+    }
+  });
+
   it("ends open streams when the server closes", async () => {
     const own = await createHarness();
     const url = await own.listen();

@@ -35,6 +35,7 @@ export interface HarnessOptions {
   randomCode?: () => string;
   heartbeatMs?: number;
   presenceRefreshMs?: number;
+  nearbyCacheMs?: number;
   /** Stores shared with a real collab server; defaults to in-memory stores. */
   stores?: Stores;
   /** `fake` answers `cmd:<shareId>` like collab without touching the stores; `none` stays silent. */
@@ -314,6 +315,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     randomCode: options.randomCode,
     heartbeatMs: options.heartbeatMs,
     presenceRefreshMs: options.presenceRefreshMs,
+    nearbyCacheMs: options.nearbyCacheMs ?? 0,
     settingsCacheMs: 0,
     commandTimeoutMs: options.commandTimeoutMs,
   });
