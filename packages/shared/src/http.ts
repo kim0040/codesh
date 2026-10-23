@@ -53,12 +53,20 @@ export const auditQuerySchema = z.object({
 });
 
 // session
+export const identityViewSchema = z.object({
+  provider: z.string(),
+  name: z.string().optional(),
+  email: z.string().optional(),
+});
+
 export const sessionResponseSchema = z.object({
   clientId: clientIdSchema,
   name: z.string().nullable(),
   color: colorSchema,
   net: z.string(),
   room: z.string().nullable(),
+  /** The verified OIDC / LDAP identity bound to this session, if any. */
+  identity: identityViewSchema.nullable().optional(),
 });
 export type SessionResponse = z.infer<typeof sessionResponseSchema>;
 
@@ -92,12 +100,16 @@ export const createShareResponseSchema = z.object({
 });
 export type CreateShareResponse = z.infer<typeof createShareResponseSchema>;
 
-/** What the owner may see and change about access control. The PIN hash and edit key stay server-side. */
+/**
+ * What the owner may see and change about access control. The PIN hash stays server-side; the
+ * edit key is shown to the owner only, so the owner can hand out an edit link next to a view link.
+ */
 export const shareAccessViewSchema = z.object({
   default: accessLevelSchema,
   hasPin: z.boolean(),
   requireApproval: z.boolean(),
   nearby: z.boolean(),
+  editKey: z.string(),
 });
 
 export const shareMetaSchema = z.object({
@@ -271,6 +283,19 @@ export const patchLabBodySchema = z.object({
 });
 export type PatchLabBody = z.infer<typeof patchLabBodySchema>;
 export const distributeLabResponseSchema = z.object({ count: z.number().int().nonnegative() });
+
+// optional login (OIDC / LDAP), off unless enabled in the settings
+export const authProvidersResponseSchema = z.object({
+  oidc: z.boolean(),
+  ldap: z.boolean(),
+  guestAllowed: z.boolean(),
+});
+export type AuthProvidersResponse = z.infer<typeof authProvidersResponseSchema>;
+export const ldapLoginBodySchema = z.object({
+  username: z.string().min(1).max(256),
+  password: z.string().min(1).max(1024),
+});
+export type LdapLoginBody = z.infer<typeof ldapLoginBodySchema>;
 
 // admin
 export const getSettingsResponseSchema = settingsSchema;

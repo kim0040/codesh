@@ -1,0 +1,110 @@
+import { apiKeys, channels, type PermMessage, type Settings, type SseEvent } from "@codesh/shared";
+import type { Stores } from "@codesh/storage";
+import type { FastifyRequest } from "fastify";
+import type { Redis } from "ioredis";
+import type { LdapAdapter, OidcAdapter } from "./auth/adapters.js";
+import type { Config } from "./config.js";
+import type { Hub } from "./hub.js";
+import type { Metrics } from "./metrics.js";
+import { type Cidr, parseCidrs } from "./net.js";
+
+export interface Deps {
+  config: Config;
+  stores: Stores;
+  valkey: Redis;
+  hub: Hub;
+  metrics: Metrics;
+  oidc?: OidcAdapter;
+  ldap?: LdapAdapter;
+  /** Join code generator, replaceable in tests to force collisions. */
+  randomCode?: () => string;
+  heartbeatMs?: number;
+  presenceRefreshMs?: number;
+  /** How long settings are cached per process; 0 in tests so a stored change applies at once. */
+  settingsCacheMs?: number;
+}
+
+const SETTINGS_CACHE_MS = 5000;
+
+/** Everything a route needs: stores, Valkey, settings and the event publishers. */
+export class Ctx {
+  readonly config: Config;
+  readonly stores: Stores;
+  readonly valkey: Redis;
+  readonly hub: Hub;
+  readonly metrics: Metrics;
+  readonly oidc?: OidcAdapter;
+  readonly ldap?: LdapAdapter;
+  readonly randomCode?: () => string;
+  readonly heartbeatMs?: number;
+  readonly presenceRefreshMs?: number;
+  readonly settingsCacheMs: number;
+  readonly trusted: Cidr[];
+  /** Open SSE streams in this process per client, so presence outlives a closed second tab. */
+  readonly streams = new Map<string, number>();
+  /** Ends every open SSE stream; called when the server closes. */
+  readonly streamClosers = new Set<() => void>();
+  private cached: { value: Settings; at: number } | null = null;
+
+  constructor(deps: Deps) {
+    this.config = deps.config;
+    this.stores = deps.stores;
+    this.valkey = deps.valkey;
+    this.hub = deps.hub;
+    this.metrics = deps.metrics;
+    this.oidc = deps.oidc;
+    this.ldap = deps.ldap;
+    this.randomCode = deps.randomCode;
+    this.heartbeatMs = deps.heartbeatMs;
+    this.presenceRefreshMs = deps.presenceRefreshMs;
+    this.settingsCacheMs = deps.settingsCacheMs ?? SETTINGS_CACHE_MS;
+    this.trusted = parseCidrs(deps.config.trustProxy);
+  }
+
+  async settings(): Promise<Settings> {
+    if (this.cached && Date.now() - this.cached.at < this.settingsCacheMs) return this.cached.value;
+    const value = await this.stores.settings.get();
+    this.cached = { value, at: Date.now() };
+    return value;
+  }
+
+  invalidateSettings(): void {
+    this.cached = null;
+  }
+
+  async publishUser(clientId: string, event: SseEvent): Promise<void> {
+    await this.valkey.publish(channels.user(clientId), JSON.stringify(event));
+  }
+
+  async publishNet(net: string, event: SseEvent): Promise<void> {
+    await this.valkey.publish(channels.net(net), JSON.stringify(event));
+  }
+
+  /** Permission change for collab (§6.7). No `clientId` means everyone connected to the share. */
+  async publishPerm(shareId: string, kind: PermMessage["kind"], clientId?: string): Promise<void> {
+    const key = apiKeys.permVersion(shareId);
+    const version = await this.valkey.incr(key);
+    if (version === 1) await this.valkey.expire(key, 30 * 24 * 3600);
+    const message: PermMessage = { version, kind, ...(clientId ? { clientId } : {}) };
+    await this.valkey.publish(channels.perm(shareId), JSON.stringify(message));
+  }
+
+  /** Writes an audit entry when `settings.audit.enabled`. */
+  async audit(
+    request: FastifyRequest,
+    action: string,
+    shareId?: string,
+    detail?: unknown,
+  ): Promise<void> {
+    const settings = await this.settings();
+    if (!settings.audit.enabled) return;
+    await this.stores.audit.append({
+      at: new Date(),
+      actor: request.session.clientId,
+      ip: request.session.ip,
+      action,
+      ...(shareId ? { shareId } : {}),
+      ...(detail === undefined ? {} : { detail }),
+    });
+  }
+}
