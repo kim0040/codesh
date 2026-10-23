@@ -183,26 +183,35 @@ describe.runIf(available)("collab permissions", () => {
     expect(member.stateless[1]).toEqual({ type: "locked", locked: false, readOnly: false });
   });
 
-  it("ignores stale permission messages", async () => {
+  it("applies kick and delete whatever their version, and ignores only a stale role", async () => {
     const {
       share,
-      clients: [member],
-    } = await room(["edit"]);
-    if (!member) throw new Error("client missing");
+      clients: [member, kicked, other],
+    } = await room(["edit", "edit", "edit"]);
+    if (!member || !kicked || !other) throw new Error("clients missing");
     await harness.publishPerm(share.id, {
       version: 50,
       kind: "role",
       clientId: member.clientId,
-      role: "edit",
+      role: "view",
     });
-    await waitFor(() => member.stateless.length === 1, "current message");
+    await waitFor(() => member.stateless.length === 1, "current role");
+    // An older role message for the same client would undo the newer one.
     await harness.publishPerm(share.id, {
       version: 49,
-      kind: "kick",
+      kind: "role",
       clientId: member.clientId,
+      role: "edit",
     });
-    await sleep(200);
-    expect(member.closes).toEqual([]);
+    // The API's counter restarts with Valkey and is not published in order: lower versions of
+    // other kinds still apply.
+    await harness.publishPerm(share.id, { version: 1, kind: "kick", clientId: kicked.clientId });
+    await waitFor(() => kicked.closes.includes("kicked"), "kick with a lower version");
+    expect(member.stateless).toEqual([{ type: "role", role: "view", readOnly: true }]);
+
+    await harness.stores.shares.delete(share.id);
+    await harness.publishPerm(share.id, { version: 0, kind: "delete" });
+    await waitFor(() => other.closes.includes("deleted"), "delete with a lower version");
   });
 
   it("closes everyone and drops the doc when the share is deleted", async () => {

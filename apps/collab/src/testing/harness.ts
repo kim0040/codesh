@@ -1,4 +1,10 @@
 import {
+  createServer,
+  type Server as NetServer,
+  type Socket,
+  connect as tcpConnect,
+} from "node:net";
+import {
   COLLAB_COMMAND_TIMEOUT_MS,
   type CollabCommand,
   type CollabCommandReply,
@@ -144,14 +150,19 @@ export class Harness {
   }
 
   async startServer(
-    options: { instanceId?: string; timings?: Partial<CollabTimings> } = {},
+    options: {
+      instanceId?: string;
+      timings?: Partial<CollabTimings>;
+      stores?: Stores;
+      valkeyUrl?: string;
+    } = {},
   ): Promise<CollabServer> {
     const server = createCollabServer({
       port: 0,
       address: "127.0.0.1",
       quiet: true,
-      stores: this.stores,
-      valkeyUrl: VALKEY_TEST_URL,
+      stores: options.stores ?? this.stores,
+      valkeyUrl: options.valkeyUrl ?? VALKEY_TEST_URL,
       secret: TEST_SECRET,
       instanceId: options.instanceId ?? `test-${generateShareId()}`,
       timings: { ...TEST_TIMINGS, ...options.timings },
@@ -260,6 +271,86 @@ export class Harness {
     await Promise.all(this.servers.map((s) => s.destroy()));
     this.redis.disconnect();
     await this.database.drop();
+  }
+}
+
+export interface StoreControl {
+  /** Every call fails while true, like MongoDB being unreachable. */
+  down: boolean;
+  /** Calls per `store.method`, counted whether they fail or not. */
+  calls: Record<string, number>;
+  /** Runs before every call, e.g. to hold one until the test lets it go. */
+  before?: (method: string, args: unknown[]) => Promise<void> | void;
+}
+
+/** `stores` with every method passing through `control` first. */
+export function controlledStores(stores: Stores, control: StoreControl): Stores {
+  const wrap = <T extends object>(name: string, target: T): T =>
+    new Proxy(target, {
+      get(object, property, receiver) {
+        const value: unknown = Reflect.get(object, property, receiver);
+        if (typeof value !== "function") return value;
+        const method = `${name}.${String(property)}`;
+        return async (...args: unknown[]) => {
+          control.calls[method] = (control.calls[method] ?? 0) + 1;
+          await control.before?.(method, args);
+          if (control.down) throw new Error(`test: MongoDB is down (${method})`);
+          return value.apply(object, args);
+        };
+      },
+    });
+  return Object.fromEntries(
+    Object.entries(stores).map(([name, store]) => [name, wrap(name, store as object)]),
+  ) as unknown as Stores;
+}
+
+/** A TCP proxy in front of Valkey whose connection can be cut, like a Valkey restart. */
+export class ValkeyProxy {
+  private readonly sockets = new Set<Socket>();
+  private server: NetServer | null = null;
+  private port = 0;
+
+  private constructor(private readonly target: URL) {}
+
+  static async start(): Promise<ValkeyProxy> {
+    const proxy = new ValkeyProxy(new URL(VALKEY_TEST_URL));
+    await proxy.up();
+    return proxy;
+  }
+
+  get url(): string {
+    const url = new URL(this.target);
+    url.hostname = "127.0.0.1";
+    url.port = String(this.port);
+    return url.toString();
+  }
+
+  /** Starts accepting again, on the same port. */
+  async up() {
+    const server = createServer((client) => {
+      const upstream = tcpConnect(Number(this.target.port || 6379), this.target.hostname);
+      for (const socket of [client, upstream]) {
+        this.sockets.add(socket);
+        socket.on("close", () => this.sockets.delete(socket));
+        socket.on("error", () => {
+          client.destroy();
+          upstream.destroy();
+        });
+      }
+      client.pipe(upstream).pipe(client);
+    });
+    await new Promise<void>((resolve) => server.listen(this.port, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address && typeof address === "object") this.port = address.port;
+    this.server = server;
+  }
+
+  /** Cuts every connection and refuses new ones. */
+  async down() {
+    const server = this.server;
+    this.server = null;
+    for (const socket of this.sockets) socket.destroy();
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }
 

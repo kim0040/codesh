@@ -4,11 +4,16 @@ import { SLOW_CLIENT_CLOSE_CODE } from "@codesh/shared";
 export interface GuardedSocket {
   send(data: never, ...rest: never[]): void;
   close(code?: number, reason?: string): void;
+  /** `ws` only: drops the TCP connection without a close handshake. */
+  terminate?(): void;
   readonly readyState: number;
   readonly bufferedAmount?: number;
 }
 
 const OPEN = 1;
+const CLOSED = 3;
+/** A peer this slow will not answer the close handshake either; ws would wait 30 s for it. */
+export const SLOW_CLIENT_TERMINATE_MS = 5000;
 const guarded = new WeakSet<object>();
 
 /**
@@ -24,6 +29,9 @@ export function guardSlowClient(socket: GuardedSocket, limitBytes: number, onClo
     if (socket.readyState === OPEN && (socket.bufferedAmount ?? 0) > limitBytes) {
       socket.close(SLOW_CLIENT_CLOSE_CODE, "slow client");
       onClose?.();
+      setTimeout(() => {
+        if (socket.readyState !== CLOSED) socket.terminate?.();
+      }, SLOW_CLIENT_TERMINATE_MS).unref();
     }
   };
 }

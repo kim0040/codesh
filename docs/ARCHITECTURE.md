@@ -51,7 +51,7 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 ```
 
 - Server Y.Doc uses `gc: true`. The initial sync sends only the garbage-collected current state, so deleted text is never sent to a newly joining client.
-- Awareness state (`packages/shared` `AwarenessState`): `{ user: {clientId, name, color}, fileId, cursor?: {anchor, head} (Yjs relative), viewport?: {fromLine, toLine}, following?: clientId }`. Clients throttle awareness to ≤30 updates/s.
+- Awareness state (`packages/shared` `AwarenessState`): `{ user: {clientId, name, color}, fileId, cursor?: {anchor, head} (Yjs relative), viewport?: {fromLine, toLine}, following?: clientId }`. Clients throttle awareness to ≤30 updates/s; the collab server drops updates beyond that per connection, states over 4 KB, and states for Yjs clients another connection announced, and always sets `user` from the token.
 
 ## 5. MongoDB collections
 
@@ -72,11 +72,11 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 
 1. Live state is the in-memory Y.Doc held by Hocuspocus. Nothing on the keystroke path awaits MongoDB.
 2. `onChange`/`onStoreDocument` are replaced by a custom extension: every Y update is appended to an in-memory per-doc buffer; a flusher writes buffers with `insertMany` every 100 ms (`seq` monotonically increasing per doc, owned by the instance that holds the doc lock `doclock:<id>` in Valkey).
-3. Compaction: after 200 updates or when the doc unloads, write a `compact` snapshot (`Y.encodeStateAsUpdate`) and delete updates with `seq ≤ snapshot.seq`. History snapshots (`kind:'history'`) are kept every 30 s of activity for playback (owner only), up to `settings.historyRetentionDays`.
+3. Compaction: after 200 updates or when the doc unloads, write a `compact` snapshot (`Y.encodeStateAsUpdate`) and delete updates with `seq ≤ snapshot.seq`. History snapshots (`kind:'history'`) are kept every 30 s of activity for playback (owner only), up to `settings.historyRetentionDays` and at most the newest 100 per share.
 4. Load: latest snapshot + updates after it.
 5. Unload: 30 s after the last connection leaves, flush, compact, release lock.
 6. Shutdown (SIGTERM): stop accepting, flush all buffers, compact, exit. Target data loss on crash ≤ 1 s.
-7. Permissions: on connect the client sends a token (§8). The collab server verifies it, sets `connection.readOnly` for viewers and rejects updates from read-only connections. Permission changes arrive on Valkey channel `perm:<shareId>` with `{version, kind: 'role'|'kick'|'lock'|'delete', clientId?}`; affected connections are closed or switched within 100 ms.
+7. Permissions: on connect the client sends a token (§8). The collab server verifies it, sets `connection.readOnly` for viewers and rejects updates from read-only connections. Permission changes arrive on Valkey channel `perm:<shareId>` with `{version, kind: 'role'|'kick'|'lock'|'delete', clientId?, role?}`; affected connections are closed or switched within 100 ms. `kick`, `lock` and `delete` apply whatever their `version`; only a per-client `role` older than one already applied is ignored. Pub/sub can lose messages, so collab also re-reads the share of every doc with connections every 15 s and after its subscriber reconnects (lock, bans, existence), and replays messages that arrived while a connection was authenticating. Database errors during authentication or load are refused with reason `unavailable` (retry with backoff), not as an access decision.
 8. Slow clients: if a connection's buffered amount exceeds 4 MB, close it with code 4408; the client reconnects and resyncs.
 9. Nearby previews: on change (throttled to 2 s), publish `{id, title, language, participants, preview: first 8 lines of main file}` into Valkey hash `nearby:item:<id>` (EX 60) when `access.nearby` is true.
 10. `lastActiveAt` is written at most once per minute per doc.
@@ -150,7 +150,7 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 
 ## 10. Settings (`settings` doc, admin-editable, env provides defaults)
 
-`anonymousTtlHours` 24, `historyRetentionDays` 7, `maxDocBytes` 5 MB, `maxUploadMB` 200, `guestAllowed` true, `rooms` [], `subnetPrefixV4` 24, `nearbyDefault` true, `audit.enabled` false, `audit.retentionDays` 90, `secretWarning` true, `auth.oidc` null, `auth.ldap` null, `contact` "".
+`anonymousTtlHours` 24, `historyRetentionDays` 7, `maxDocBytes` 5 MB (at most 12 MiB, below MongoDB's 16 MiB document limit), `maxUploadMB` 200, `guestAllowed` true, `rooms` [], `subnetPrefixV4` 24, `nearbyDefault` true, `audit.enabled` false, `audit.retentionDays` 90, `secretWarning` true, `auth.oidc` null, `auth.ldap` null, `contact` "".
 
 ## 11. Web app
 

@@ -1,4 +1,4 @@
-import { namespace, SWEEPER_INTERVAL_MS } from "@codesh/shared";
+import { COLLAB_MAX_PAYLOAD_BYTES, namespace, SWEEPER_INTERVAL_MS } from "@codesh/shared";
 import type { Stores } from "@codesh/storage";
 import { Redis as RedisExtension } from "@hocuspocus/extension-redis";
 import { type Extension, Server } from "@hocuspocus/server";
@@ -35,8 +35,11 @@ export interface CollabServer {
   destroy(): Promise<void>;
 }
 
-/** Serves `GET /healthz` and `GET /metrics`, and only accepts WebSocket upgrades on `/collab`. */
-function routes(metrics: CollabMetrics): Extension {
+/**
+ * Serves `GET /healthz` (liveness), `GET /readyz` (MongoDB and Valkey answer) and `GET /metrics`,
+ * and only accepts WebSocket upgrades on `/collab`.
+ */
+function routes(metrics: CollabMetrics, ready: () => Promise<unknown>): Extension {
   return {
     extensionName: "routes",
     async onRequest({ request, response }) {
@@ -45,6 +48,14 @@ function routes(metrics: CollabMetrics): Extension {
         response
           .writeHead(200, { "Content-Type": "application/json" })
           .end(JSON.stringify({ ok: true }));
+      } else if (path === "/readyz") {
+        const ok = await ready().then(
+          () => true,
+          () => false,
+        );
+        response
+          .writeHead(ok ? 200 : 503, { "Content-Type": "application/json" })
+          .end(JSON.stringify({ ok }));
       } else if (path === "/metrics") {
         const body = await metrics.registry.metrics();
         response.writeHead(200, { "Content-Type": metrics.registry.contentType }).end(body);
@@ -64,8 +75,20 @@ function routes(metrics: CollabMetrics): Extension {
 }
 
 export function createCollabServer(options: CollabOptions): CollabServer {
-  const redis = new Redis(options.valkeyUrl, { maxRetriesPerRequest: 2 });
-  const subscriber = redis.duplicate();
+  const redis = new Redis(options.valkeyUrl, {
+    maxRetriesPerRequest: 2,
+    connectionName: `collab:${options.instanceId}`,
+  });
+  const subscriber = redis.duplicate({ connectionName: `collab:${options.instanceId}:sub` });
+  // ioredis reconnects by itself; without listeners it reports every failed attempt as unhandled.
+  let valkeyErrorAt = 0;
+  const onValkeyError = (error: unknown) => {
+    if (Date.now() - valkeyErrorAt < 10_000) return;
+    valkeyErrorAt = Date.now();
+    console.error("collab: Valkey connection error", error);
+  };
+  redis.on("error", onValkeyError);
+  subscriber.on("error", onValkeyError);
   let server: Server | undefined;
   const metrics = createMetrics(() => ({
     connections: server?.hocuspocus.getConnectionsCount() ?? 0,
@@ -87,10 +110,16 @@ export function createCollabServer(options: CollabOptions): CollabServer {
     name: options.instanceId,
     // Shutdown is owned by main.ts so that buffers are flushed before exit.
     stopOnSignals: false,
-    // Stores happen in the Collab extension; this only feeds extension-redis' store lock.
-    debounce: 1000,
+    // ws buffers a whole frame before anything can check it; its default limit is 100 MiB.
+    websocketOptions: { maxPayload: COLLAB_MAX_PAYLOAD_BYTES },
+    // §4: deleted content is dropped from memory and from every encoded state.
+    yDocOptions: { gc: true, gcFilter: () => true },
+    // Stores happen in the Collab extension; this only feeds extension-redis' store lock, which
+    // takes Valkey round trips per run. The last disconnect still runs it at once.
+    debounce: 5000,
+    maxDebounce: 10_000,
     extensions: [
-      routes(metrics),
+      routes(metrics, () => Promise.all([options.stores.settings.get(), redis.ping()])),
       collab,
       new RedisExtension({ redis, identifier: options.instanceId, prefix: `${namespace()}collab` }),
     ],
@@ -116,10 +145,17 @@ export function createCollabServer(options: CollabOptions): CollabServer {
       await collab.start();
       await instance.listen();
       if (sweeperIntervalMs > 0) {
+        // The lock value is this instance's id, so it does not keep a slow sweep of this same
+        // instance from starting again.
+        let sweeping = false;
         sweeper = setInterval(() => {
-          sweep(options.stores, sweeperLock).catch((error) =>
-            console.error("collab: sweep failed", error),
-          );
+          if (sweeping) return;
+          sweeping = true;
+          sweep(options.stores, sweeperLock)
+            .catch((error) => console.error("collab: sweep failed", error))
+            .finally(() => {
+              sweeping = false;
+            });
         }, sweeperIntervalMs);
         sweeper.unref();
       }
