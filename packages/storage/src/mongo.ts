@@ -111,7 +111,12 @@ class MongoShareStore implements ShareStore {
   }
 
   async update(id: string, patch: ShareUpdate) {
-    const set = defined(patch);
+    // Dotted `access.*` paths, so a concurrent update of another access field is not overwritten.
+    const { access, ...rest } = patch;
+    const set: Record<string, unknown> = defined(rest);
+    for (const [field, value] of Object.entries(defined(access ?? {}))) {
+      set[`access.${field}`] = value;
+    }
     if (Object.keys(set).length === 0) return this.get(id);
     const doc = await this.shares.findOneAndUpdate(
       { _id: id },

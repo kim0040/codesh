@@ -157,6 +157,35 @@ describe.skipIf(!integration)("join: PIN", () => {
     );
   });
 
+  it("counts parallel wrong PINs: five are checked, every other request gets 429", async () => {
+    const { id } = await protectedShare();
+    const guest = h.client();
+    await guest.clientId();
+    const responses = await Promise.all(
+      Array.from({ length: 40 }, (_, i) =>
+        guest.post(`/api/shares/${id}/join`, { pin: String(100000 + i) }),
+      ),
+    );
+    const statuses = responses.map((response) => response.statusCode);
+    expect(statuses.filter((status) => status === 403)).toHaveLength(5);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(35);
+    // Refused attempts are not counted, so the counters stop at the limit.
+    expect(Number(await h.valkey.get(`pinfail:c:${id}:${await guest.clientId()}`))).toBe(5);
+    expect((await guest.post(`/api/shares/${id}/join`, { pin: "482913" })).statusCode).toBe(429);
+  });
+
+  it("gives the IP slot back after a correct PIN, so a classroom behind one IP is not locked out", async () => {
+    const { id } = await protectedShare();
+    const ip = h.client().ip;
+    for (let i = 0; i < 40; i++) {
+      const student = h.client({ ip });
+      expect((await student.post(`/api/shares/${id}/join`, { pin: "482913" })).statusCode).toBe(
+        200,
+      );
+    }
+    expect(await h.valkey.get(`pinfail:i:${id}:${ip}`)).toBeNull();
+  });
+
   it("does not let a guesser reset the limit by dropping the cookie", async () => {
     const { id } = await protectedShare();
     const ip = h.client().ip;
@@ -251,6 +280,23 @@ describe.skipIf(!integration)("join: owner approval", () => {
     expect(admitted.statusCode).toBe(200);
     expect(admitted.json<{ role: string }>().role).toBe("edit");
     expect((await owner.get(`/api/shares/${id}/pending`)).json()).toEqual([]);
+  });
+
+  it("drops requests queued under the old PIN when the PIN changes", async () => {
+    const { owner, id } = await approvalShare();
+    await owner.patch(`/api/shares/${id}`, { access: { pin: "482913" } });
+    const guest = h.client();
+    const guestId = await guest.clientId();
+    expect((await guest.post(`/api/shares/${id}/join`, { pin: "482913" })).statusCode).toBe(202);
+    expect((await owner.get(`/api/shares/${id}/pending`)).json<unknown[]>()).toHaveLength(1);
+
+    await owner.patch(`/api/shares/${id}`, { access: { pin: "777777" } });
+    expect((await owner.get(`/api/shares/${id}/pending`)).json<unknown[]>()).toEqual([]);
+    const approve = await owner.post(`/api/shares/${id}/pending/${guestId}`, { approve: true });
+    expect(approve.statusCode).toBe(404);
+    // The guest has to know the new PIN to queue again.
+    expect((await guest.post(`/api/shares/${id}/join`)).statusCode).toBe(401);
+    expect((await guest.post(`/api/shares/${id}/join`, { pin: "777777" })).statusCode).toBe(202);
   });
 
   it("keeps a denied client out; it can ask again", async () => {

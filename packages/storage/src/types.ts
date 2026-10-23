@@ -1,4 +1,5 @@
 import type {
+  Access,
   AuditRecord,
   LabRecord,
   LabStudent,
@@ -11,7 +12,11 @@ import type {
 
 /** Persistence contract of docs/ARCHITECTURE.md §5. Only implementations import a database driver. */
 
-/** Fields a caller may change on a share; everything else has a dedicated method. */
+/**
+ * Fields a caller may change on a share; everything else has a dedicated method.
+ * `access` is merged field by field, so two concurrent updates of different access settings
+ * (a new PIN and `requireApproval`) both survive.
+ */
 export type ShareUpdate = Partial<
   Pick<
     ShareRecord,
@@ -20,12 +25,11 @@ export type ShareUpdate = Partial<
     | "updatedAt"
     | "lastActiveAt"
     | "expiresAt"
-    | "access"
     | "joinCode"
     | "locked"
     | "sizeBytes"
   >
->;
+> & { access?: Partial<Access> };
 
 export interface ShareStore {
   create(share: ShareRecord): Promise<void>;

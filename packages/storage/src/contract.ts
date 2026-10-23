@@ -67,6 +67,28 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
         expect(await shares.update("missing1", { title: "x" })).toBeNull();
       });
 
+      it("merges access fields, so updates of different fields do not overwrite each other", async () => {
+        const { shares } = await open();
+        await shares.create(share("abcd1234"));
+        await Promise.all([
+          shares.update("abcd1234", { access: { pinHash: "scrypt$x" } }),
+          shares.update("abcd1234", { access: { requireApproval: true, nearby: false } }),
+          shares.update("abcd1234", { access: { editKey: "rotated" }, title: "Renamed" }),
+        ]);
+        expect(await shares.get("abcd1234")).toMatchObject({
+          title: "Renamed",
+          access: {
+            default: "edit",
+            editKey: "rotated",
+            pinHash: "scrypt$x",
+            requireApproval: true,
+            nearby: false,
+          },
+        });
+        const cleared = await shares.update("abcd1234", { access: { pinHash: null } });
+        expect(cleared?.access).toMatchObject({ pinHash: null, requireApproval: true });
+      });
+
       it("lists owned and saved shares newest first", async () => {
         const { shares } = await open();
         await shares.create(share("aaaaaaa1", { updatedAt: later(1000) }));

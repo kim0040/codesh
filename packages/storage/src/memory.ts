@@ -30,6 +30,10 @@ import {
 
 const copy = <T>(value: T): T => structuredClone(value);
 
+/** Same as MongoDB's `defined`: an `undefined` field means "leave as is". */
+const defined = <T extends object>(value: T): T =>
+  Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+
 class MemoryShareStore implements ShareStore {
   private readonly shares = new Map<string, ShareRecord>();
 
@@ -46,7 +50,9 @@ class MemoryShareStore implements ShareStore {
   async update(id: string, patch: ShareUpdate) {
     const share = this.shares.get(id);
     if (!share) return null;
-    Object.assign(share, copy(patch));
+    const { access, ...rest } = copy(patch);
+    Object.assign(share, defined(rest));
+    if (access) Object.assign(share.access, defined(access));
     return copy(share);
   }
 
