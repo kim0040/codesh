@@ -1,0 +1,215 @@
+/* Editor surface, remote cursors and comment markers. Colours come from the theme and tokens. */
+
+.cm-host {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cm-host .cm-editor {
+  height: 100%;
+}
+
+.cm-host .cm-editor.cm-focused {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.cm-host .cm-scroller {
+  overscroll-behavior: contain;
+}
+
+.cm-host .cm-content {
+  padding-block: 8px;
+}
+
+.cm-host .cm-placeholder {
+  color: var(--fg-3);
+  font-style: italic;
+}
+
+/* ── Remote cursors ─────────────────────────────────────────────── */
+
+.cm-remote-carets,
+.cm-remote-selections {
+  pointer-events: none;
+}
+
+.cm-remote-selection {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--rc) 30%, transparent);
+}
+
+.cm-remote-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  pointer-events: none;
+  will-change: transform;
+  /* Only transform animates: the compositor moves it, layout never reruns. */
+  transition: transform 110ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cm-remote-caret-bar {
+  position: absolute;
+  inset-block: 0;
+  left: -1px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--rc);
+}
+
+.cm-remote-caret-flag {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  max-width: 14rem;
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 4px 4px 4px 0;
+  background: var(--rc);
+  color: var(--rc-fg);
+  font: 600 11px / 1.55 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.cm-remote-caret.is-top .cm-remote-caret-flag {
+  top: 100%;
+  bottom: auto;
+  border-radius: 0 4px 4px 4px;
+}
+
+.cm-remote-caret.is-moving .cm-remote-caret-flag {
+  animation: cm-remote-flag 3s ease-out both;
+}
+
+@keyframes cm-remote-flag {
+  0% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  6% {
+    opacity: 1;
+    transform: none;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-remote-caret {
+    transition: none;
+  }
+
+  .cm-remote-caret.is-moving .cm-remote-caret-flag {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* ── Comments ───────────────────────────────────────────────────── */
+
+.cm-comment-gutter {
+  width: 18px;
+}
+
+.cm-comment-gutter .cm-gutterElement {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cm-comment-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: 600 9px / 1 var(--font-ui);
+  cursor: pointer;
+}
+
+.cm-comment-spacer {
+  display: inline-block;
+  width: 12px;
+}
+
+.cm-commented {
+  text-decoration: underline dotted var(--accent-text);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+/* ── Search panel and merge view ────────────────────────────────── */
+
+.cm-host .cm-panels {
+  font-family: var(--font-ui);
+  font-size: 0.8125rem;
+}
+
+.cm-host .cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 6px 28px 6px 8px;
+}
+
+.cm-host .cm-search br {
+  display: none;
+}
+
+.cm-host .cm-search input.cm-textfield {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--fg);
+}
+
+.cm-host .cm-search button.cm-button {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  background-image: none;
+}
+
+.cm-host .cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-2);
+}
+
+.cm-host .cm-search [name="close"] {
+  inset-inline-end: 6px;
+  color: var(--fg-2);
+}
+
+.cm-merge-host {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cm-merge-host .cm-mergeView,
+.cm-merge-host .cm-mergeViewEditors {
+  min-height: 100%;
+}
