@@ -1,0 +1,28 @@
+import type { MessageKey } from "./en.js";
+
+export const ko: Record<MessageKey, string> = {
+  "app.name": "codesh",
+  "app.tagline": "사내망에서 실시간으로 코드를 공유하세요",
+  "common.cancel": "취소",
+  "common.close": "닫기",
+  "common.confirm": "확인",
+  "common.copy": "복사",
+  "common.copied": "복사됨",
+  "common.delete": "삭제",
+  "common.loading": "불러오는 중…",
+  "common.retry": "다시 시도",
+  "common.save": "저장",
+  "error.generic": "문제가 생겼어요. 다시 시도해 주세요.",
+  "nav.home": "홈",
+  "nav.myShares": "내 공유",
+  "share.new": "새 공유",
+  "share.joinWithCode": "코드로 입장",
+  "share.codePlaceholder": "6자리 코드",
+  "share.linkCopied": "링크를 복사했어요",
+  "status.connected": "연결됨",
+  "status.reconnecting": "다시 연결하는 중…",
+  "status.offline": "오프라인 – 변경 내용은 보관돼요",
+  "locale.ko": "한국어",
+  "locale.en": "English",
+  "greeting.hello": "{name}님, 안녕하세요",
+};
