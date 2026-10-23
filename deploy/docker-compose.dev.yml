@@ -3,6 +3,12 @@ name: codesh-dev
 services:
   mongo:
     image: mongo:8
+    ulimits:
+      nofile: 64000
+    logging: &logging
+      options:
+        max-size: 10m
+        max-file: "3"
     ports:
       - "27017:27017"
     volumes:
@@ -16,6 +22,7 @@ services:
 
   valkey:
     image: valkey/valkey:8
+    logging: *logging
     ports:
       - "6379:6379"
     volumes:
