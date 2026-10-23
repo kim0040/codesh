@@ -388,4 +388,162 @@ describe.skipIf(!integration)("labs", () => {
       expect((await teacher.post("/api/labs/Zz9Zz9Zz/distribute")).statusCode).toBe(404);
     });
   });
+
+  describe("template privacy", () => {
+    it("keeps the template away from students: not in the lab, not in their copy, not nearby", async () => {
+      const teacher = net.client();
+      const template = await templateOf(teacher);
+      const nearby = `nearby:${teacher.ip.split(".").slice(0, 3).join(".")}.0/24`;
+      expect(await h.valkey.zscore(nearby, template.id)).not.toBeNull();
+      const lab = await createLab(teacher, { templateShareId: template.id });
+      expect(await h.valkey.zscore(nearby, template.id)).toBeNull();
+      expect((await h.stores.shares.get(template.id))?.access.nearby).toBe(false);
+
+      const student = net.client();
+      const { shareId } = (await join(student, lab.id, "Hana")).json<{ shareId: string }>();
+      const everything = [
+        (await student.get(`/api/labs/${lab.id}`)).body,
+        (await student.get(`/api/shares/${shareId}`)).body,
+        (await student.get("/api/shares")).body,
+        (await student.post(`/api/shares/${shareId}/join`)).body,
+      ].join("\n");
+      expect(everything).not.toContain(template.id);
+      expect((await student.get(`/api/labs/${lab.id}`)).json<LabView>().templateShareId).toBeNull();
+      expect((await student.get(`/api/shares/${shareId}`)).json()).not.toHaveProperty("forkOf");
+
+      // The teacher still sees it, and a template set later is hidden as well.
+      expect((await teacher.get(`/api/labs/${lab.id}`)).json<LabView>().templateShareId).toBe(
+        template.id,
+      );
+      const later = await templateOf(teacher);
+      await teacher.patch(`/api/labs/${lab.id}`, { templateShareId: later.id });
+      expect(await h.valkey.zscore(nearby, later.id)).toBeNull();
+      expect((await student.get(`/api/labs/${lab.id}`)).body).not.toContain(later.id);
+    });
+
+    it("keeps forkOf on ordinary forks", async () => {
+      const owner = net.client();
+      const { id } = await createShare(owner);
+      const fork = (await net.client().post(`/api/shares/${id}/fork`)).json<{ id: string }>();
+      expect((await owner.get(`/api/shares/${fork.id}`)).json()).toMatchObject({ forkOf: id });
+    });
+  });
+
+  describe("lock races", () => {
+    /** Runs `hook` once, right before the next `addStudent`, as a teacher's PATCH would between two steps. */
+    const beforeNextAddStudent = (hook: () => Promise<void>) => {
+      const labs = h.stores.labs;
+      const original = labs.addStudent.bind(labs);
+      labs.addStudent = async (id, student) => {
+        labs.addStudent = original;
+        await hook();
+        return original(id, student);
+      };
+      return () => {
+        labs.addStudent = original;
+      };
+    };
+
+    it("locks a copy that is created while the teacher locks the lab", async () => {
+      const teacher = net.client();
+      const template = await templateOf(teacher);
+      const lab = await createLab(teacher, { templateShareId: template.id });
+      const student = net.client();
+      const restore = beforeNextAddStudent(async () => {
+        const locked = await teacher.patch(`/api/labs/${lab.id}`, { locked: true });
+        expect(locked.statusCode).toBe(200);
+      });
+      let shareId: string;
+      try {
+        shareId = (await join(student, lab.id, "Hana")).json<{ shareId: string }>().shareId;
+      } finally {
+        restore();
+      }
+      expect((await h.stores.shares.get(shareId))?.locked).toBe(true);
+      expect(
+        (await student.post(`/api/shares/${shareId}/join`)).json<{ role: string }>().role,
+      ).toBe("view");
+    });
+
+    it("lets the lab decide for its copies, even when a copy's own flag lags behind", async () => {
+      const teacher = net.client();
+      const lab = await createLab(teacher);
+      const student = net.client();
+      const { shareId } = (await join(student, lab.id, "Hana")).json<{ shareId: string }>();
+      await h.stores.labs.update(lab.id, { locked: true });
+      expect((await h.stores.shares.get(shareId))?.locked).toBe(false);
+      expect(
+        (await student.post(`/api/shares/${shareId}/join`)).json<{ role: string }>().role,
+      ).toBe("view");
+      await h.stores.labs.update(lab.id, { locked: false });
+      expect(
+        (await student.post(`/api/shares/${shareId}/join`)).json<{ role: string }>().role,
+      ).toBe("owner");
+    });
+
+    it("locks the fresh copies of a distribute that runs while the teacher locks the lab", async () => {
+      const teacher = net.client();
+      const template = await templateOf(teacher);
+      const lab = await createLab(teacher, { templateShareId: template.id });
+      const student = net.client();
+      await join(student, lab.id, "Hana");
+      const restore = beforeNextAddStudent(async () => {
+        await teacher.patch(`/api/labs/${lab.id}`, { locked: true });
+      });
+      try {
+        expect((await teacher.post(`/api/labs/${lab.id}/distribute`)).statusCode).toBe(200);
+      } finally {
+        restore();
+      }
+      const current = (await h.stores.labs.get(lab.id))?.students[0];
+      expect((await h.stores.shares.get(current?.shareId as string))?.locked).toBe(true);
+    });
+  });
+
+  describe("locks", () => {
+    it("runs one distribute at a time, so copies are not forked twice", async () => {
+      const teacher = net.client();
+      const template = await templateOf(teacher);
+      const lab = await createLab(teacher, { templateShareId: template.id });
+      for (const name of ["One", "Two"]) await join(net.client(), lab.id, name);
+      expect(await h.stores.shares.listByLab(lab.id)).toHaveLength(2);
+
+      const held = `lock:labdistribute:${lab.id}`;
+      await h.valkey.set(held, "other", "EX", 60);
+      const busy = await teacher.post(`/api/labs/${lab.id}/distribute`);
+      expect(busy.statusCode).toBe(429);
+      expect(errorCode(busy)).toBe("rate_limited");
+      expect(await h.valkey.get(held)).toBe("other");
+      await h.valkey.del(held);
+
+      const results = await Promise.all([
+        teacher.post(`/api/labs/${lab.id}/distribute`),
+        teacher.post(`/api/labs/${lab.id}/distribute`),
+      ]);
+      expect(results.map((r) => r.statusCode).sort()).toEqual([200, 429]);
+      expect(await h.stores.shares.listByLab(lab.id)).toHaveLength(4);
+      expect(await h.valkey.exists(held)).toBe(0);
+    });
+
+    it("does not delete the join lock of another request after its own expired", async () => {
+      const teacher = net.client();
+      const lab = await createLab(teacher);
+      const student = net.client();
+      const lockKey = `lock:labjoin:${lab.id}:${await student.clientId()}`;
+      const labs = h.stores.labs;
+      const original = labs.addStudent.bind(labs);
+      labs.addStudent = async (id, record) => {
+        labs.addStudent = original;
+        // Our lock lapsed and another request of the same student holds it now.
+        await h.valkey.set(lockKey, "someone-else", "EX", 60);
+        return original(id, record);
+      };
+      try {
+        expect((await join(student, lab.id, "Hana")).statusCode).toBe(200);
+      } finally {
+        labs.addStudent = original;
+      }
+      expect(await h.valkey.get(lockKey)).toBe("someone-else");
+    });
+  });
 });

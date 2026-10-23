@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   apiKeys,
   createLabBodySchema,
@@ -11,18 +12,27 @@ import {
   type LabRecord,
   labParamsSchema,
   patchLabBodySchema,
+  type ShareRecord,
 } from "@codesh/shared";
 import { findShare, requireOwner } from "../access.js";
 import { allocateCode } from "../codes.js";
 import type { Ctx } from "../ctx.js";
 import { type DocContent, loadDoc, readContent } from "../docs.js";
 import { ApiError, forbidden, invalid, notFound } from "../errors.js";
+import { removeNearby } from "../presence.js";
 import { saveProfile } from "../session.js";
 import { createShare, urlOf } from "../shares.js";
 import { type App, limited, mapLimit } from "./types.js";
 
 const JOIN_LOCK_SECONDS = 30;
 const JOIN_WAIT_MS = 3000;
+const DISTRIBUTE_LOCK_SECONDS = 300;
+
+/** Deletes the lock only while it is still ours: after its TTL another request may hold it. */
+const RELEASE_LOCK = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0
+`;
 
 async function findLab(ctx: Ctx, id: string): Promise<LabRecord> {
   const lab = await ctx.stores.labs.get(id);
@@ -37,7 +47,8 @@ function labView(lab: LabRecord, clientId: string): GetLabResponse {
     id: lab.id,
     title: lab.title,
     joinCode: lab.joinCode,
-    templateShareId: lab.templateShareId,
+    // The template is a normal share the teacher owns: its id would let a student join it.
+    templateShareId: teacher ? lab.templateShareId : null,
     locked: lab.locked,
     role: teacher ? "teacher" : "student",
     // A student sees only their own entry; the grid of everyone's code is the teacher's.
@@ -65,6 +76,31 @@ export function labRoutes(app: App, ctx: Ctx): void {
     const template = await ctx.stores.shares.get(lab.templateShareId);
     if (!template) return null;
     return readContent(await loadDoc(ctx, template.id));
+  };
+
+  const acquire = async (key: string, seconds: number): Promise<string | null> => {
+    const token = randomUUID();
+    return (await ctx.valkey.set(key, token, "EX", seconds, "NX")) === "OK" ? token : null;
+  };
+  const release = (key: string, token: string) => ctx.valkey.eval(RELEASE_LOCK, 1, key, token);
+
+  /**
+   * A template is the teacher's own share; nobody else is to find it. It is taken out of the
+   * nearby list so students on the same network do not see it there.
+   */
+  const hideTemplate = async (templateShareId: string) => {
+    await ctx.stores.shares.update(templateShareId, { access: { nearby: false } });
+    await removeNearby(ctx, templateShareId);
+  };
+
+  /**
+   * Brings a new copy in step with the lab's current lock. The teacher may have (un)locked the lab
+   * between our read of it and `addStudent`, and that PATCH did not see the copy yet.
+   */
+  const alignLock = async (copy: ShareRecord, lab: LabRecord | null) => {
+    if (!lab || lab.locked === copy.locked) return;
+    await ctx.stores.shares.update(copy.id, { locked: lab.locked });
+    await ctx.publishPerm(copy.id, "lock");
   };
 
   /** Each student works on a copy they own; the teacher edits it as controller of the lab. */
@@ -114,6 +150,7 @@ export function labRoutes(app: App, ctx: Ctx): void {
         expiresAt,
       });
       await ctx.valkey.zadd(apiKeys.labsIndex, expiresAt.getTime(), id);
+      if (body.templateShareId) await hideTemplate(body.templateShareId);
       await ctx.audit(request, "lab.create", undefined, { labId: id });
       return { id, code, url: urlOf(ctx, `lab/${id}`) };
     },
@@ -146,8 +183,8 @@ export function labRoutes(app: App, ctx: Ctx): void {
 
       // A double click must not create two copies.
       const lockKey = apiKeys.labJoinLock(lab.id, session.clientId);
-      const locked = await ctx.valkey.set(lockKey, "1", "EX", JOIN_LOCK_SECONDS, "NX");
-      if (locked !== "OK") {
+      const lockToken = await acquire(lockKey, JOIN_LOCK_SECONDS);
+      if (lockToken === null) {
         const until = Date.now() + JOIN_WAIT_MS;
         while (Date.now() < until) {
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -167,12 +204,13 @@ export function labRoutes(app: App, ctx: Ctx): void {
           session.clientId,
           await templateContent(current),
         );
-        await ctx.stores.labs.addStudent(lab.id, {
+        const withStudent = await ctx.stores.labs.addStudent(lab.id, {
           clientId: session.clientId,
           name: body.name,
           shareId: share.id,
           joinedAt: new Date(),
         });
+        await alignLock(share, withStudent);
         await ctx.publishUser(lab.ownerId, {
           event: "lab",
           data: { labId: lab.id, kind: "joined" },
@@ -180,7 +218,7 @@ export function labRoutes(app: App, ctx: Ctx): void {
         await ctx.audit(request, "lab.join", share.id, { labId: lab.id });
         return { shareId: share.id };
       } finally {
-        await ctx.valkey.del(lockKey);
+        await release(lockKey, lockToken);
       }
     },
   );
@@ -206,6 +244,7 @@ export function labRoutes(app: App, ctx: Ctx): void {
         ...(body.templateShareId === undefined ? {} : { templateShareId: body.templateShareId }),
       });
       if (!updated) throw notFound("Lab not found");
+      if (body.templateShareId) await hideTemplate(body.templateShareId);
 
       if (body.locked !== undefined && body.locked !== lab.locked) {
         const kind = body.locked ? "locked" : "unlocked";
@@ -225,25 +264,43 @@ export function labRoutes(app: App, ctx: Ctx): void {
     { schema: { params: labParamsSchema, response: { 200: distributeLabResponseSchema } } },
     async (request) => {
       const { session } = request;
-      const lab = await findLab(ctx, request.params.id);
-      requireTeacher(lab, session.clientId);
-      const content = await templateContent(lab);
-      if (!content) throw invalid("Set a template share before distributing");
+      const found = await findLab(ctx, request.params.id);
+      requireTeacher(found, session.clientId);
 
-      // Every student gets a fresh copy; the previous copy is no longer linked to the lab.
-      await mapLimit(lab.students, 4, async (student) => {
-        const { share } = await forkForStudent(lab, student.clientId, content);
-        await ctx.stores.labs.addStudent(lab.id, { ...student, shareId: share.id });
-        await ctx.publishUser(student.clientId, {
-          event: "lab",
-          data: { labId: lab.id, kind: "distributed" },
+      // One distribute at a time: a second one would fork everyone again and orphan the first copies.
+      const lockKey = apiKeys.labDistributeLock(found.id);
+      const lockToken = await acquire(lockKey, DISTRIBUTE_LOCK_SECONDS);
+      if (lockToken === null) {
+        throw new ApiError("rate_limited", "A distribution is already in progress", {
+          "Retry-After": "5",
         });
-      });
-      await ctx.audit(request, "lab.distribute", lab.templateShareId ?? undefined, {
-        labId: lab.id,
-        count: lab.students.length,
-      });
-      return { count: lab.students.length };
+      }
+      try {
+        // Read after taking the lock, so students who joined meanwhile are included.
+        const lab = await findLab(ctx, found.id);
+        const content = await templateContent(lab);
+        if (!content) throw invalid("Set a template share before distributing");
+
+        // Every student gets a fresh copy; the previous copy is no longer linked to the lab.
+        await mapLimit(lab.students, 4, async (student) => {
+          const { share } = await forkForStudent(lab, student.clientId, content);
+          await alignLock(
+            share,
+            await ctx.stores.labs.addStudent(lab.id, { ...student, shareId: share.id }),
+          );
+          await ctx.publishUser(student.clientId, {
+            event: "lab",
+            data: { labId: lab.id, kind: "distributed" },
+          });
+        });
+        await ctx.audit(request, "lab.distribute", lab.templateShareId ?? undefined, {
+          labId: lab.id,
+          count: lab.students.length,
+        });
+        return { count: lab.students.length };
+      } finally {
+        await release(lockKey, lockToken);
+      }
     },
   );
 }

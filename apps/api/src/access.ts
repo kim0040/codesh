@@ -75,7 +75,9 @@ export async function accessOf(
   let role: Role = owner ? "owner" : teacher ? "edit" : keyOk ? "edit" : share.access.default;
   // A locked share is read-only for everyone but the controller: the teacher in a lab, else the
   // owner. In a lab the student owns the share but must not be able to undo the teacher's lock.
-  if (share.locked && !teacher && (role === "edit" || (role === "owner" && share.labId))) {
+  // The lab decides for its shares: a copy created while the teacher locks the lab may lag behind.
+  const locked = lab ? lab.locked : share.locked;
+  if (locked && !teacher && (role === "edit" || (role === "owner" && share.labId))) {
     role = "view";
   }
   const needsPin = share.access.pinHash !== null && !granted;
@@ -237,7 +239,8 @@ export function shareMeta(share: ShareRecord, clientId: string): ShareMeta {
     saved: share.savedBy.includes(clientId),
     locked: share.locked,
     ...(share.labId ? { labId: share.labId } : {}),
-    ...(share.forkOf ? { forkOf: share.forkOf } : {}),
+    // A lab copy's origin is the teacher's template, which students must not learn.
+    ...(share.forkOf && !share.labId ? { forkOf: share.forkOf } : {}),
   };
 }
 
