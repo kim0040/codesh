@@ -1,3 +1,4 @@
+import { channels } from "@codesh/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { readContent } from "./docs.js";
 import {
@@ -285,7 +286,7 @@ describe.skipIf(!integration)("labs", () => {
         (await join(s1, lab.id)).json<{ shareId: string }>().shareId,
         (await join(s2, lab.id)).json<{ shareId: string }>().shareId,
       ];
-      const perms = await Promise.all(shares.map((id) => h.subscribe(`perm:${id}`)));
+      const perms = await Promise.all(shares.map((id) => h.subscribe(channels.perm(id))));
       const s1Events = await s1.events(base);
       streams.push(s1Events);
 

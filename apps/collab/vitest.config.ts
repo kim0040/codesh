@@ -7,5 +7,6 @@ export default defineProject({
     hookTimeout: 30_000,
     // Integration files start servers and child processes; run them one at a time.
     fileParallelism: false,
+    setupFiles: ["../../scripts/vitest-namespace.ts"],
   },
 });

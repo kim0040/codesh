@@ -1,4 +1,4 @@
-import { verifyCollabToken } from "@codesh/shared";
+import { channels, verifyCollabToken } from "@codesh/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readContent } from "./docs.js";
 import {
@@ -291,7 +291,7 @@ describe.skipIf(!integration)("PATCH /api/shares/:id", () => {
   it("changes access, publishes a role change, and keeps the edit key secret from others", async () => {
     const owner = h.client();
     const { id } = await createShare(owner);
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
     const before = (await h.stores.shares.get(id))?.access.editKey;
 
     const response = await owner.patch(`/api/shares/${id}`, {
@@ -345,7 +345,7 @@ describe.skipIf(!integration)("PATCH /api/shares/:id", () => {
     const owner = h.client();
     const { id } = await createShare(owner);
     const guest = h.client();
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
 
     const response = await owner.patch(`/api/shares/${id}`, { locked: true });
     expect(response.statusCode).toBe(200);
@@ -408,7 +408,7 @@ describe.skipIf(!integration)("DELETE /api/shares/:id", () => {
       expiresAt: new Date(Date.now() + 60_000),
       data: new Uint8Array([1, 2, 3]),
     });
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
 
     const response = await owner.delete(`/api/shares/${id}`);
     expect(response.statusCode).toBe(200);

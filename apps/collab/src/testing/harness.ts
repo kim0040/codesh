@@ -226,7 +226,7 @@ export class Harness {
   }
 
   publishPerm(shareId: string, message: PermMessage) {
-    return this.redis.publish(`perm:${shareId}`, JSON.stringify(message));
+    return this.redis.publish(channels.perm(shareId), JSON.stringify(message));
   }
 
   /**

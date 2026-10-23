@@ -221,11 +221,15 @@ export class Collab implements Extension<CollabContext> {
   /** Starts the flush and lock timers and the permission and command subscriptions. */
   async start() {
     await this.refreshSettings(true);
+    const permPattern = channels.permPattern();
+    const cmdPattern = channels.cmdPattern();
     this.deps.subscriber.on("pmessage", (pattern: string, channel: string, message: string) => {
-      if (pattern === "perm:*") void this.applyPermission(channel.slice("perm:".length), message);
-      else if (pattern === "cmd:*") void this.handleCommand(channel.slice("cmd:".length), message);
+      if (pattern === permPattern)
+        void this.applyPermission(channel.slice(permPattern.length - 1), message);
+      else if (pattern === cmdPattern)
+        void this.handleCommand(channel.slice(cmdPattern.length - 1), message);
     });
-    await this.deps.subscriber.psubscribe("perm:*", "cmd:*");
+    await this.deps.subscriber.psubscribe(permPattern, cmdPattern);
     this.timers.push(
       setInterval(() => this.flushTick(), this.timings.flushIntervalMs),
       setInterval(() => void this.lockTick(), this.timings.lockRenewMs),
@@ -248,7 +252,9 @@ export class Collab implements Extension<CollabContext> {
   async onDestroy() {
     for (const timer of this.timers) clearInterval(timer);
     this.timers = [];
-    await this.deps.subscriber.punsubscribe("perm:*", "cmd:*").catch(() => {});
+    await this.deps.subscriber
+      .punsubscribe(channels.permPattern(), channels.cmdPattern())
+      .catch(() => {});
   }
 
   // auth

@@ -322,11 +322,11 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   const collab: FakeCollab = { commands: [], reply: () => ({ ok: true }) };
   const commandListener = new Redis(VALKEY_URL);
   if ((options.collab ?? "fake") === "fake") {
-    await commandListener.psubscribe("cmd:*");
+    await commandListener.psubscribe(channels.cmdPattern());
     commandListener.on("pmessage", (_pattern, channel, raw) => {
       // Pub/sub is shared across databases: only answer for shares this harness stores.
       void (async () => {
-        const shareId = channel.slice("cmd:".length);
+        const shareId = channel.slice(channels.cmdPattern().length - 1);
         if (!(await stores.shares.get(shareId))) return;
         const command = collabCommandSchema.parse(JSON.parse(raw));
         collab.commands.push(command);
