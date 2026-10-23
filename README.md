@@ -57,9 +57,9 @@
 | 동기화 | Yjs(CRDT) + Hocuspocus 서버 | 끊긴 뒤 병합, 커서 상태(awareness) 기본 제공, 검증된 CodeMirror 바인딩 |
 | 확장 | Hocuspocus Redis 확장 | 여러 서버 인스턴스 간 문서 동기화 |
 | API 서버 | Fastify | 빠르고 스키마 기반 검증 |
-| DB | PostgreSQL 17 + Drizzle ORM | 공유 메타데이터, 이력 스냅샷 |
-| 캐시/메시징 | Redis(Valkey) | pub/sub, 접속자 목록, 근처 공유, 속도 제한 |
-| 파일 저장 | S3 호환(MinIO) | 업로드·내보내기 |
+| DB | MongoDB 8 (공식 드라이버 + zod 검증) | TTL 인덱스로 24시간 만료 자동 처리, Yjs 상태·편집 기록 저장. MySQL 8로 교체 가능 |
+| 캐시/메시징 | Redis 7(Valkey 호환) | 인스턴스 간 실시간 전파, 접속자·근처 공유, 참여 코드 발급, 권한 캐시, 속도 제한 |
+| 파일 저장 | MongoDB GridFS | 업로드·내보내기, 별도 저장소 서비스 없음 |
 | UI | Tailwind CSS v4 + Radix UI 기반 자체 컴포넌트 | 접근성 기본기, 디자인 토큰 일관성 |
 | 다국어 | 한국어·영어 메시지 파일 2개 | 지원 언어를 둘로 고정 |
 | 글꼴 | Pretendard(본문), JetBrains Mono 또는 Geist Mono(코드), 자체 호스팅 | 한글 가독성, 외부 CDN 금지 |
