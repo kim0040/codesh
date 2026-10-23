@@ -16,6 +16,8 @@ export const keys = {
 
 export const channels = {
   perm: (shareId: string) => `perm:${shareId}` as const,
+  cmd: (shareId: string) => `cmd:${shareId}` as const,
+  cmdReply: (requestId: string) => `cmd-reply:${requestId}` as const,
   user: (clientId: string) => `user:${clientId}` as const,
   net: (net: string) => `net:${net}` as const,
 } as const;

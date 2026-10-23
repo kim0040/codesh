@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { roleSchema } from "./http.js";
+import { languageSchema, roleSchema, titleSchema } from "./http.js";
+import { fileIdSchema } from "./ids.js";
 
 /** Messages between apps/collab and the editor beyond the Yjs protocol (§6.7, §6.8). */
 
@@ -35,3 +36,56 @@ export const collabStatelessSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("too_large"), maxDocBytes: z.number().int().positive() }),
 ]);
 export type CollabStateless = z.infer<typeof collabStatelessSchema>;
+
+/** `error` of a failed command reply on `cmd-reply:<requestId>` (§6.11). */
+export const COLLAB_COMMAND_ERRORS = {
+  /** The message did not match `collabCommandSchema`, or `state` is not a Yjs update. */
+  invalid: "invalid",
+  /** The share does not exist or is being deleted. */
+  notFound: "not_found",
+  /** No history snapshot with the requested `seq`. */
+  snapshotNotFound: "snapshot_not_found",
+  /** `meta` with a `fileId` that is not in Y.Map `files`. */
+  fileNotFound: "file_not_found",
+  /** The resulting document would exceed `settings.maxDocBytes`. */
+  tooLarge: "too_large",
+  failed: "failed",
+} as const;
+export type CollabCommandError = (typeof COLLAB_COMMAND_ERRORS)[keyof typeof COLLAB_COMMAND_ERRORS];
+
+export const collabCommandRequestIdSchema = z.string().min(1).max(128);
+
+/**
+ * Message on the Valkey channel `cmd:<shareId>`: how other services change document content
+ * (§6.11). `restore` brings back history snapshot `seq`; `replace` makes the document equal to a
+ * full Y state (`Y.encodeStateAsUpdate`, base64); `meta` sets the title and the default language,
+ * or with `fileId` that file's language. All are applied as a normal edit, so connected clients
+ * see the change and history keeps growing.
+ */
+export const collabCommandSchema = z.discriminatedUnion("kind", [
+  z.object({
+    requestId: collabCommandRequestIdSchema,
+    kind: z.literal("restore"),
+    seq: z.number().int().nonnegative(),
+  }),
+  z.object({
+    requestId: collabCommandRequestIdSchema,
+    kind: z.literal("replace"),
+    state: z.base64(),
+  }),
+  z.object({
+    requestId: collabCommandRequestIdSchema,
+    kind: z.literal("meta"),
+    title: titleSchema.optional(),
+    language: languageSchema.optional(),
+    fileId: fileIdSchema.optional(),
+  }),
+]);
+export type CollabCommand = z.infer<typeof collabCommandSchema>;
+
+/** Reply on `cmd-reply:<requestId>`, sent within `COLLAB_COMMAND_TIMEOUT_MS`. */
+export const collabCommandReplySchema = z.object({
+  ok: z.boolean(),
+  error: z.enum(COLLAB_COMMAND_ERRORS).optional(),
+});
+export type CollabCommandReply = z.infer<typeof collabCommandReplySchema>;
