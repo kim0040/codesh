@@ -10,33 +10,83 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as IdRouteImport } from './routes/$id'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as MeRouteImport } from './routes/me'
+import { Route as NewRouteImport } from './routes/new'
+import { Route as LabIdRouteImport } from './routes/lab.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IdRoute = IdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MeRoute = MeRouteImport.update({
+  id: '/me',
+  path: '/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NewRoute = NewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LabIdRoute = LabIdRouteImport.update({
+  id: '/lab/$id',
+  path: '/lab/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/$id': typeof IdRoute
+  '/admin': typeof AdminRoute
+  '/me': typeof MeRoute
+  '/new': typeof NewRoute
+  '/lab/$id': typeof LabIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/$id': typeof IdRoute
+  '/admin': typeof AdminRoute
+  '/me': typeof MeRoute
+  '/new': typeof NewRoute
+  '/lab/$id': typeof LabIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/$id': typeof IdRoute
+  '/admin': typeof AdminRoute
+  '/me': typeof MeRoute
+  '/new': typeof NewRoute
+  '/lab/$id': typeof LabIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/$id' | '/admin' | '/me' | '/new' | '/lab/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/$id' | '/admin' | '/me' | '/new' | '/lab/$id'
+  id: '__root__' | '/' | '/$id' | '/admin' | '/me' | '/new' | '/lab/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  IdRoute: typeof IdRoute
+  AdminRoute: typeof AdminRoute
+  MeRoute: typeof MeRoute
+  NewRoute: typeof NewRoute
+  LabIdRoute: typeof LabIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +98,51 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$id': {
+      id: '/$id'
+      path: '/$id'
+      fullPath: '/$id'
+      preLoaderRoute: typeof IdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/me': {
+      id: '/me'
+      path: '/me'
+      fullPath: '/me'
+      preLoaderRoute: typeof MeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/new': {
+      id: '/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof NewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lab/$id': {
+      id: '/lab/$id'
+      path: '/lab/$id'
+      fullPath: '/lab/$id'
+      preLoaderRoute: typeof LabIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  IdRoute: IdRoute,
+  AdminRoute: AdminRoute,
+  MeRoute: MeRoute,
+  NewRoute: NewRoute,
+  LabIdRoute: LabIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
