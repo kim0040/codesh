@@ -1,7 +1,7 @@
 import type { LabRecord, ShareRecord } from "@codesh/shared";
 import { defaultSettings } from "@codesh/shared";
 import { describe, expect, it } from "vitest";
-import { DuplicateSeqError, type Stores } from "./types.js";
+import { DuplicateSeqError, FileTooLargeError, type Stores } from "./types.js";
 
 /** Behaviour every `Stores` implementation must have. `open` returns empty stores. */
 
@@ -288,6 +288,54 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
         expect(found?.data).toEqual(new Uint8Array([1, 2, 3]));
         expect(found?.meta).toEqual(meta);
         expect(await files.get("missing")).toBeNull();
+      });
+
+      it("reads metadata without the content, and streams the content out", async () => {
+        const { files } = await open();
+        const stored = await files.put(upload({ shareId: "abcd1234" }));
+        expect(await files.meta(stored.id)).toEqual(stored);
+        expect(await files.meta("missing")).toBeNull();
+
+        const opened = await files.openDownload(stored.id);
+        expect(opened?.meta).toEqual(stored);
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of opened?.stream ?? []) chunks.push(chunk as Uint8Array);
+        expect(Buffer.concat(chunks)).toEqual(Buffer.from([1, 2, 3]));
+        expect(await files.openDownload("missing")).toBeNull();
+      });
+
+      it("stores a stream, enforces the size limit and leaves nothing behind", async () => {
+        const { files } = await open();
+        async function* chunks(count: number, size: number) {
+          for (let i = 0; i < count; i++) yield new Uint8Array(size).fill(i + 1);
+        }
+        const { data: _data, ...fields } = upload({ shareId: "abcd1234" });
+        const meta = await files.putStream({ ...fields, stream: chunks(3, 4) }, 12);
+        expect(meta).toMatchObject({ name: "a.txt", size: 12, shareId: "abcd1234" });
+        expect(await files.meta(meta.id)).toEqual(meta);
+        const found = await files.get(meta.id);
+        expect(Array.from(found?.data ?? [])).toEqual([
+          ...Array(4).fill(1),
+          ...Array(4).fill(2),
+          ...Array(4).fill(3),
+        ]);
+
+        await expect(
+          files.putStream({ ...fields, shareId: "toolarge", stream: chunks(3, 5) }, 12),
+        ).rejects.toBeInstanceOf(FileTooLargeError);
+        await expect(
+          files.putStream({
+            ...fields,
+            shareId: "broken01",
+            stream: (async function* () {
+              yield new Uint8Array(3);
+              throw new Error("connection lost");
+            })(),
+          }),
+        ).rejects.toThrow("connection lost");
+        expect(await files.shareIds()).toEqual(["abcd1234"]);
+        expect(await files.deleteForShare("toolarge")).toBe(0);
+        expect(await files.deleteForShare("broken01")).toBe(0);
       });
 
       it("deletes by id, share and expiry", async () => {

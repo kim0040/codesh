@@ -1,3 +1,4 @@
+import type { Readable } from "node:stream";
 import type {
   Access,
   AuditRecord,
@@ -115,10 +116,32 @@ export interface SnapshotStore {
 
 export type NewUpload = Omit<UploadRecord, "id" | "size"> & { data: Uint8Array };
 
+/** Same as `NewUpload`, with the content as a stream so large files never sit in memory. */
+export type NewUploadStream = Omit<UploadRecord, "id" | "size"> & {
+  stream: AsyncIterable<Uint8Array>;
+};
+
+/** `FileStore.putStream` stopped because the content grew past `maxBytes`; nothing was stored. */
+export class FileTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`file is larger than ${maxBytes} bytes`);
+    this.name = "FileTooLargeError";
+  }
+}
+
 /** GridFS bucket `uploads`. */
 export interface FileStore {
   put(upload: NewUpload): Promise<UploadRecord>;
+  /**
+   * Stores `upload.stream` chunk by chunk. Throws `FileTooLargeError` as soon as more than
+   * `maxBytes` arrived and leaves nothing behind (also when the stream itself fails).
+   */
+  putStream(upload: NewUploadStream, maxBytes?: number): Promise<UploadRecord>;
   get(id: string): Promise<{ meta: UploadRecord; data: Uint8Array } | null>;
+  /** Metadata only: no content is read. */
+  meta(id: string): Promise<UploadRecord | null>;
+  /** The content as a stream, for downloads that must not load the file into memory. */
+  openDownload(id: string): Promise<{ meta: UploadRecord; stream: Readable } | null>;
   delete(id: string): Promise<boolean>;
   deleteForShare(shareId: string): Promise<number>;
   /** Deletes uploads whose `expiresAt` is before `now` and returns how many were removed. */

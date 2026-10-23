@@ -197,6 +197,72 @@ describe.skipIf(!integration)("POST /api/uploads and GET /api/uploads/:uploadId"
     }
   });
 
+  it("streams uploads and downloads and reads only metadata where it can", async () => {
+    const me = net.client();
+    const files = h.stores.files;
+    const originalGet = files.get;
+    const originalStream = files.putStream;
+    let streamed = 0;
+    // `get` loads the whole file: it is what held 200 MB in memory and must not be used any more.
+    files.get = async () => {
+      throw new Error("get loads the whole file");
+    };
+    files.putStream = (...args) => {
+      streamed++;
+      return originalStream.apply(files, args);
+    };
+    try {
+      const [file] = (await upload(me, [{ name: "kept.bin", data: png }])).json<Uploaded[]>();
+      const url = `/api/uploads/${file?.uploadId}`;
+      const download = await me.get(url);
+      expect(download.statusCode).toBe(200);
+      expect(Array.from(download.rawPayload)).toEqual(Array.from(png));
+      expect(download.headers["content-length"]).toBe(String(png.byteLength));
+
+      // Valkey lost the metadata: it comes back from a metadata-only lookup.
+      await h.valkey.del(`upload:meta:${file?.uploadId}`);
+      expect((await me.get(url)).statusCode).toBe(200);
+      expect(await h.valkey.hget(`upload:meta:${file?.uploadId}`, "size")).toBe(
+        String(png.byteLength),
+      );
+      expect(streamed).toBe(1);
+    } finally {
+      files.get = originalGet;
+      files.putStream = originalStream;
+    }
+  });
+
+  it("removes the files of a request that fails halfway", async () => {
+    const small = await createHarness();
+    try {
+      await small.stores.settings.put({
+        ...(await small.stores.settings.get()),
+        maxUploadMB: 0.001,
+      });
+      const ids: string[] = [];
+      const files = small.stores.files;
+      const original = files.putStream.bind(files);
+      files.putStream = async (...args) => {
+        const meta = await original(...args);
+        ids.push(meta.id);
+        return meta;
+      };
+      const me = small.client();
+      const big = new Uint8Array(2000).fill(65);
+      const response = await me.multipart("/api/uploads", [
+        { name: "a.bin", data: big.slice(0, 600) },
+        { name: "b.bin", data: big.slice(0, 600) },
+      ]);
+      expect(response.statusCode).toBe(413);
+      expect(ids).toHaveLength(1);
+      expect(await files.meta(ids[0] as string)).toBeNull();
+      expect(await small.valkey.exists(`upload:meta:${ids[0]}`)).toBe(0);
+      expect(await small.valkey.zcard("uploads:index")).toBe(0);
+    } finally {
+      await small.close();
+    }
+  });
+
   it("answers 400 for a request that is not multipart or holds no file", async () => {
     const me = net.client();
     const notMultipart = await me.post("/api/uploads", { hello: "world" });
@@ -325,5 +391,111 @@ describe.skipIf(!integration)("POST /api/uploads?asShare=1", () => {
     } finally {
       await small.close();
     }
+  });
+
+  it("keeps the unpacked text of a zip within what a share holds", async () => {
+    const tight = await createHarness();
+    try {
+      await tight.stores.settings.put({
+        ...(await tight.stores.settings.get()),
+        maxDocBytes: 1000,
+      });
+      const me = tight.client();
+      const text = "x".repeat(400);
+      const fits = zipSync({ "a.txt": strToU8(text), "b.txt": strToU8(text) });
+      expect((await asShare(me, [{ name: "ok.zip", data: fits }])).statusCode).toBe(200);
+
+      const over = zipSync({
+        "a.txt": strToU8(text),
+        "b.txt": strToU8(text),
+        "c.txt": strToU8(text),
+      });
+      const refused = await asShare(me, [{ name: "over.zip", data: over }]);
+      expect(refused.statusCode).toBe(413);
+      expect(errorCode(refused)).toBe("too_large");
+
+      // Several files in one request add up as well.
+      const together = await asShare(me, [
+        { name: "a.txt", data: text },
+        { name: "b.txt", data: text },
+        { name: "c.txt", data: text },
+      ]);
+      expect(together.statusCode).toBe(413);
+
+      // One text file above the limit is refused, a binary one of that size is just skipped.
+      const longText = await asShare(me, [{ name: "long.txt", data: "y".repeat(5000) }]);
+      expect(longText.statusCode).toBe(413);
+      const binary = new Uint8Array(5000);
+      binary[10] = 1;
+      const skipped = await asShare(me, [
+        { name: "big.bin", data: binary },
+        { name: "small.txt", data: "hi\n" },
+      ]);
+      expect(skipped.statusCode).toBe(200);
+      const { id } = skipped.json<Created>();
+      expect(readContent(await storedDoc(tight.stores, id)).files.map((f) => f.path)).toEqual([
+        "small.txt",
+      ]);
+    } finally {
+      await tight.close();
+    }
+  });
+
+  it("skips big binary entries of a zip by their declared size, without unpacking them", async () => {
+    const small = await createHarness();
+    try {
+      await small.stores.settings.put({ ...(await small.stores.settings.get()), maxUploadMB: 1 });
+      const me = small.client();
+      // 20 MB of zeros pack to a few KB, and unpacked they would be far over the 1 MB budget.
+      const zip = zipSync({
+        "app/movie.bin": new Uint8Array(20 * 1024 * 1024),
+        "app/main.py": strToU8("print(1)\n"),
+      });
+      expect(zip.byteLength).toBeLessThan(100 * 1024);
+      const response = await asShare(me, [{ name: "app.zip", data: zip }]);
+      expect(response.statusCode).toBe(200);
+      const { id } = response.json<Created>();
+      expect(readContent(await storedDoc(small.stores, id)).files.map((f) => f.path)).toEqual([
+        "app/main.py",
+      ]);
+    } finally {
+      await small.close();
+    }
+  });
+
+  it("reads zips bigger than one read, stored or deflated, and refuses a cut-off one", async () => {
+    const me = h.client();
+    let seed = 7;
+    const noise = (length: number) =>
+      Array.from({ length }, () => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return String.fromCharCode(97 + (seed % 26));
+      }).join("");
+    const tree = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`src/f${i}.txt`, strToU8(`${i}\n${noise(6000)}\n`)]),
+    );
+    for (const level of [0, 6] as const) {
+      const zip = zipSync(tree, { level });
+      expect(zip.byteLength).toBeGreaterThan(64 * 1024);
+      const { id } = (await asShare(me, [{ name: "big.zip", data: zip }])).json<Created>();
+      const files = readContent(await storedDoc(h.stores, id)).files;
+      expect(files).toHaveLength(40);
+      expect(files.find((f) => f.path === "src/f7.txt")?.content).toBe(
+        new TextDecoder().decode(tree["src/f7.txt"]),
+      );
+    }
+    const cut = zipSync(tree, { level: 0 }).slice(0, 100_000);
+    const truncated = await asShare(me, [{ name: "cut.zip", data: cut }]);
+    expect(truncated.statusCode).toBe(400);
+    expect(errorCode(truncated)).toBe("validation");
+  });
+
+  it("trims the file name and cuts it to the title limit", async () => {
+    const me = h.client();
+    const long = await asShare(me, [{ name: `${"a".repeat(250)}.md`, data: "# x\n" }]);
+    const title = (await h.stores.shares.get(long.json<Created>().id))?.title ?? "";
+    expect(title).toBe("a".repeat(200));
+    const spaced = await asShare(me, [{ name: "  notes.md  ", data: "# x\n" }]);
+    expect((await h.stores.shares.get(spaced.json<Created>().id))?.title).toBe("notes.md");
   });
 });

@@ -26,7 +26,12 @@ describe.skipIf(!integration)("cross-site request guard", () => {
       ["PATCH", `/api/shares/${id}`],
       ["DELETE", `/api/shares/${id}`],
     ] as const) {
-      for (const headers of [{}, { origin: "https://evil.example" }, { origin: "null" }]) {
+      const foreign: Record<string, string>[] = [
+        {},
+        { origin: "https://evil.example" },
+        { origin: "null" },
+      ];
+      for (const headers of foreign) {
         const response = await client.request(method, url, { body: {}, ...bare(headers) });
         expect(response.statusCode, `${method} ${url} ${JSON.stringify(headers)}`).toBe(403);
         expect(errorCode(response)).toBe("forbidden");

@@ -1,3 +1,5 @@
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
   type AuditRecord,
   defaultSettings,
@@ -25,9 +27,11 @@ import {
   type AuditStore,
   DuplicateSeqError,
   type FileStore,
+  FileTooLargeError,
   type LabStore,
   type LabUpdate,
   type NewUpload,
+  type NewUploadStream,
   type SettingsStore,
   type ShareStore,
   type ShareUpdate,
@@ -341,6 +345,48 @@ class MongoFileStore implements FileStore {
       stream.end(data);
     });
     return this.toRecord(stream.id as ObjectId, name, data.byteLength, metadata);
+  }
+
+  async putStream(upload: NewUploadStream, maxBytes?: number) {
+    const { stream, name, ...rest } = upload;
+    const metadata: UploadMetadata = defined({
+      ownerId: rest.ownerId,
+      shareId: rest.shareId,
+      expiresAt: rest.expiresAt,
+      contentType: rest.contentType,
+    });
+    const target = this.bucket.openUploadStream(name, { metadata });
+    let size = 0;
+    const limit = new Transform({
+      transform(chunk: Uint8Array, _encoding, done) {
+        size += chunk.byteLength;
+        if (maxBytes !== undefined && size > maxBytes) done(new FileTooLargeError(maxBytes));
+        else done(null, chunk);
+      },
+    });
+    try {
+      await pipeline(stream, limit, target);
+    } catch (error) {
+      // Drops the chunks written so far; the file document is only written when the stream ends.
+      await target.abort().catch(() => undefined);
+      throw error;
+    }
+    return this.toRecord(target.id as ObjectId, name, size, metadata);
+  }
+
+  async meta(id: string) {
+    const _id = this.parseId(id);
+    if (!_id) return null;
+    const file = await this.bucket.find({ _id }).next();
+    if (!file) return null;
+    return this.toRecord(_id, file.filename, file.length, file.metadata as UploadMetadata);
+  }
+
+  async openDownload(id: string) {
+    const _id = this.parseId(id);
+    const meta = _id ? await this.meta(id) : null;
+    if (!_id || !meta) return null;
+    return { meta, stream: this.bucket.openDownloadStream(_id) };
   }
 
   async get(id: string) {

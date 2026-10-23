@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import {
   type AuditRecord,
   defaultSettings,
@@ -14,9 +15,11 @@ import {
   type AuditStore,
   DuplicateSeqError,
   type FileStore,
+  FileTooLargeError,
   type LabStore,
   type LabUpdate,
   type NewUpload,
+  type NewUploadStream,
   type SettingsStore,
   type ShareStore,
   type ShareUpdate,
@@ -238,9 +241,38 @@ class MemoryFileStore implements FileStore {
     return copy(meta);
   }
 
+  async putStream(upload: NewUploadStream, maxBytes?: number) {
+    const { stream, ...rest } = upload;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for await (const chunk of stream) {
+      size += chunk.byteLength;
+      if (maxBytes !== undefined && size > maxBytes) throw new FileTooLargeError(maxBytes);
+      chunks.push(chunk.slice());
+    }
+    const data = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      data.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return this.put({ ...rest, data });
+  }
+
   async get(id: string) {
     const file = this.files.get(id);
     return file ? { meta: copy(file.meta), data: file.data.slice() } : null;
+  }
+
+  async meta(id: string) {
+    const file = this.files.get(id);
+    return file ? copy(file.meta) : null;
+  }
+
+  async openDownload(id: string) {
+    const file = this.files.get(id);
+    if (!file) return null;
+    return { meta: copy(file.meta), stream: Readable.from([Buffer.from(file.data)]) };
   }
 
   async delete(id: string) {

@@ -63,4 +63,31 @@ describe.runIf(available)("MongoDB stores", () => {
     expect(found?.data).toEqual(data);
     expect(found?.meta).toEqual(meta);
   });
+
+  it("streams a large upload in and out, and drops the chunks of one that is too large", async () => {
+    const stores = await database.reset();
+    const chunk = new Uint8Array(100 * 1024).fill(7);
+    const chunks = async function* (count: number) {
+      for (let i = 0; i < count; i++) yield chunk;
+    };
+    const fields = {
+      name: "stream.bin",
+      contentType: null,
+      ownerId: "11111111-1111-4111-8111-111111111111",
+      expiresAt: new Date(Date.now() + 60_000),
+    };
+    const meta = await stores.files.putStream({ ...fields, stream: chunks(6) });
+    expect(meta.size).toBe(6 * chunk.byteLength);
+    const opened = await stores.files.openDownload(meta.id);
+    let received = 0;
+    for await (const part of opened?.stream ?? []) received += (part as Uint8Array).byteLength;
+    expect(received).toBe(meta.size);
+
+    const before = await database.db.collection("uploads.chunks").countDocuments();
+    await expect(
+      stores.files.putStream({ ...fields, stream: chunks(6) }, 3 * chunk.byteLength),
+    ).rejects.toThrow(/larger than/);
+    expect(await database.db.collection("uploads.chunks").countDocuments()).toBe(before);
+    expect(await database.db.collection("uploads.files").countDocuments()).toBe(1);
+  });
 });
