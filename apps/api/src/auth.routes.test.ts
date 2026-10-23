@@ -7,7 +7,7 @@ import {
   type VerifiedIdentity,
 } from "./auth/adapters.js";
 import { ldapAdapter } from "./auth/real.js";
-import { createHarness, type Harness, integration } from "./testing/harness.js";
+import { createHarness, createShare, type Harness, integration } from "./testing/harness.js";
 
 const errorCode = (response: { json: <T>() => T }) =>
   response.json<{ error: { code: string } }>().error.code;
@@ -126,14 +126,18 @@ describe.skipIf(!integration)("optional login", () => {
       await enable({ auth: { oidc: null, ldap: ldapSettings } });
       ldapCalls = [];
       const client = h.client();
-      const clientId = await client.clientId();
+      const guestId = await client.clientId();
       const response = await client.post("/api/auth/ldap/login", {
         username: "alice",
         password: "right",
       });
       expect(response.statusCode).toBe(200);
+      // The login starts a new session; the cookie now carries the id the identity is bound to.
+      const { clientId } = response.json<{ clientId: string }>();
+      expect(clientId).not.toBe(guestId);
+      expect(await client.clientId()).toBe(clientId);
+      expect(await h.valkey.exists(`identity:${guestId}`)).toBe(0);
       expect(response.json()).toMatchObject({
-        clientId,
         name: "Alice Kim",
         identity: { provider: "ldap", name: "Alice Kim", email: "alice@corp.local" },
       });
@@ -156,6 +160,42 @@ describe.skipIf(!integration)("optional login", () => {
       expect((await client.get("/api/session")).json()).toMatchObject({
         name: "Alice Kim",
         identity: { provider: "ldap", email: "alice@corp.local" },
+      });
+    });
+
+    it("starts a new session on login and on logout, so shares and history stay behind", async () => {
+      await enable({ auth: { oidc: null, ldap: ldapSettings } });
+      const client = h.client();
+      const first = await client.clientId();
+      const { id } = await createShare(client, { title: "Before login" });
+      expect((await client.get(`/api/shares/${id}`)).json<{ role: string }>().role).toBe("owner");
+
+      await client.post("/api/auth/ldap/login", { username: "alice", password: "right" });
+      const loggedIn = await client.clientId();
+      expect(loggedIn).not.toBe(first);
+
+      const logout = await client.post("/api/auth/logout");
+      expect(logout.json()).toEqual({ ok: true });
+      expect(logout.cookies.map((c) => c.name)).toContain("codesh_sid");
+      const next = await client.clientId();
+      expect(next).not.toBe(loggedIn);
+      expect(next).not.toBe(first);
+      expect(await h.valkey.exists(`identity:${loggedIn}`)).toBe(0);
+      // The next person on this browser owns nothing of the previous users.
+      expect((await client.get("/api/session")).json<{ identity: unknown }>().identity).toBeNull();
+      expect((await client.get("/api/shares")).json()).toEqual([]);
+    });
+
+    it("carries the chosen name over to the new session and leaves other profile data alone", async () => {
+      await enable({ auth: { oidc: null, ldap: ldapSettings } });
+      const client = await h.client().named("Ally");
+      const first = await client.clientId();
+      await client.patch("/api/session", { color: "#102030" });
+      await client.post("/api/auth/ldap/login", { username: "alice", password: "right" });
+      expect(await client.clientId()).not.toBe(first);
+      expect((await client.get("/api/session")).json()).toMatchObject({
+        name: "Ally",
+        color: "#102030",
       });
     });
 
@@ -272,12 +312,14 @@ describe.skipIf(!integration)("optional login", () => {
       await enable({ auth: { oidc: oidcSettings, ldap: null } });
       exchangeCalls = [];
       const client = h.client();
-      const clientId = await client.clientId();
+      const guestId = await client.clientId();
       const { state } = await start(client);
       const callback = await client.get(
         `/api/auth/oidc/callback?state=${state}&code=abc&iss=https%3A%2F%2Fidp.corp`,
       );
       expect(callback.statusCode).toBe(302);
+      const clientId = await client.clientId();
+      expect(clientId).not.toBe(guestId);
       expect(callback.headers.location).toBe("https://codesh.corp/");
       expect(exchangeCalls).toHaveLength(1);
       const call = exchangeCalls[0] as (typeof exchangeCalls)[number];

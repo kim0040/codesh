@@ -66,6 +66,20 @@ export function clientIp(ctx: Ctx, request: FastifyRequest): string {
   );
 }
 
+/** Starts a session for the browser: a new client id in the signed `codesh_sid` cookie. */
+export function issueSession(ctx: Ctx, reply: FastifyReply): string {
+  const clientId = generateClientId();
+  reply.setCookie(SESSION_COOKIE, clientId, {
+    signed: true,
+    httpOnly: true,
+    secure: ctx.config.publicUrl.startsWith("https://"),
+    sameSite: "lax",
+    path: "/",
+    maxAge: COOKIE_MAX_AGE_SECONDS,
+  });
+  return clientId;
+}
+
 export async function loadSession(
   ctx: Ctx,
   request: FastifyRequest,
@@ -77,17 +91,7 @@ export async function loadSession(
     const unsigned = request.unsignCookie(raw);
     if (unsigned.valid && unsigned.value && isClientId(unsigned.value)) clientId = unsigned.value;
   }
-  if (!clientId) {
-    clientId = generateClientId();
-    reply.setCookie(SESSION_COOKIE, clientId, {
-      signed: true,
-      httpOnly: true,
-      secure: ctx.config.publicUrl.startsWith("https://"),
-      sameSite: "lax",
-      path: "/",
-      maxAge: COOKIE_MAX_AGE_SECONDS,
-    });
-  }
+  if (!clientId) clientId = issueSession(ctx, reply);
   const settings = await ctx.settings();
   const ip = clientIp(ctx, request);
   const { net, room } = resolveNet(ip, settings);
