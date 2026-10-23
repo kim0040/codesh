@@ -35,6 +35,7 @@ export interface HarnessOptions {
   randomCode?: () => string;
   heartbeatMs?: number;
   presenceRefreshMs?: number;
+  nearbyCacheMs?: number;
   /** Stores shared with a real collab server; defaults to in-memory stores. */
   stores?: Stores;
   /** `fake` answers `cmd:<shareId>` like collab without touching the stores; `none` stays silent. */
@@ -100,6 +101,8 @@ export class Client {
       remoteAddress: "127.0.0.1",
       headers: {
         "x-forwarded-for": this.ip,
+        // What the web app sends on every request that changes something (CSRF guard).
+        ...(method === "GET" ? {} : { "x-codesh": "1" }),
         ...(this.jar.size > 0 ? { cookie: this.cookieHeader } : {}),
         ...options.headers,
       },
@@ -314,6 +317,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     randomCode: options.randomCode,
     heartbeatMs: options.heartbeatMs,
     presenceRefreshMs: options.presenceRefreshMs,
+    nearbyCacheMs: options.nearbyCacheMs ?? 0,
     settingsCacheMs: 0,
     commandTimeoutMs: options.commandTimeoutMs,
   });

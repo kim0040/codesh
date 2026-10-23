@@ -6,11 +6,12 @@ import {
   okResponseSchema,
   sessionResponseSchema,
 } from "@codesh/shared";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ldapConfigSchema, oidcConfigSchema, type VerifiedIdentity } from "../auth/adapters.js";
 import type { Ctx } from "../ctx.js";
 import { forbidden, invalid, notFound } from "../errors.js";
-import { saveProfile } from "../session.js";
+import { issueSession, type Session, saveProfile } from "../session.js";
 import { sessionView } from "./session.js";
 import { type App, limited, OK } from "./types.js";
 
@@ -46,6 +47,28 @@ export function authRoutes(app: App, ctx: Ctx): void {
       })
       .expire(key, IDENTITY_TTL_SECONDS)
       .exec();
+  };
+
+  /**
+   * Logging in or out gives the browser a new `codesh_sid`: the next person on a shared PC does
+   * not inherit the previous user's shares, uploads and history, and a session id planted before
+   * the login (cookie tossing from a sibling host) is worthless. The display name and color move
+   * to the new session on login; shares owned by the old one stay with it.
+   */
+  const startSession = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    identity: VerifiedIdentity,
+  ): Promise<Session> => {
+    const previous = request.session;
+    const clientId = issueSession(ctx, reply);
+    const profile = await ctx.valkey.hgetall(apiKeys.profile(previous.clientId));
+    if (Object.keys(profile).length > 0) {
+      await saveProfile(ctx, clientId, profile);
+    }
+    await ctx.valkey.del(apiKeys.identity(previous.clientId));
+    await bind(clientId, identity);
+    return { ...previous, clientId };
   };
 
   app.get(
@@ -115,9 +138,9 @@ export function authRoutes(app: App, ctx: Ctx): void {
         request.log.warn({ err: error }, "oidc exchange failed");
         throw forbidden("Login failed");
       }
-      await bind(request.session.clientId, identity);
-      if (!request.session.name && identity.name) {
-        await saveProfile(ctx, request.session.clientId, { name: identity.name.slice(0, 40) });
+      const session = await startSession(request, reply, identity);
+      if (!session.name && identity.name) {
+        await saveProfile(ctx, session.clientId, { name: identity.name.slice(0, 40) });
       }
       await ctx.audit(request, "auth.oidc", undefined, { subject: identity.subject });
       return reply.redirect(ctx.config.publicUrl ? `${ctx.config.publicUrl}/` : "/");
@@ -130,7 +153,7 @@ export function authRoutes(app: App, ctx: Ctx): void {
       preHandler: login,
       schema: { body: ldapLoginBodySchema, response: { 200: sessionResponseSchema } },
     },
-    async (request) => {
+    async (request, reply) => {
       const raw = (await ctx.settings()).auth.ldap;
       if (raw === null || !ctx.ldap) throw notFound("LDAP login is not enabled");
       const config = ldapConfigSchema.safeParse(raw);
@@ -147,8 +170,7 @@ export function authRoutes(app: App, ctx: Ctx): void {
         throw forbidden("The directory is not reachable");
       }
       if (!identity) throw forbidden("Wrong username or password");
-      const { session } = request;
-      await bind(session.clientId, identity);
+      const session = await startSession(request, reply, identity);
       let name = session.name;
       if (!name && identity.name) {
         name = identity.name.slice(0, 40);
@@ -171,8 +193,9 @@ export function authRoutes(app: App, ctx: Ctx): void {
   app.post(
     "/api/auth/logout",
     { schema: { response: { 200: okResponseSchema } } },
-    async (request) => {
+    async (request, reply) => {
       await ctx.valkey.del(apiKeys.identity(request.session.clientId));
+      issueSession(ctx, reply);
       return OK;
     },
   );

@@ -1,4 +1,5 @@
 import {
+  type Access,
   apiKeys,
   createShareBodySchema,
   createShareResponseSchema,
@@ -17,6 +18,7 @@ import {
 } from "@codesh/shared";
 import type { ShareUpdate } from "@codesh/storage";
 import { strToU8, zipSync } from "fflate";
+import type { z } from "zod";
 import {
   accessOf,
   checkPin,
@@ -32,7 +34,7 @@ import {
 import { hashPin, randomKey, safeEqual } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
 import { loadDoc, readContent, sendCommand, sharePreview } from "../docs.js";
-import { forbidden, invalid, notFound } from "../errors.js";
+import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { attachment, basename, sanitizePath } from "../files.js";
 import { announceShare, removeNearby } from "../presence.js";
 import { displayName } from "../session.js";
@@ -46,6 +48,13 @@ const LIST_LIMIT = 100;
  * decides what is too large.
  */
 const CREATE_BODY_LIMIT = 32 * 1024 * 1024;
+
+/** The PATCH body for the audit log: the PIN itself is never stored, only whether one was set. */
+function auditDetail(body: z.infer<typeof patchShareBodySchema>) {
+  if (!body.access) return body;
+  const { pin, ...access } = body.access;
+  return { ...body, access: { ...access, ...(pin === undefined ? {} : { hasPin: pin !== null }) } };
+}
 
 export function shareRoutes(app: App, ctx: Ctx): void {
   const create = limited(ctx, "create", ctx.config.rateLimit.createPerMinute);
@@ -83,25 +92,38 @@ export function shareRoutes(app: App, ctx: Ctx): void {
     "/api/shares",
     { schema: { response: { 200: listSharesResponseSchema } } },
     async (request) => {
-      const { clientId } = request.session;
+      const { session } = request;
+      const { clientId } = session;
       const now = Date.now();
       const shares = (await ctx.stores.shares.listForClient(clientId))
         .filter((share) => !share.expiresAt || share.expiresAt.getTime() > now)
         .slice(0, LIST_LIMIT);
-      return mapLimit(
-        shares,
-        8,
-        async (share): Promise<ShareListItem> => ({
+      const items = await mapLimit(shares, 8, async (share): Promise<ShareListItem | null> => {
+        const owner = share.ownerId === clientId;
+        // A saved entry must not outlive the access: banned clients lose the share from the list,
+        // and clients who now need a PIN or approval see neither title nor code until admitted.
+        let hidden = false;
+        if (!owner) {
+          try {
+            const access = await accessOf(ctx, share, session);
+            hidden = access.needsPin || access.needsApproval;
+          } catch (error) {
+            if (error instanceof ApiError && error.code === "banned") return null;
+            throw error;
+          }
+        }
+        return {
           id: share.id,
-          title: share.title,
-          language: share.language,
-          role: share.ownerId === clientId ? "owner" : share.access.default,
+          title: hidden ? "" : share.title,
+          language: hidden ? "" : share.language,
+          role: owner ? "owner" : share.access.default,
           saved: share.savedBy.includes(clientId),
           updatedAt: share.updatedAt.toISOString(),
           expiresAt: share.expiresAt ? share.expiresAt.toISOString() : null,
-          preview: await sharePreview(ctx, share.id).catch(() => ""),
-        }),
-      );
+          preview: hidden ? "" : await sharePreview(ctx, share).catch(() => ""),
+        };
+      });
+      return items.filter((item) => item !== null);
     },
   );
 
@@ -185,8 +207,10 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       let clearGrants = false;
       if (body.access) {
         const wanted = body.access;
-        const next = { ...share.access };
-        if (wanted.default !== undefined && wanted.default !== next.default) {
+        // Only the fields that change are written (as dotted paths), so a concurrent PATCH of
+        // another access field, or of the same one, is not undone by this one.
+        const next: Partial<Access> = {};
+        if (wanted.default !== undefined && wanted.default !== share.access.default) {
           next.default = wanted.default;
           askRejoin = true;
         }
@@ -205,7 +229,9 @@ export function shareRoutes(app: App, ctx: Ctx): void {
           askRejoin = true;
         }
         // A nearby card shows code; a protected share must not.
-        if (next.pinHash !== null || next.requireApproval) next.nearby = false;
+        const pinHash = next.pinHash === undefined ? share.access.pinHash : next.pinHash;
+        const approval = next.requireApproval ?? share.access.requireApproval;
+        if (pinHash !== null || approval) next.nearby = false;
         patch.access = next;
       }
       if (body.locked !== undefined && body.locked !== share.locked) patch.locked = body.locked;
@@ -222,6 +248,14 @@ export function shareRoutes(app: App, ctx: Ctx): void {
 
       let updated = await ctx.stores.shares.update(share.id, patch);
       if (!updated) throw notFound("Share not found");
+      if (
+        updated.access.nearby &&
+        (updated.access.pinHash !== null || updated.access.requireApproval)
+      ) {
+        // A concurrent PATCH turned on a PIN or approval after we read the share.
+        updated =
+          (await ctx.stores.shares.update(share.id, { access: { nearby: false } })) ?? updated;
+      }
 
       if (body.saved === true) {
         updated = (await ctx.stores.shares.addSaved(share.id, session.clientId)) ?? updated;
@@ -232,15 +266,18 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       }
       if (body.saved !== undefined) await syncExpiry(ctx, updated);
 
-      if (clearGrants) await ctx.valkey.del(apiKeys.grants(share.id));
+      if (clearGrants) {
+        // A client that queued under the old PIN must enter the new one as well.
+        await ctx.valkey.del(apiKeys.grants(share.id), keys.pending(share.id));
+      }
       if (patch.locked !== undefined) await ctx.publishPerm(share.id, "lock");
       if (askRejoin) await ctx.publishPerm(share.id, "role");
       if (updated.access.nearby && !share.access.nearby) {
-        await announceShare(ctx, updated, session.net, await sharePreview(ctx, share.id));
+        await announceShare(ctx, updated, session.net, await sharePreview(ctx, updated));
       } else if (!updated.access.nearby && share.access.nearby) {
         await removeNearby(ctx, share.id);
       }
-      await ctx.audit(request, "share.update", share.id, body);
+      await ctx.audit(request, "share.update", share.id, auditDetail(body));
       return shareView(updated, session, await accessOf(ctx, updated, session));
     },
   );

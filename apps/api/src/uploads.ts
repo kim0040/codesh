@@ -11,20 +11,32 @@ export interface UploadMeta {
   expiresAt: number;
 }
 
-/** Stores a file in the FileStore and mirrors its metadata into Valkey, so checks need no file read. */
+/**
+ * Streams a file into the FileStore (at most `maxBytes`; `FileTooLargeError` otherwise) and
+ * mirrors its metadata into Valkey, so checks need no file read.
+ */
 export async function storeUpload(
   ctx: Ctx,
-  input: { name: string; contentType: string | null; ownerId: string; data: Uint8Array },
+  input: {
+    name: string;
+    contentType: string | null;
+    ownerId: string;
+    stream: AsyncIterable<Uint8Array>;
+    maxBytes: number;
+  },
 ): Promise<UploadMeta> {
   const settings = await ctx.settings();
   const expiresAt = new Date(Date.now() + settings.anonymousTtlHours * 3600 * 1000);
-  const record = await ctx.stores.files.put({
-    name: input.name,
-    contentType: input.contentType,
-    ownerId: input.ownerId,
-    expiresAt,
-    data: input.data,
-  });
+  const record = await ctx.stores.files.putStream(
+    {
+      name: input.name,
+      contentType: input.contentType,
+      ownerId: input.ownerId,
+      expiresAt,
+      stream: input.stream,
+    },
+    input.maxBytes,
+  );
   const meta: UploadMeta = {
     id: record.id,
     name: record.name,
@@ -35,6 +47,17 @@ export async function storeUpload(
   };
   await cacheUploadMeta(ctx, meta);
   return meta;
+}
+
+/** Removes a stored upload again, for a request that failed after some of its files were stored. */
+export async function discardUpload(ctx: Ctx, meta: UploadMeta): Promise<void> {
+  await ctx.stores.files.delete(meta.id).catch(() => undefined);
+  await ctx.valkey
+    .multi()
+    .del(apiKeys.uploadMeta(meta.id))
+    .zrem(apiKeys.uploadsIndex, `${meta.id}:${meta.size}`)
+    .exec()
+    .catch(() => undefined);
 }
 
 async function cacheUploadMeta(ctx: Ctx, meta: UploadMeta): Promise<void> {
@@ -66,15 +89,15 @@ export async function getUploadMeta(ctx: Ctx, id: string): Promise<UploadMeta | 
     };
   }
   // Valkey lost the entry (restart, flush); the FileStore is the source of truth.
-  const stored = await ctx.stores.files.get(id);
+  const stored = await ctx.stores.files.meta(id);
   if (!stored) return null;
   const meta: UploadMeta = {
     id,
-    name: stored.meta.name,
-    size: stored.meta.size,
-    contentType: stored.meta.contentType,
-    ownerId: stored.meta.ownerId,
-    expiresAt: stored.meta.expiresAt.getTime(),
+    name: stored.name,
+    size: stored.size,
+    contentType: stored.contentType,
+    ownerId: stored.ownerId,
+    expiresAt: stored.expiresAt.getTime(),
   };
   await cacheUploadMeta(ctx, meta);
   return meta;

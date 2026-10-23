@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import {
   type AuditRecord,
   defaultSettings,
@@ -14,9 +15,11 @@ import {
   type AuditStore,
   DuplicateSeqError,
   type FileStore,
+  FileTooLargeError,
   type LabStore,
   type LabUpdate,
   type NewUpload,
+  type NewUploadStream,
   type SettingsStore,
   type ShareStore,
   type ShareUpdate,
@@ -29,6 +32,10 @@ import {
 /** In-memory stores for tests. Values are copied on the way in and out, like a real database. */
 
 const copy = <T>(value: T): T => structuredClone(value);
+
+/** Same as MongoDB's `defined`: an `undefined` field means "leave as is". */
+const defined = <T extends object>(value: T): T =>
+  Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 
 class MemoryShareStore implements ShareStore {
   private readonly shares = new Map<string, ShareRecord>();
@@ -46,7 +53,9 @@ class MemoryShareStore implements ShareStore {
   async update(id: string, patch: ShareUpdate) {
     const share = this.shares.get(id);
     if (!share) return null;
-    Object.assign(share, copy(patch));
+    const { access, ...rest } = copy(patch);
+    Object.assign(share, defined(rest));
+    if (access) Object.assign(share.access, defined(access));
     return copy(share);
   }
 
@@ -232,9 +241,38 @@ class MemoryFileStore implements FileStore {
     return copy(meta);
   }
 
+  async putStream(upload: NewUploadStream, maxBytes?: number) {
+    const { stream, ...rest } = upload;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for await (const chunk of stream) {
+      size += chunk.byteLength;
+      if (maxBytes !== undefined && size > maxBytes) throw new FileTooLargeError(maxBytes);
+      chunks.push(chunk.slice());
+    }
+    const data = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      data.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return this.put({ ...rest, data });
+  }
+
   async get(id: string) {
     const file = this.files.get(id);
     return file ? { meta: copy(file.meta), data: file.data.slice() } : null;
+  }
+
+  async meta(id: string) {
+    const file = this.files.get(id);
+    return file ? copy(file.meta) : null;
+  }
+
+  async openDownload(id: string) {
+    const file = this.files.get(id);
+    if (!file) return null;
+    return { meta: copy(file.meta), stream: Readable.from([Buffer.from(file.data)]) };
   }
 
   async delete(id: string) {

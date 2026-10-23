@@ -103,6 +103,22 @@ describe.skipIf(!integration)("join codes", () => {
     expect(errorCode(expired)).toBe("expired");
   });
 
+  it("keeps the code of a live share when the lookup fails for another reason", async () => {
+    const { id, code } = await createShare(h.client());
+    const shares = h.stores.shares;
+    const original = shares.get.bind(shares);
+    shares.get = async () => {
+      throw new Error("mongo timeout");
+    };
+    try {
+      expect((await h.client().get(`/api/codes/${code}`)).statusCode).toBe(500);
+    } finally {
+      shares.get = original;
+    }
+    expect(await h.valkey.get(`code:${code}`)).toBe(id);
+    expect((await h.client().get(`/api/codes/${code}`)).json()).toEqual({ id });
+  });
+
   it("limits code lookups per IP so the code space cannot be scanned", async () => {
     const limited = await createHarness({
       config: {

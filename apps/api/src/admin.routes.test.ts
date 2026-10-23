@@ -66,6 +66,39 @@ describe.skipIf(!integration)("admin API", () => {
     });
   });
 
+  it("does not count requests with the right token against the login limit", async () => {
+    const strict = await createHarness({
+      config: {
+        rateLimit: {
+          apiPerMinute: 1000,
+          codePerMinute: 100,
+          createPerMinute: 100,
+          loginPerMinute: 3,
+        },
+      },
+    });
+    try {
+      const client = strict.client();
+      for (let i = 0; i < 10; i++) {
+        expect((await client.get("/api/admin/stats", bearer())).statusCode, `request ${i}`).toBe(
+          200,
+        );
+      }
+      // A console loading a few resources at once: each request reserves a slot and gives it back.
+      const parallel = await Promise.all(
+        Array.from({ length: 3 }, () => client.get("/api/admin/settings", bearer())),
+      );
+      expect(parallel.map((r) => r.statusCode)).toEqual([200, 200, 200]);
+
+      for (let i = 0; i < 3; i++)
+        expect((await client.get("/api/admin/stats", bearer("guess"))).statusCode).toBe(403);
+      // Failures used the limit up: even the right token waits.
+      expect((await client.get("/api/admin/stats", bearer())).statusCode).toBe(429);
+    } finally {
+      await strict.close();
+    }
+  });
+
   describe("settings", () => {
     it("returns the defaults first", async () => {
       const response = await h.client().get("/api/admin/settings", bearer());

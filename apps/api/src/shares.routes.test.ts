@@ -324,6 +324,49 @@ describe.skipIf(!integration)("PATCH /api/shares/:id", () => {
     expect((await h.stores.shares.get(id))?.access.pinHash).toBeNull();
   });
 
+  it("keeps both changes of concurrent access PATCHes, the slow PIN hash included", async () => {
+    const owner = h.client();
+    const { id } = await createShare(owner);
+    const before = (await h.stores.shares.get(id))?.access.editKey;
+    const [pin, approval, rotate] = await Promise.all([
+      owner.patch(`/api/shares/${id}`, { access: { pin: "482913" } }),
+      owner.patch(`/api/shares/${id}`, { access: { requireApproval: true } }),
+      owner.patch(`/api/shares/${id}`, { access: { rotateEditKey: true } }),
+    ]);
+    expect([pin.statusCode, approval.statusCode, rotate.statusCode]).toEqual([200, 200, 200]);
+    const { access } = (await h.stores.shares.get(id)) ?? {};
+    expect(access?.pinHash?.startsWith("scrypt$")).toBe(true);
+    expect(access?.requireApproval).toBe(true);
+    expect(access?.editKey).not.toBe(before);
+    expect(access?.nearby).toBe(false);
+  });
+
+  it("keeps the PIN out of the audit log and records whether one was set", async () => {
+    await h.stores.settings.put({
+      ...(await h.stores.settings.get()),
+      audit: { enabled: true, retentionDays: 90 },
+    });
+    const owner = h.client();
+    const { id } = await createShare(owner);
+    await owner.patch(`/api/shares/${id}`, { access: { pin: "482913", requireApproval: true } });
+    await owner.patch(`/api/shares/${id}`, { access: { pin: null } });
+    const entries = (await h.stores.audit.list({ limit: 50 })).filter(
+      (entry) => entry.action === "share.update" && entry.shareId === id,
+    );
+    expect(entries).toHaveLength(2);
+    expect(JSON.stringify(entries)).not.toContain("482913");
+    expect(entries.map((entry) => entry.detail)).toEqual(
+      expect.arrayContaining([
+        { access: { requireApproval: true, hasPin: true } },
+        { access: { hasPin: false } },
+      ]),
+    );
+    await h.stores.settings.put({
+      ...(await h.stores.settings.get()),
+      audit: { enabled: false, retentionDays: 90 },
+    });
+  });
+
   it("turns nearby off for protected shares and removes the nearby entry", async () => {
     const owner = h.client();
     const { id } = await createShare(owner);

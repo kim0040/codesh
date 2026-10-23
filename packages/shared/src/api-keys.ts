@@ -37,4 +37,6 @@ export const apiKeys = {
   pinFailsIp: (shareId: string, ip: string) => `pinfail:i:${shareId}:${ip}` as const,
   /** Serialises a student's join so a double click cannot create two forks. */
   labJoinLock: (labId: string, clientId: string) => `lock:labjoin:${labId}:${clientId}` as const,
+  /** Lets one distribute per lab run at a time, so a double click cannot fork everyone twice. */
+  labDistributeLock: (labId: string) => `lock:labdistribute:${labId}` as const,
 } as const;

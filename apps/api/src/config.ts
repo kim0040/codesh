@@ -79,3 +79,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
   };
 }
+
+/**
+ * Problems of a production setup that still starts. Behind a reverse proxy an empty TRUST_PROXY
+ * makes every client the proxy's address: one rate-limit bucket, one PIN counter, one network group.
+ */
+export function proxyWarnings(config: Config): string[] {
+  if (!config.production || config.trustProxy.length > 0) return [];
+  return [
+    "TRUST_PROXY is empty: every client is seen with the address of the connection. Behind a reverse proxy set TRUST_PROXY to its CIDR, or all users share one rate limit, one PIN counter and one network group.",
+  ];
+}

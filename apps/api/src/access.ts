@@ -75,7 +75,9 @@ export async function accessOf(
   let role: Role = owner ? "owner" : teacher ? "edit" : keyOk ? "edit" : share.access.default;
   // A locked share is read-only for everyone but the controller: the teacher in a lab, else the
   // owner. In a lab the student owns the share but must not be able to undo the teacher's lock.
-  if (share.locked && !teacher && (role === "edit" || (role === "owner" && share.labId))) {
+  // The lab decides for its shares: a copy created while the teacher locks the lab may lag behind.
+  const locked = lab ? lab.locked : share.locked;
+  if (locked && !teacher && (role === "edit" || (role === "owner" && share.labId))) {
     role = "view";
   }
   const needsPin = share.access.pinHash !== null && !granted;
@@ -111,8 +113,37 @@ export function requireOwner(share: ShareRecord, session: Session): void {
 }
 
 /**
+ * Reserves one PIN attempt for the client and for its IP before the (slow) PIN check runs, so
+ * parallel requests cannot all see a count below the limit. KEYS: [client counter, ip counter],
+ * ARGV: [window seconds, client limit, ip limit]. A refused attempt is not counted. Returns
+ * `{allowed, ttl}`; the window starts with the first attempt and later ones do not extend it.
+ */
+const RESERVE_PIN_ATTEMPT = `
+local client = redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[1], 'NX')
+local ip = redis.call('INCR', KEYS[2])
+redis.call('EXPIRE', KEYS[2], ARGV[1], 'NX')
+if client > tonumber(ARGV[2]) or ip > tonumber(ARGV[3]) then
+  redis.call('DECR', KEYS[1])
+  redis.call('DECR', KEYS[2])
+  return {0, redis.call('TTL', KEYS[1])}
+end
+return {1, 0}
+`;
+
+/** After a correct PIN: forgets the client's wrong attempts and gives the reserved IP slot back. */
+const RELEASE_PIN_ATTEMPT = `
+redis.call('DEL', KEYS[1])
+if redis.call('EXISTS', KEYS[2]) == 1 and redis.call('DECR', KEYS[2]) <= 0 then
+  redis.call('DEL', KEYS[2])
+end
+return 1
+`;
+
+/**
  * Counts wrong PINs per client and per IP (§8: 5 per client per 10 minutes) and throws
  * `rate_limited` once a limit is reached, even for the right PIN, so guessing cannot continue.
+ * The attempt is reserved atomically before the PIN is verified; a correct PIN gives it back.
  */
 export async function checkPin(
   ctx: Ctx,
@@ -125,25 +156,25 @@ export async function checkPin(
   if (pin === undefined || pin === "") throw new ApiError("pin_required", "This share needs a PIN");
   const clientKey = apiKeys.pinFailsClient(share.id, session.clientId);
   const ipKey = apiKeys.pinFailsIp(share.id, session.ip);
-  const [byClient, byIp] = await ctx.valkey.mget(clientKey, ipKey);
-  if (Number(byClient ?? 0) >= PIN_MAX_ATTEMPTS || Number(byIp ?? 0) >= PIN_IP_MAX_ATTEMPTS) {
-    const ttl = Math.max(1, await ctx.valkey.ttl(clientKey));
+  const [allowed, ttl] = (await ctx.valkey.eval(
+    RESERVE_PIN_ATTEMPT,
+    2,
+    clientKey,
+    ipKey,
+    String(PIN_ATTEMPT_WINDOW_SECONDS),
+    String(PIN_MAX_ATTEMPTS),
+    String(PIN_IP_MAX_ATTEMPTS),
+  )) as [number, number];
+  if (allowed !== 1) {
     ctx.metrics.rateLimited.inc({ bucket: "pin" });
     throw new ApiError("rate_limited", "Too many wrong PINs, try again later", {
-      "Retry-After": String(ttl),
+      "Retry-After": String(Math.max(1, ttl)),
     });
   }
   if (await verifyPin(pin, hash)) {
-    await ctx.valkey.del(clientKey);
+    await ctx.valkey.eval(RELEASE_PIN_ATTEMPT, 2, clientKey, ipKey);
     return;
   }
-  const pipeline = ctx.valkey.multi();
-  for (const key of [clientKey, ipKey]) {
-    pipeline.incr(key);
-    // EXPIRE NX: the window starts with the first wrong attempt and is not extended by later ones.
-    pipeline.expire(key, PIN_ATTEMPT_WINDOW_SECONDS, "NX");
-  }
-  await pipeline.exec();
   throw new ApiError("pin_invalid", "Wrong PIN");
 }
 
@@ -208,7 +239,8 @@ export function shareMeta(share: ShareRecord, clientId: string): ShareMeta {
     saved: share.savedBy.includes(clientId),
     locked: share.locked,
     ...(share.labId ? { labId: share.labId } : {}),
-    ...(share.forkOf ? { forkOf: share.forkOf } : {}),
+    // A lab copy's origin is the teacher's template, which students must not learn.
+    ...(share.forkOf && !share.labId ? { forkOf: share.forkOf } : {}),
   };
 }
 

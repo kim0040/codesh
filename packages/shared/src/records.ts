@@ -36,6 +36,9 @@ export const shareRecordSchema = z.object({
   forkOf: shareIdSchema.optional(),
   locked: z.boolean(),
   sizeBytes: z.number().int().nonnegative(),
+  /** First lines of the main file for lists; valid while `updatedAt` is not after `previewAt`. */
+  preview: z.string().optional(),
+  previewAt: z.date().optional(),
 });
 export type ShareRecord = z.infer<typeof shareRecordSchema>;
 

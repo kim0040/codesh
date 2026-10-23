@@ -1,5 +1,5 @@
 import { buildApp } from "./app.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, proxyWarnings } from "./config.js";
 import { createRuntime } from "./runtime.js";
 
 const config = loadConfig();
@@ -7,6 +7,8 @@ const runtime = await createRuntime(config);
 const app = buildApp(runtime.deps, {
   logger: { level: config.production ? "info" : "debug" },
 });
+
+for (const warning of proxyWarnings(config)) app.log.warn(warning);
 
 let closing = false;
 async function shutdown(signal: string) {

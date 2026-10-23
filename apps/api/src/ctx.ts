@@ -2,6 +2,7 @@ import {
   apiKeys,
   COLLAB_COMMAND_TIMEOUT_MS,
   channels,
+  type NearbyItem,
   type PermMessage,
   type Settings,
   type SseEvent,
@@ -29,11 +30,14 @@ export interface Deps {
   presenceRefreshMs?: number;
   /** How long settings are cached per process; 0 in tests so a stored change applies at once. */
   settingsCacheMs?: number;
+  /** How long the nearby list of a network group is shared by its open streams; 0 in tests. */
+  nearbyCacheMs?: number;
   /** How long a content command waits for collab's reply (§6.11); shortened in tests. */
   commandTimeoutMs?: number;
 }
 
 const SETTINGS_CACHE_MS = 5000;
+const NEARBY_CACHE_MS = 5000;
 
 /** Everything a route needs: stores, Valkey, settings and the event publishers. */
 export class Ctx {
@@ -49,6 +53,9 @@ export class Ctx {
   readonly presenceRefreshMs?: number;
   readonly settingsCacheMs: number;
   readonly commandTimeoutMs: number;
+  readonly nearbyCacheMs: number;
+  /** In-flight or recent nearby lists per network group, see `listNearbyCached`. */
+  readonly nearbyCache = new Map<string, { at: number; list: Promise<NearbyItem[]> }>();
   readonly trusted: Cidr[];
   /** Open SSE streams in this process per client, so presence outlives a closed second tab. */
   readonly streams = new Map<string, number>();
@@ -69,6 +76,7 @@ export class Ctx {
     this.presenceRefreshMs = deps.presenceRefreshMs;
     this.settingsCacheMs = deps.settingsCacheMs ?? SETTINGS_CACHE_MS;
     this.commandTimeoutMs = deps.commandTimeoutMs ?? COLLAB_COMMAND_TIMEOUT_MS;
+    this.nearbyCacheMs = deps.nearbyCacheMs ?? NEARBY_CACHE_MS;
     this.trusted = parseCidrs(deps.config.trustProxy);
   }
 

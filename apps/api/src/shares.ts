@@ -55,6 +55,7 @@ export async function createShare(
   const code = await allocateCode(ctx, "share", id, ttlSeconds);
 
   const now = new Date();
+  const preview = previewOf(content);
   const share: ShareRecord = {
     id,
     title: input.title,
@@ -79,6 +80,8 @@ export async function createShare(
     ...(input.forkOf ? { forkOf: input.forkOf } : {}),
     locked: input.locked ?? false,
     sizeBytes,
+    preview,
+    previewAt: now,
   };
   try {
     await ctx.stores.shares.create(share);
@@ -91,7 +94,7 @@ export async function createShare(
   }
 
   await ctx.valkey.zadd(apiKeys.sharesIndex, share.expiresAt?.getTime() ?? now.getTime(), id);
-  if (input.net) await announceShare(ctx, share, input.net, previewOf(content));
+  if (input.net) await announceShare(ctx, share, input.net, preview);
   ctx.metrics.sharesCreated.inc();
   return { share, response: { id, code, url: urlOf(ctx, id) } };
 }

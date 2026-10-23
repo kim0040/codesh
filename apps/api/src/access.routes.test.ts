@@ -157,6 +157,35 @@ describe.skipIf(!integration)("join: PIN", () => {
     );
   });
 
+  it("counts parallel wrong PINs: five are checked, every other request gets 429", async () => {
+    const { id } = await protectedShare();
+    const guest = h.client();
+    await guest.clientId();
+    const responses = await Promise.all(
+      Array.from({ length: 40 }, (_, i) =>
+        guest.post(`/api/shares/${id}/join`, { pin: String(100000 + i) }),
+      ),
+    );
+    const statuses = responses.map((response) => response.statusCode);
+    expect(statuses.filter((status) => status === 403)).toHaveLength(5);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(35);
+    // Refused attempts are not counted, so the counters stop at the limit.
+    expect(Number(await h.valkey.get(`pinfail:c:${id}:${await guest.clientId()}`))).toBe(5);
+    expect((await guest.post(`/api/shares/${id}/join`, { pin: "482913" })).statusCode).toBe(429);
+  });
+
+  it("gives the IP slot back after a correct PIN, so a classroom behind one IP is not locked out", async () => {
+    const { id } = await protectedShare();
+    const ip = h.client().ip;
+    for (let i = 0; i < 40; i++) {
+      const student = h.client({ ip });
+      expect((await student.post(`/api/shares/${id}/join`, { pin: "482913" })).statusCode).toBe(
+        200,
+      );
+    }
+    expect(await h.valkey.get(`pinfail:i:${id}:${ip}`)).toBeNull();
+  });
+
   it("does not let a guesser reset the limit by dropping the cookie", async () => {
     const { id } = await protectedShare();
     const ip = h.client().ip;
@@ -177,6 +206,31 @@ describe.skipIf(!integration)("join: PIN", () => {
     expect(Number(await h.valkey.get(`pinfail:c:${id}:${guestId}`))).toBe(1);
     await guest.post(`/api/shares/${id}/join`, { pin: "482913" });
     expect(await h.valkey.get(`pinfail:c:${id}:${guestId}`)).toBeNull();
+  });
+
+  it("hides title and preview in the saved list of a client that must enter the new PIN", async () => {
+    const owner = h.client();
+    const { id } = await createShare(owner, {
+      title: "Solutions",
+      files: [{ path: "a.txt", content: "secret answer\n" }],
+    });
+    await owner.patch(`/api/shares/${id}`, { access: { pin: "482913" } });
+    const guest = h.client();
+    await guest.post(`/api/shares/${id}/join`, { pin: "482913" });
+    await guest.post(`/api/shares/${id}/save`);
+    const before = (await guest.get("/api/shares")).json<{ title: string; preview: string }[]>();
+    expect(before[0]).toMatchObject({ title: "Solutions", preview: "secret answer" });
+
+    await owner.patch(`/api/shares/${id}`, { access: { pin: "777777" } });
+    const locked = await guest.get("/api/shares");
+    expect(locked.body).not.toContain("secret answer");
+    expect(locked.body).not.toContain("Solutions");
+    expect(locked.json<{ id: string }[]>().map((s) => s.id)).toEqual([id]);
+
+    await guest.post(`/api/shares/${id}/join`, { pin: "777777" });
+    expect((await guest.get("/api/shares")).json<{ title: string }[]>()[0]?.title).toBe(
+      "Solutions",
+    );
   });
 
   it("makes everyone enter a new PIN, and removing the PIN opens the share", async () => {
@@ -251,6 +305,23 @@ describe.skipIf(!integration)("join: owner approval", () => {
     expect(admitted.statusCode).toBe(200);
     expect(admitted.json<{ role: string }>().role).toBe("edit");
     expect((await owner.get(`/api/shares/${id}/pending`)).json()).toEqual([]);
+  });
+
+  it("drops requests queued under the old PIN when the PIN changes", async () => {
+    const { owner, id } = await approvalShare();
+    await owner.patch(`/api/shares/${id}`, { access: { pin: "482913" } });
+    const guest = h.client();
+    const guestId = await guest.clientId();
+    expect((await guest.post(`/api/shares/${id}/join`, { pin: "482913" })).statusCode).toBe(202);
+    expect((await owner.get(`/api/shares/${id}/pending`)).json<unknown[]>()).toHaveLength(1);
+
+    await owner.patch(`/api/shares/${id}`, { access: { pin: "777777" } });
+    expect((await owner.get(`/api/shares/${id}/pending`)).json<unknown[]>()).toEqual([]);
+    const approve = await owner.post(`/api/shares/${id}/pending/${guestId}`, { approve: true });
+    expect(approve.statusCode).toBe(404);
+    // The guest has to know the new PIN to queue again.
+    expect((await guest.post(`/api/shares/${id}/join`)).statusCode).toBe(401);
+    expect((await guest.post(`/api/shares/${id}/join`, { pin: "777777" })).statusCode).toBe(202);
   });
 
   it("keeps a denied client out; it can ask again", async () => {
@@ -372,6 +443,39 @@ describe.skipIf(!integration)("kick and ban", () => {
     // Others are fine.
     expect((await h.client().post(`/api/shares/${id}/join`)).statusCode).toBe(200);
     perm.stop();
+  });
+
+  it("ban takes the share out of the banned client's saved shares and lets it expire", async () => {
+    const owner = h.client();
+    const { id } = await createShare(owner, { title: "Private notes" });
+    const guest = h.client();
+    const guestId = await guest.clientId();
+    await guest.post(`/api/shares/${id}/join`);
+    await guest.post(`/api/shares/${id}/save`);
+    expect(await h.stores.shares.get(id)).toMatchObject({ savedBy: [guestId], expiresAt: null });
+    expect((await guest.get("/api/shares")).json<{ id: string }[]>().map((s) => s.id)).toEqual([
+      id,
+    ]);
+
+    await owner.post(`/api/shares/${id}/kick`, { clientId: guestId, ban: true });
+    const share = await h.stores.shares.get(id);
+    expect(share?.savedBy).toEqual([]);
+    expect(share?.expiresAt).not.toBeNull();
+    expect((await guest.get("/api/shares")).json()).toEqual([]);
+  });
+
+  it("leaves a banned client's older saved entry out of the list", async () => {
+    const owner = h.client();
+    const { id } = await createShare(owner);
+    const guest = h.client();
+    const guestId = await guest.clientId();
+    await h.stores.shares.addSaved(id, guestId);
+    await h.stores.shares.addBan(id, guestId);
+    expect((await guest.get("/api/shares")).json()).toEqual([]);
+    // Others who saved it are not affected.
+    const other = h.client();
+    await h.stores.shares.addSaved(id, await other.clientId());
+    expect((await other.get("/api/shares")).json<{ id: string }[]>()).toHaveLength(1);
   });
 
   it("is for the owner only, cannot remove the owner, and validates the body", async () => {

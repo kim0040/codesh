@@ -9,7 +9,7 @@ import {
 } from "@codesh/shared";
 import type { Ctx } from "../ctx.js";
 import {
-  listNearby,
+  listNearbyCached,
   listPresence,
   publishPresence,
   removePresence,
@@ -123,7 +123,7 @@ export function eventRoutes(app: App, ctx: Ctx): void {
           try {
             await touchPresence(ctx, session);
             sendList({ event: "presence", data: await presenceList() });
-            sendList({ event: "nearby", data: await listNearby(ctx, net) });
+            sendList({ event: "nearby", data: await listNearbyCached(ctx, net) });
           } catch (error) {
             request.log.warn({ err: error }, "sse refresh failed");
           }
@@ -133,7 +133,7 @@ export function eventRoutes(app: App, ctx: Ctx): void {
 
     await touchPresence(ctx, session);
     sendList({ event: "presence", data: await presenceList() });
-    sendList({ event: "nearby", data: await listNearby(ctx, net) });
+    sendList({ event: "nearby", data: await listNearbyCached(ctx, net) });
     await publishPresence(ctx, net);
     return reply.send(stream);
   });

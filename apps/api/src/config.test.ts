@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig, proxyWarnings } from "./config.js";
 
 describe("config", () => {
   it("falls back to local defaults", () => {
@@ -27,5 +27,13 @@ describe("config", () => {
       loadConfig({ NODE_ENV: "production", SESSION_SECRET: strong, COLLAB_SECRET: strong })
         .production,
     ).toBe(true);
+  });
+
+  it("warns in production when no proxy is trusted, and only then", () => {
+    const strong = "x".repeat(32);
+    const prod = { NODE_ENV: "production", SESSION_SECRET: strong, COLLAB_SECRET: strong };
+    expect(proxyWarnings(loadConfig(prod))).toEqual([expect.stringContaining("TRUST_PROXY")]);
+    expect(proxyWarnings(loadConfig({ ...prod, TRUST_PROXY: "10.0.0.0/8" }))).toEqual([]);
+    expect(proxyWarnings(loadConfig({}))).toEqual([]);
   });
 });

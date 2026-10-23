@@ -110,6 +110,42 @@ describe.skipIf(!integration)("save, unsave and GET /api/shares", () => {
     expect((await h.client().get("/api/shares")).json()).toEqual([]);
   });
 
+  it("serves the preview from the share record instead of loading every document", async () => {
+    const me = h.client();
+    const { id } = await createShare(me, { files: [{ path: "a.txt", content: "one\ntwo\n" }] });
+    const snapshots = h.stores.snapshots;
+    const original = snapshots.latest.bind(snapshots);
+    let loads = 0;
+    snapshots.latest = async (...args) => {
+      loads++;
+      return original(...args);
+    };
+    try {
+      // Cold Valkey cache (restart, flush, 60 s TTL): the record has the preview.
+      await h.valkey.del(`preview:${id}`);
+      expect((await me.get("/api/shares")).json<ListItem[]>()[0]?.preview).toBe("one\ntwo");
+      expect(loads).toBe(0);
+
+      // Activity (collab touches the share) makes the stored preview stale: it is read once more
+      // and written back.
+      await h.valkey.del(`preview:${id}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await h.stores.shares.touch(id, new Date(), new Date(Date.now() + 10_000));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await me.get("/api/shares");
+      expect(loads).toBeGreaterThan(0);
+      const refreshed = await h.stores.shares.get(id);
+      expect(refreshed?.preview).toBe("one\ntwo");
+      expect(refreshed?.previewAt?.getTime()).toBeGreaterThan(Date.now() - 5000);
+      const seen = loads;
+      await h.valkey.del(`preview:${id}`);
+      await me.get("/api/shares");
+      expect(loads).toBe(seen);
+    } finally {
+      snapshots.latest = original;
+    }
+  });
+
   it("leaves out shares that already expired", async () => {
     const me = h.client();
     const { id } = await createShare(me);
