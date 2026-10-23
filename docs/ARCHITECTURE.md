@@ -169,4 +169,4 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 
 ## 13. Dependency policy
 
-Allowed licenses: MIT, Apache-2.0, BSD-2/3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC0-1.0, OFL-1.1 (fonts), Python-2.0 (tooling only), CC-BY-4.0 (data only). `pnpm check` fails on anything else. Valkey (BSD) instead of Redis ≥7.4. MongoDB Community Server (SSPL) is used only as the internal database of this app and is not redistributed in the repo; drivers are Apache-2.0. No k6 (AGPL): load tests are a Node script.
+Allowed licenses: MIT, Apache-2.0, BSD-2/3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC0-1.0, Unlicense, OFL-1.1 (fonts), Python-2.0 (tooling only), CC-BY-4.0 (data only). MPL-2.0 is allowed for dev-only build tools used unmodified (lightningcss via Tailwind/Vite) and must never appear in the production dependency set. `pnpm check` fails on anything else. Valkey (BSD) instead of Redis ≥7.4. MongoDB Community Server (SSPL) is used only as the internal database of this app and is not redistributed in the repo; drivers are Apache-2.0. No k6 (AGPL): load tests are a Node script.
