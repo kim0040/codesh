@@ -1,10 +1,11 @@
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { createRuntime } from "./runtime.js";
 
 const config = loadConfig();
-const app = buildApp({
+const runtime = await createRuntime(config);
+const app = buildApp(runtime.deps, {
   logger: { level: config.production ? "info" : "debug" },
-  trustProxy: config.trustProxy.length > 0 ? config.trustProxy : false,
 });
 
 let closing = false;
@@ -14,6 +15,7 @@ async function shutdown(signal: string) {
   app.log.info({ signal }, "shutting down");
   try {
     await app.close();
+    await runtime.close();
     process.exit(0);
   } catch (error) {
     app.log.error(error);
