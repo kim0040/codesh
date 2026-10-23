@@ -89,6 +89,15 @@ class MemoryShareStore implements ShareStore {
     return copy(share);
   }
 
+  async touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number) {
+    const share = this.shares.get(id);
+    if (!share) return;
+    share.lastActiveAt = new Date(at);
+    share.updatedAt = new Date(at);
+    if (!share.saved) share.expiresAt = new Date(expiresAtIfUnsaved);
+    if (sizeBytes !== undefined) share.sizeBytes = sizeBytes;
+  }
+
   async addBan(id: string, clientId: string) {
     const share = this.shares.get(id);
     if (share && !share.bans.includes(clientId)) share.bans.push(clientId);

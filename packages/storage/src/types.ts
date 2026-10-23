@@ -45,6 +45,12 @@ export interface ShareStore {
    * `expiresAt` becomes `expiresAtIfUnsaved`.
    */
   removeSaved(id: string, clientId: string, expiresAtIfUnsaved: Date): Promise<ShareRecord | null>;
+  /**
+   * Records activity: sets `lastActiveAt` and `updatedAt` to `at`, `sizeBytes` when given, and
+   * `expiresAt` to `expiresAtIfUnsaved` unless the share is saved. One atomic write, so a
+   * concurrent save can never be overwritten with an expiry.
+   */
+  touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number): Promise<void>;
   addBan(id: string, clientId: string): Promise<void>;
   removeBan(id: string, clientId: string): Promise<void>;
   /** Removes shares whose `expiresAt` is before `now` and returns their ids (MongoDB uses a TTL index). */

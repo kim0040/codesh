@@ -178,6 +178,19 @@ class MongoShareStore implements ShareStore {
     return doc ? fromShareDoc(doc) : null;
   }
 
+  async touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number) {
+    await this.shares.updateOne({ _id: id }, [
+      {
+        $set: {
+          lastActiveAt: at,
+          updatedAt: at,
+          expiresAt: { $cond: ["$saved", "$expiresAt", expiresAtIfUnsaved] },
+          ...(sizeBytes === undefined ? {} : { sizeBytes }),
+        },
+      },
+    ]);
+  }
+
   async addBan(id: string, clientId: string) {
     await this.shares.updateOne({ _id: id }, { $addToSet: { bans: clientId } });
   }

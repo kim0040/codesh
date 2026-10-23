@@ -97,6 +97,28 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
         });
       });
 
+      it("touches activity without giving a saved share an expiry", async () => {
+        const { shares } = await open();
+        await shares.create(share("unsaved1"));
+        await shares.create(share("saved001", { saved: true, savedBy: [OWNER], expiresAt: null }));
+        const at = later(60_000);
+        const expiry = later(25 * 3600_000);
+        await shares.touch("unsaved1", at, expiry, 42);
+        await shares.touch("saved001", at, expiry);
+        await shares.touch("missing1", at, expiry);
+        expect(await shares.get("unsaved1")).toMatchObject({
+          lastActiveAt: at,
+          updatedAt: at,
+          expiresAt: expiry,
+          sizeBytes: 42,
+        });
+        expect(await shares.get("saved001")).toMatchObject({
+          lastActiveAt: at,
+          expiresAt: null,
+          sizeBytes: 0,
+        });
+      });
+
       it("tracks bans, labs and existence", async () => {
         const { shares } = await open();
         await shares.create(share("abcd1234", { labId: "lab00001" }));
