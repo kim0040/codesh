@@ -1,14 +1,23 @@
 import {
   COLLAB_CLOSE_REASONS,
+  COLLAB_COMMAND_ERRORS,
   COLLAB_DENY_REASONS,
   COMPACT_AFTER_UPDATES,
+  type CollabCommand,
+  type CollabCommandError,
+  type CollabCommandReply,
   type CollabStateless,
+  channels,
+  collabCommandRequestIdSchema,
+  collabCommandSchema,
   DEFAULT_FILE_ID,
   defaultSettings,
   FLUSH_INTERVAL_MS,
   HISTORY_SNAPSHOT_INTERVAL_MS,
   keys,
   LAST_ACTIVE_WRITE_INTERVAL_MS,
+  languageSchema,
+  META_MIRROR_THROTTLE_MS,
   NEARBY_ITEM_TTL_SECONDS,
   NEARBY_PREVIEW_LINES,
   NEARBY_THROTTLE_MS,
@@ -18,11 +27,12 @@ import {
   type Settings,
   type ShareRecord,
   SLOW_CLIENT_BUFFER_BYTES,
+  titleSchema,
   UNLOAD_DELAY_MS,
   verifyCollabToken,
   YDOC,
 } from "@codesh/shared";
-import type { Stores } from "@codesh/storage";
+import type { ShareUpdate, Stores } from "@codesh/storage";
 import type {
   afterHandleMessagePayload,
   afterUnloadDocumentPayload,
@@ -30,6 +40,7 @@ import type {
   beforeUnloadDocumentPayload,
   Connection,
   connectedPayload,
+  DirectConnection,
   Document,
   Extension,
   Hocuspocus,
@@ -41,6 +52,7 @@ import type {
 } from "@hocuspocus/server";
 import type { Redis } from "ioredis";
 import * as Y from "yjs";
+import { applyMeta, syncContent } from "./content.js";
 import { ValkeyLock } from "./lock.js";
 import type { CollabMetrics } from "./metrics.js";
 import { PersistedDoc } from "./persisted-doc.js";
@@ -66,6 +78,7 @@ export interface CollabTimings {
   lastActiveIntervalMs: number;
   settingsRefreshMs: number;
   slowClientBytes: number;
+  metaMirrorMs: number;
 }
 
 export const DEFAULT_TIMINGS: CollabTimings = {
@@ -80,13 +93,14 @@ export const DEFAULT_TIMINGS: CollabTimings = {
   lastActiveIntervalMs: LAST_ACTIVE_WRITE_INTERVAL_MS,
   settingsRefreshMs: 30_000,
   slowClientBytes: SLOW_CLIENT_BUFFER_BYTES,
+  metaMirrorMs: META_MIRROR_THROTTLE_MS,
 };
 
 export interface CollabDeps {
   stores: Stores;
   /** Commands (locks, nearby). */
   redis: Redis;
-  /** A dedicated connection for `perm:*` (a subscribed connection cannot run commands). */
+  /** A dedicated connection for `perm:*` and `cmd:*` (a subscribed connection cannot run commands). */
   subscriber: Redis;
   secret: string;
   instanceId: string;
@@ -107,6 +121,9 @@ class DocState {
   unloadTimer: NodeJS.Timeout | null = null;
   nearbyTimer: NodeJS.Timeout | null = null;
   nearbyAt = 0;
+  metaTimer: NodeJS.Timeout | null = null;
+  metaAt = 0;
+  stopMetaObserver: () => void = () => {};
   lastActiveWrite = 0;
   permVersion = -1;
   deleted = false;
@@ -131,8 +148,10 @@ class DocState {
   clearTimers() {
     if (this.unloadTimer) clearTimeout(this.unloadTimer);
     if (this.nearbyTimer) clearTimeout(this.nearbyTimer);
+    if (this.metaTimer) clearTimeout(this.metaTimer);
     this.unloadTimer = null;
     this.nearbyTimer = null;
+    this.metaTimer = null;
   }
 }
 
@@ -152,6 +171,12 @@ function originLabel(origin: unknown): string {
   return "local";
 }
 
+function isDenied(error: unknown, reason: string): boolean {
+  return (
+    typeof error === "object" && error !== null && "reason" in error && error.reason === reason
+  );
+}
+
 /** True when a Yjs update only deletes; deletions never grow a document. */
 function onlyDeletes(update: Uint8Array): boolean {
   try {
@@ -163,7 +188,8 @@ function onlyDeletes(update: Uint8Array): boolean {
 
 /**
  * The collaboration extension: token auth, permission enforcement, batched persistence with a doc
- * lock, delayed unload, live permission changes, size limit, nearby previews and activity (§6).
+ * lock, delayed unload, live permission changes, size limit, nearby previews, activity and content
+ * commands from other services (§6).
  */
 export class Collab implements Extension<CollabContext> {
   extensionName = "codesh-collab";
@@ -192,13 +218,14 @@ export class Collab implements Extension<CollabContext> {
     this.instance = instance;
   }
 
-  /** Starts the flush and lock timers and the permission subscription. */
+  /** Starts the flush and lock timers and the permission and command subscriptions. */
   async start() {
     await this.refreshSettings(true);
-    this.deps.subscriber.on("pmessage", (_pattern: string, channel: string, message: string) => {
-      void this.applyPermission(channel.slice("perm:".length), message);
+    this.deps.subscriber.on("pmessage", (pattern: string, channel: string, message: string) => {
+      if (pattern === "perm:*") void this.applyPermission(channel.slice("perm:".length), message);
+      else if (pattern === "cmd:*") void this.handleCommand(channel.slice("cmd:".length), message);
     });
-    await this.deps.subscriber.psubscribe("perm:*");
+    await this.deps.subscriber.psubscribe("perm:*", "cmd:*");
     this.timers.push(
       setInterval(() => this.flushTick(), this.timings.flushIntervalMs),
       setInterval(() => void this.lockTick(), this.timings.lockRenewMs),
@@ -221,7 +248,7 @@ export class Collab implements Extension<CollabContext> {
   async onDestroy() {
     for (const timer of this.timers) clearInterval(timer);
     this.timers = [];
-    await this.deps.subscriber.punsubscribe("perm:*").catch(() => {});
+    await this.deps.subscriber.punsubscribe("perm:*", "cmd:*").catch(() => {});
   }
 
   // auth
@@ -269,7 +296,12 @@ export class Collab implements Extension<CollabContext> {
       if (core.owner) await this.lock.release(lockKey).catch(() => {});
       throw error;
     }
-    this.docs.set(documentName, new DocState(documentName, document, core, share));
+    const state = new DocState(documentName, document, core, share);
+    const meta = document.getMap(YDOC.meta);
+    const observer = () => this.scheduleMetaMirror(state);
+    meta.observe(observer);
+    state.stopMetaObserver = () => meta.unobserve(observer);
+    this.docs.set(documentName, state);
   }
 
   async connected({ connection, documentName }: connectedPayload<CollabContext>) {
@@ -305,6 +337,7 @@ export class Collab implements Extension<CollabContext> {
     }
     if (state.deleted) return;
     try {
+      await this.mirrorMeta(state);
       await state.core.history(true);
       await state.core.compact();
     } catch (error) {
@@ -331,6 +364,7 @@ export class Collab implements Extension<CollabContext> {
   /** Forgets a doc: stops recording, gives up the lock and its nearby entry. */
   private async release(state: DocState) {
     state.clearTimers();
+    state.stopMetaObserver();
     state.core.detach();
     if (state.core.owner) {
       state.core.disown();
@@ -510,6 +544,155 @@ export class Collab implements Extension<CollabContext> {
         .exec();
     } catch (error) {
       console.error(`collab: nearby publish for ${state.name} failed`, error);
+    }
+  }
+
+  private scheduleMetaMirror(state: DocState) {
+    if (state.metaTimer || state.deleted) return;
+    const wait = Math.max(0, state.metaAt + this.timings.metaMirrorMs - Date.now());
+    state.metaTimer = setTimeout(() => {
+      state.metaTimer = null;
+      void this.mirrorMeta(state);
+    }, wait);
+  }
+
+  /** Copies Y.Map `meta` title and language into the share record, from the lock owner only. */
+  private async mirrorMeta(state: DocState) {
+    if (!state.core.owner || state.deleted) return;
+    state.metaAt = Date.now();
+    const meta = state.document.getMap(YDOC.meta);
+    const title = titleSchema.safeParse(meta.get("title"));
+    const language = languageSchema.safeParse(meta.get("language"));
+    const patch: ShareUpdate = {};
+    if (title.success && title.data !== state.share.title) patch.title = title.data;
+    if (language.success && language.data !== state.share.language) patch.language = language.data;
+    if (patch.title === undefined && patch.language === undefined) return;
+    try {
+      const share = await this.deps.stores.shares.update(state.name, {
+        ...patch,
+        updatedAt: new Date(),
+      });
+      if (share) state.share = share;
+    } catch (error) {
+      console.error(`collab: mirroring meta of ${state.name} failed`, error);
+    }
+  }
+
+  // content commands (§6.11)
+
+  /**
+   * Handles one `cmd:<shareId>` message. Every instance receives it; only the doc lock holder
+   * handles and answers it, taking the lock when nobody holds it.
+   */
+  async handleCommand(shareId: string, raw: string) {
+    let message: unknown;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      message = undefined;
+    }
+    const parsed = collabCommandSchema.safeParse(message);
+    const requestId = parsed.success
+      ? parsed.data.requestId
+      : collabCommandRequestIdSchema.safeParse(
+          typeof message === "object" && message !== null && "requestId" in message
+            ? message.requestId
+            : undefined,
+        ).data;
+    if (requestId === undefined) {
+      console.error(`collab: ignoring command without a request id for ${shareId}`);
+      return;
+    }
+    if (!(await this.claim(shareId).catch(() => false))) return;
+
+    let error: CollabCommandError | undefined;
+    try {
+      error = parsed.success
+        ? await this.runCommand(shareId, parsed.data)
+        : COLLAB_COMMAND_ERRORS.invalid;
+    } catch (cause) {
+      console.error(`collab: command ${requestId} for ${shareId} failed`, cause);
+      error = COLLAB_COMMAND_ERRORS.failed;
+    } finally {
+      // The lock was taken for a doc that did not stay loaded here.
+      if (!this.docs.get(shareId)?.core.owner) {
+        await this.lock.release(keys.docLock(shareId)).catch(() => {});
+      }
+    }
+    const reply: CollabCommandReply = error === undefined ? { ok: true } : { ok: false, error };
+    await this.deps.redis
+      .publish(channels.cmdReply(requestId), JSON.stringify(reply))
+      .catch((cause) => console.error(`collab: reply to command ${requestId} failed`, cause));
+  }
+
+  /** True when this instance holds the doc lock (now), so it is the one to run a command. */
+  private async claim(shareId: string): Promise<boolean> {
+    if (this.shuttingDown) return false;
+    let state = this.docs.get(shareId);
+    if (state?.document.isDestroyed) {
+      await state.closed;
+      state = this.docs.get(shareId);
+    }
+    if (state?.core.owner) return true;
+    if (!(await this.lock.acquire(keys.docLock(shareId)))) return false;
+    if (state && !state.deleted && !state.document.isDestroyed && !state.core.owner) {
+      await state.core.adopt();
+    }
+    return true;
+  }
+
+  private async runCommand(
+    shareId: string,
+    command: CollabCommand,
+  ): Promise<CollabCommandError | undefined> {
+    let target: Y.Doc | undefined;
+    if (command.kind === "restore") {
+      const snapshot = await this.deps.stores.snapshots.get(shareId, "history", command.seq);
+      if (!snapshot) return COLLAB_COMMAND_ERRORS.snapshotNotFound;
+      target = new Y.Doc();
+      Y.applyUpdate(target, snapshot.state);
+    } else if (command.kind === "replace") {
+      target = new Y.Doc();
+      try {
+        Y.applyUpdate(target, Buffer.from(command.state, "base64"));
+      } catch {
+        return COLLAB_COMMAND_ERRORS.invalid;
+      }
+    }
+    if (target && Y.encodeStateAsUpdate(target).byteLength > this.settings.maxDocBytes) {
+      return COLLAB_COMMAND_ERRORS.tooLarge;
+    }
+
+    let connection: DirectConnection;
+    try {
+      // Loads the doc when it is not in memory here; the lock is already ours, so this instance
+      // becomes its writer.
+      connection = await this.instance.openDirectConnection(shareId);
+    } catch (cause) {
+      if (isDenied(cause, COLLAB_DENY_REASONS.notFound)) return COLLAB_COMMAND_ERRORS.notFound;
+      throw cause;
+    }
+    try {
+      const state = this.docs.get(shareId);
+      if (!state || state.document.isDestroyed) return COLLAB_COMMAND_ERRORS.failed;
+      if (state.deleted) return COLLAB_COMMAND_ERRORS.notFound;
+      if (!state.core.owner) return COLLAB_COMMAND_ERRORS.failed;
+      // History before and after, so the change itself is a step in playback.
+      if (target) await state.core.history(true);
+      let error = undefined as CollabCommandError | undefined;
+      await connection.transact((doc) => {
+        if (doc !== state.document) error = COLLAB_COMMAND_ERRORS.failed;
+        else if (target) syncContent(doc, target);
+        else if (command.kind === "meta" && !applyMeta(doc, command)) {
+          error = COLLAB_COMMAND_ERRORS.fileNotFound;
+        }
+      });
+      if (error) return error;
+      await state.core.flush();
+      if (target) await state.core.history(true);
+      return undefined;
+    } finally {
+      await connection.disconnect();
     }
   }
 

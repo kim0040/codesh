@@ -16,6 +16,8 @@ describe("valkey keys", () => {
     expect(keys.sweeperLock).toBe("lock:sweeper");
     expect(keys.rateLimit("10.0.0.1", "pin")).toBe("rl:10.0.0.1:pin");
     expect(channels.perm("abc12345")).toBe("perm:abc12345");
+    expect(channels.cmd("abc12345")).toBe("cmd:abc12345");
+    expect(channels.cmdReply("r1")).toBe("cmd-reply:r1");
     expect(channels.user("u1")).toBe("user:u1");
     expect(channels.net("10.0.1")).toBe("net:10.0.1");
   });

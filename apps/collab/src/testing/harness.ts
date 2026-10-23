@@ -1,5 +1,10 @@
 import {
+  COLLAB_COMMAND_TIMEOUT_MS,
+  type CollabCommand,
+  type CollabCommandReply,
   type CollabTokenPayload,
+  channels,
+  collabCommandReplySchema,
   generateClientId,
   generateJoinCode,
   generateShareId,
@@ -222,6 +227,32 @@ export class Harness {
 
   publishPerm(shareId: string, message: PermMessage) {
     return this.redis.publish(`perm:${shareId}`, JSON.stringify(message));
+  }
+
+  /**
+   * Publishes on `cmd:<shareId>` like the API does and returns every reply: the first must arrive
+   * within the §6.11 deadline, later ones are collected for `settleMs` more.
+   */
+  async command(
+    shareId: string,
+    message: CollabCommand | Record<string, unknown>,
+    settleMs = 0,
+  ): Promise<CollabCommandReply[]> {
+    const requestId = typeof message.requestId === "string" ? message.requestId : "none";
+    const subscriber = this.redis.duplicate();
+    const replies: CollabCommandReply[] = [];
+    try {
+      await subscriber.subscribe(channels.cmdReply(requestId));
+      subscriber.on("message", (_channel: string, raw: string) => {
+        replies.push(collabCommandReplySchema.parse(JSON.parse(raw)));
+      });
+      await this.redis.publish(channels.cmd(shareId), JSON.stringify(message));
+      await waitFor(() => replies.length > 0, `reply to ${requestId}`, COLLAB_COMMAND_TIMEOUT_MS);
+      if (settleMs > 0) await sleep(settleMs);
+      return replies;
+    } finally {
+      subscriber.disconnect();
+    }
   }
 
   async close() {
