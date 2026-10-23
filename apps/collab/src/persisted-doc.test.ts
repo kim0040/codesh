@@ -2,7 +2,7 @@ import { generateShareId } from "@codesh/shared";
 import { createTestDatabase, mongoAvailable, type TestDatabase } from "@codesh/storage/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { loadPersisted, PersistedDoc } from "./persisted-doc.js";
+import { loadPersisted, PersistedDoc, type PersistedDocOptions } from "./persisted-doc.js";
 
 const available = await mongoAvailable();
 
@@ -14,9 +14,13 @@ describe.runIf(available)("PersistedDoc", () => {
   });
   afterAll(() => database?.drop());
 
-  function open(shareId = generateShareId(), options: { compactAfter?: number } = {}) {
+  function open(
+    shareId = generateShareId(),
+    options: Partial<Omit<PersistedDocOptions, "historyIntervalMs">> = {},
+  ) {
     const doc = new Y.Doc();
     const core = new PersistedDoc(shareId, doc, database.stores, {
+      ...options,
       compactAfter: options.compactAfter ?? 200,
       historyIntervalMs: 30_000,
     });
@@ -133,14 +137,71 @@ describe.runIf(available)("PersistedDoc", () => {
     expect(history.map((h) => h.seq)).toEqual([1]);
   });
 
-  it("tracks the encoded size closely enough for the size limit", async () => {
+  it("keeps the size estimate an upper bound until a deletion is measured", async () => {
     const { core, text, doc } = open();
     core.owner = true;
     await core.load();
+    const size = () => Y.encodeStateAsUpdate(doc).byteLength;
     text.insert(0, "x".repeat(10_000));
-    expect(core.sizeEstimate).toBeGreaterThanOrEqual(10_000);
+    for (let i = 0; i < 50; i++) {
+      text.insert((i * 7919) % text.length, `edit ${i};`);
+      expect(core.sizeEstimate).toBeGreaterThanOrEqual(size());
+    }
     text.delete(0, 9_000);
-    expect(core.measure()).toBe(Y.encodeStateAsUpdate(doc).byteLength);
-    expect(core.sizeEstimate).toBeLessThan(2_000);
+    // Deletions are not subtracted, so the limit check measures before it refuses anything.
+    expect(core.sizeEstimate).toBeGreaterThan(10_000);
+    expect(size()).toBeLessThan(4_000);
+    core.measure();
+    expect(core.sizeEstimate).toBeLessThan(4_000);
+  });
+
+  it("keeps at most maxHistory history snapshots", async () => {
+    const { shareId, core, text } = open(undefined, { maxHistory: 2 });
+    core.owner = true;
+    await core.load();
+    for (const word of ["a", "b", "c", "d"]) {
+      text.insert(0, word);
+      await core.history(true);
+    }
+    const history = await database.stores.snapshots.list(shareId, "history");
+    expect(history.map((h) => h.seq)).toEqual([3, 4]);
+  });
+
+  it("does not replace the log when the lock was lost before a compaction", async () => {
+    let owner = true;
+    const { shareId, core, text } = open(undefined, {
+      compactAfter: 2,
+      stillOwner: async () => owner,
+    });
+    core.owner = true;
+    await core.load();
+    text.insert(0, "one;");
+    await core.flush();
+    text.insert(0, "two;");
+    await core.flush();
+    owner = false;
+    await core.compact();
+    expect(await database.stores.snapshots.latest(shareId, "compact")).toBeNull();
+    expect((await database.stores.updates.read(shareId, 0)).map((e) => e.seq)).toEqual([1, 2]);
+    owner = true;
+    await core.compact();
+    expect((await database.stores.snapshots.latest(shareId, "compact"))?.seq).toBe(2);
+    expect(await database.stores.updates.read(shareId, 0)).toEqual([]);
+  });
+
+  it("refuses to load a log with a gap that does not go away", async () => {
+    const shareId = generateShareId();
+    const { stores } = database;
+    await stores.updates.append(
+      shareId,
+      [{ seq: 1, data: Y.encodeStateAsUpdate(new Y.Doc()) }],
+      new Date(),
+    );
+    await stores.updates.append(
+      shareId,
+      [{ seq: 3, data: Y.encodeStateAsUpdate(new Y.Doc()) }],
+      new Date(),
+    );
+    await expect(loadPersisted(stores, shareId)).rejects.toThrow(/gap/);
   });
 });
