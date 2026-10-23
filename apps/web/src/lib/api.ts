@@ -57,6 +57,7 @@ const KNOWN_CODES: readonly string[] = [
   "too_large",
   "expired",
   "validation",
+  "unavailable",
 ];
 
 interface RequestOptions {

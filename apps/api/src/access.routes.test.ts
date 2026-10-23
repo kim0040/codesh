@@ -1,5 +1,5 @@
+import { channels, verifyCollabToken } from "@codesh/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { verifyCollabToken } from "./crypto.js";
 import {
   type Client,
   createHarness,
@@ -43,7 +43,8 @@ describe.skipIf(!integration)("join: edit key", () => {
     const withKey = await guest.post(`/api/shares/${id}/join`, { editKey });
     expect(withKey.json<{ role: string; token: string }>().role).toBe("edit");
     expect(
-      verifyCollabToken(withKey.json<{ token: string }>().token, h.config.collabSecret)?.role,
+      (await verifyCollabToken(withKey.json<{ token: string }>().token, h.config.collabSecret))
+        ?.role,
     ).toBe("edit");
   });
 
@@ -328,7 +329,7 @@ describe.skipIf(!integration)("kick and ban", () => {
     const guest = h.client();
     const guestId = await guest.clientId();
     await guest.post(`/api/shares/${id}/join`, { pin: "1357" });
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
 
     const response = await owner.post(`/api/shares/${id}/kick`, { clientId: guestId, ban: false });
     expect(response.statusCode).toBe(200);
@@ -349,7 +350,7 @@ describe.skipIf(!integration)("kick and ban", () => {
     const guest = h.client();
     const guestId = await guest.clientId();
     await guest.post(`/api/shares/${id}/join`);
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
 
     expect(
       (await owner.post(`/api/shares/${id}/kick`, { clientId: guestId, ban: true })).statusCode,

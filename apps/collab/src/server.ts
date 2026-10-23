@@ -1,4 +1,4 @@
-import { SWEEPER_INTERVAL_MS } from "@codesh/shared";
+import { namespace, SWEEPER_INTERVAL_MS } from "@codesh/shared";
 import type { Stores } from "@codesh/storage";
 import { Redis as RedisExtension } from "@hocuspocus/extension-redis";
 import { type Extension, Server } from "@hocuspocus/server";
@@ -92,7 +92,7 @@ export function createCollabServer(options: CollabOptions): CollabServer {
     extensions: [
       routes(metrics),
       collab,
-      new RedisExtension({ redis, identifier: options.instanceId, prefix: "collab" }),
+      new RedisExtension({ redis, identifier: options.instanceId, prefix: `${namespace()}collab` }),
     ],
   });
 

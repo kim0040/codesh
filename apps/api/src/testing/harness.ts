@@ -1,4 +1,10 @@
-import type { SseEvent } from "@codesh/shared";
+import {
+  type CollabCommand,
+  type CollabCommandReply,
+  channels,
+  collabCommandSchema,
+  type SseEvent,
+} from "@codesh/shared";
 import { createMemoryStores, type Stores } from "@codesh/storage";
 import type { LightMyRequestResponse } from "fastify";
 import { Redis } from "ioredis";
@@ -29,6 +35,19 @@ export interface HarnessOptions {
   randomCode?: () => string;
   heartbeatMs?: number;
   presenceRefreshMs?: number;
+  /** Stores shared with a real collab server; defaults to in-memory stores. */
+  stores?: Stores;
+  /** `fake` answers `cmd:<shareId>` like collab without touching the stores; `none` stays silent. */
+  collab?: "fake" | "none";
+  commandTimeoutMs?: number;
+}
+
+/** Stands in for apps/collab in route tests: records content commands and answers them (§6.11). */
+export interface FakeCollab {
+  /** Every command received for a share of this harness, in order. */
+  commands: CollabCommand[];
+  /** The reply to give; `null` stays silent so the request times out. */
+  reply: (command: CollabCommand) => CollabCommandReply | null;
 }
 
 export interface Harness {
@@ -36,6 +55,7 @@ export interface Harness {
   stores: Stores;
   valkey: Redis;
   config: Config;
+  collab: FakeCollab;
   /** A browser: its own cookie jar and an IP in the harness's network. */
   client(options?: { ip?: string; hostByte?: number }): Client;
   /** A network group of its own, so presence and nearby lists of other tests do not leak in. */
@@ -262,7 +282,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   const valkey = new Redis(VALKEY_URL, { db: dbIndex });
   await valkey.flushdb();
   const subscriber = new Redis(VALKEY_URL);
-  const stores = createMemoryStores();
+  const stores = options.stores ?? createMemoryStores();
   const config: Config = {
     production: false,
     host: "127.0.0.1",
@@ -295,8 +315,27 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     heartbeatMs: options.heartbeatMs,
     presenceRefreshMs: options.presenceRefreshMs,
     settingsCacheMs: 0,
+    commandTimeoutMs: options.commandTimeoutMs,
   });
   await app.ready();
+
+  const collab: FakeCollab = { commands: [], reply: () => ({ ok: true }) };
+  const commandListener = new Redis(VALKEY_URL);
+  if ((options.collab ?? "fake") === "fake") {
+    await commandListener.psubscribe(channels.cmdPattern());
+    commandListener.on("pmessage", (_pattern, channel, raw) => {
+      // Pub/sub is shared across databases: only answer for shares this harness stores.
+      void (async () => {
+        const shareId = channel.slice(channels.cmdPattern().length - 1);
+        if (!(await stores.shares.get(shareId))) return;
+        const command = collabCommandSchema.parse(JSON.parse(raw));
+        collab.commands.push(command);
+        const reply = collab.reply(command);
+        if (reply)
+          await valkey.publish(channels.cmdReply(command.requestId), JSON.stringify(reply));
+      })();
+    });
+  }
 
   const prefix = netPrefix();
   let hosts = 10;
@@ -306,6 +345,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     stores,
     valkey,
     config,
+    collab,
     client(opts = {}) {
       return new Client(harness, opts.ip ?? `${prefix}.${opts.hostByte ?? hosts++}`);
     },
@@ -334,6 +374,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       await app.close();
       for (const connection of extra) connection.disconnect();
       subscriber.disconnect();
+      commandListener.disconnect();
       await valkey.flushdb();
       valkey.disconnect();
     },

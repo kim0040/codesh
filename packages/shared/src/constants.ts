@@ -28,6 +28,10 @@ export const LAST_ACTIVE_WRITE_INTERVAL_MS = 60_000;
 export const NEARBY_THROTTLE_MS = 2000;
 export const NEARBY_ITEM_TTL_SECONDS = 60;
 export const NEARBY_PREVIEW_LINES = 8;
+/** §6.11: collab answers a `cmd:<shareId>` request on `cmd-reply:<requestId>` within this time. */
+export const COLLAB_COMMAND_TIMEOUT_MS = 5000;
+/** Y.Map `meta` title and language are copied into the share record at most this often per doc. */
+export const META_MIRROR_THROTTLE_MS = 2000;
 
 // §4 awareness
 export const AWARENESS_MAX_UPDATES_PER_SECOND = 30;

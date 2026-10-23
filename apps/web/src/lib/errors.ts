@@ -17,6 +17,7 @@ const TEXT: Record<ClientErrorCode, ErrorText> = {
   too_large: { title: "error.too_large", hint: "error.too_large.hint" },
   expired: { title: "error.expired", hint: "error.expired.hint" },
   validation: { title: "error.validation", hint: "error.validation.hint" },
+  unavailable: { title: "error.unavailable", hint: "error.unavailable.hint" },
   network: { title: "error.network", hint: "error.network.hint" },
   unknown: { title: "error.generic" },
 };

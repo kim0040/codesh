@@ -1,5 +1,5 @@
+import { channels, verifyCollabToken } from "@codesh/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { verifyCollabToken } from "./crypto.js";
 import { readContent } from "./docs.js";
 import {
   createHarness,
@@ -233,9 +233,10 @@ describe.skipIf(!integration)("PATCH /api/shares/:id", () => {
   });
   afterAll(() => h.close());
 
-  it("changes title and language in the record and in the document", async () => {
+  it("changes title and language in the record and asks collab to change the document", async () => {
     const owner = h.client();
     const { id } = await createShare(owner, { title: "Old", language: "python" });
+    h.collab.commands.length = 0;
     const response = await owner.patch(`/api/shares/${id}`, { title: "New", language: "go" });
     expect(response.statusCode).toBe(200);
     expect(response.json<ShareView>()).toMatchObject({
@@ -245,10 +246,31 @@ describe.skipIf(!integration)("PATCH /api/shares/:id", () => {
     });
 
     expect(await h.stores.shares.get(id)).toMatchObject({ title: "New", language: "go" });
-    const content = readContent(await storedDoc(h.stores, id));
-    expect(content).toMatchObject({ title: "New", language: "go" });
-    // The change is a normal update in the log, not a rewrite of the snapshot.
-    expect(await h.stores.updates.lastSeq(id)).toBe(1);
+    expect(h.collab.commands).toMatchObject([{ kind: "meta", title: "New", language: "go" }]);
+    // Only collab writes the update log (§6.11).
+    expect(await h.stores.updates.lastSeq(id)).toBe(0);
+  });
+
+  it("sends no command for changes that are not document content", async () => {
+    const owner = h.client();
+    const { id } = await createShare(owner);
+    h.collab.commands.length = 0;
+    expect((await owner.patch(`/api/shares/${id}`, { locked: true })).statusCode).toBe(200);
+    expect(h.collab.commands).toEqual([]);
+  });
+
+  it("leaves the share unchanged and answers 503 when collab does not reply", async () => {
+    const quiet = await createHarness({ collab: "none", commandTimeoutMs: 150 });
+    try {
+      const owner = quiet.client();
+      const { id } = await createShare(owner, { title: "Old" });
+      const response = await owner.patch(`/api/shares/${id}`, { title: "New" });
+      expect(response.statusCode, response.body).toBe(503);
+      expect(errorCode(response)).toBe("unavailable");
+      expect((await quiet.stores.shares.get(id))?.title).toBe("Old");
+    } finally {
+      await quiet.close();
+    }
   });
 
   it("is for the owner only and validates the body", async () => {
@@ -269,7 +291,7 @@ describe.skipIf(!integration)("PATCH /api/shares/:id", () => {
   it("changes access, publishes a role change, and keeps the edit key secret from others", async () => {
     const owner = h.client();
     const { id } = await createShare(owner);
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
     const before = (await h.stores.shares.get(id))?.access.editKey;
 
     const response = await owner.patch(`/api/shares/${id}`, {
@@ -323,7 +345,7 @@ describe.skipIf(!integration)("PATCH /api/shares/:id", () => {
     const owner = h.client();
     const { id } = await createShare(owner);
     const guest = h.client();
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
 
     const response = await owner.patch(`/api/shares/${id}`, { locked: true });
     expect(response.statusCode).toBe(200);
@@ -386,7 +408,7 @@ describe.skipIf(!integration)("DELETE /api/shares/:id", () => {
       expiresAt: new Date(Date.now() + 60_000),
       data: new Uint8Array([1, 2, 3]),
     });
-    const perm = await h.subscribe(`perm:${id}`);
+    const perm = await h.subscribe(channels.perm(id));
 
     const response = await owner.delete(`/api/shares/${id}`);
     expect(response.statusCode).toBe(200);
@@ -439,7 +461,7 @@ describe.skipIf(!integration)("collab tokens", () => {
     expect(response.statusCode).toBe(200);
     const { token, role } = response.json<{ token: string; role: string }>();
     expect(role).toBe("edit");
-    const payload = verifyCollabToken(token, h.config.collabSecret);
+    const payload = await verifyCollabToken(token, h.config.collabSecret);
     expect(payload).toEqual({
       shareId: id,
       clientId: guestId,
@@ -450,7 +472,7 @@ describe.skipIf(!integration)("collab tokens", () => {
     });
     expect((payload?.exp ?? 0) - before).toBeGreaterThanOrEqual(599);
     expect((payload?.exp ?? 0) - before).toBeLessThanOrEqual(601);
-    expect(verifyCollabToken(token, "another-secret")).toBeNull();
+    expect(await verifyCollabToken(token, "another-secret")).toBeNull();
   });
 
   it("uses a guest name when the visitor never chose one, and the owner role for the owner", async () => {
@@ -462,7 +484,7 @@ describe.skipIf(!integration)("collab tokens", () => {
       role: string;
     }>();
     expect(role).toBe("owner");
-    expect(verifyCollabToken(token, h.config.collabSecret)).toMatchObject({
+    expect(await verifyCollabToken(token, h.config.collabSecret)).toMatchObject({
       clientId: ownerId,
       name: `Guest-${ownerId.slice(0, 4)}`,
       role: "owner",

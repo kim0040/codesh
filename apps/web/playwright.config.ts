@@ -37,8 +37,8 @@ export default defineConfig({
     {
       command: "pnpm exec tsx src/main.ts",
       cwd: "../collab",
-      // The collab server speaks HTTP on its port, so a plain GET tells us it is up.
-      url: `http://localhost:${COLLAB_PORT}`,
+      // It only answers on /collab, so the listening port is the readiness signal.
+      port: COLLAB_PORT,
       env: { ...shared, PORT: String(COLLAB_PORT), COLLAB_INSTANCE_ID: "e2e" },
       reuseExistingServer: false,
       timeout: 60_000,

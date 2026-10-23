@@ -80,7 +80,7 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 8. Slow clients: if a connection's buffered amount exceeds 4 MB, close it with code 4408; the client reconnects and resyncs.
 9. Nearby previews: on change (throttled to 2 s), publish `{id, title, language, participants, preview: first 8 lines of main file}` into Valkey hash `nearby:item:<id>` (EX 60) when `access.nearby` is true.
 10. `lastActiveAt` is written at most once per minute per doc.
-11. Only apps/collab writes `share_updates`. Other services change document content through Valkey channel `cmd:<shareId>` with `{requestId, kind: 'restore', seq}` (restore history snapshot `seq`) or `{requestId, kind: 'replace', state: base64}` (apply a full Y state as a diff); collab opens the doc (direct connection if not loaded), applies the change as a normal update and replies on `cmd-reply:<requestId>` with `{ok, error?}` within 5 s. Initial content of a brand-new share (uploads, fork, CLI push) is written by the API as a `compact` snapshot at seq 0 before any client connects.
+11. Only apps/collab writes `share_updates`. Other services change document content through Valkey channel `cmd:<shareId>` with `{requestId, kind: 'restore', seq}` (restore history snapshot `seq`) or `{requestId, kind: 'replace', state: base64}` (apply a full Y state as a diff) or `{requestId, kind: 'meta', title?, language?, fileId?}`; collab opens the doc (direct connection if not loaded), applies the change as a normal update and replies on `cmd-reply:<requestId>` with `{ok, error?}` within 5 s. Initial content of a brand-new share (uploads, fork, CLI push) is written by the API as a `compact` snapshot at seq 0 before any client connects.
 12. A client whose update was refused (read-only or `too_large`) must drop its local Y.Doc and resync (`packages/shared/src/collab.ts`).
 
 ## 7. Valkey keys and channels
@@ -96,10 +96,13 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 | `perm:<shareId>` channel | permission changes to collab |
 | `user:<clientId>` channel | SSE events for one user |
 | `net:<net>` channel | SSE events for a network group (broadcast) |
+| `cmd:<shareId>` channel, `cmd-reply:<requestId>` channel | content commands to collab (§6.11): `restore`, `replace`, `meta` |
 | `doclock:<id>`, `lock:sweeper` | instance ownership (SET NX PX + renew) |
 | `rl:<ip>:<bucket>` | rate limiting |
 
-Network group `net`: the room name when the client IP falls in a configured room CIDR (`settings.rooms: [{name, cidrs}]`), else the IPv4 /24 (`settings.subnetPrefixV4`, default 24) or IPv6 /64. Client IP is the socket address unless the socket address is in `TRUST_PROXY` CIDRs, then the left-most untrusted `X-Forwarded-For` entry.
+Every pub/sub channel is prefixed with the optional env `CODESH_NS` (keys are isolated by Valkey database index instead, but pub/sub ignores it). Tests give each file its own namespace via `scripts/vitest-namespace.ts`; production leaves it empty or sets one per deployment sharing a Valkey.
+
+Network group `net`: the room name when the client IP falls in a configured room CIDR (`settings.rooms: [{name, cidrs}]`), else the IPv4 /24 (`settings.subnetPrefixV4`, default 24) or IPv6 /64. Client IP is the socket address unless the socket address is in `TRUST_PROXY` CIDRs, then the right-most untrusted `X-Forwarded-For` entry (walking from the right; it cannot be spoofed).
 
 ## 8. Sessions and tokens
 

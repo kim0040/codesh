@@ -23,8 +23,8 @@ import { colorSchema, displayNameSchema } from "./user.js";
 /** Request and response bodies of the HTTP API (§9). Dates travel as ISO 8601 strings. */
 
 const isoDate = z.iso.datetime();
-const titleSchema = z.string().trim().max(MAX_TITLE_LENGTH);
-const languageSchema = z.string().min(1).max(40);
+export const titleSchema = z.string().trim().max(MAX_TITLE_LENGTH);
+export const languageSchema = z.string().min(1).max(40);
 const pinSchema = z.string().min(MIN_PIN_LENGTH).max(MAX_PIN_LENGTH);
 
 export const roleSchema = z.enum(ROLES);
