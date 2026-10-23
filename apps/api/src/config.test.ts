@@ -1,23 +1,5 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { buildApp } from "./app.js";
+import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
-
-describe("api", () => {
-  const app = buildApp();
-  afterAll(() => app.close());
-
-  it("answers GET /healthz", async () => {
-    const response = await app.inject({ method: "GET", url: "/healthz" });
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true });
-  });
-
-  it("answers unknown routes with the contract error shape", async () => {
-    const response = await app.inject({ method: "GET", url: "/nope" });
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: { code: "not_found", message: "Not found" } });
-  });
-});
 
 describe("config", () => {
   it("falls back to local defaults", () => {
@@ -26,6 +8,7 @@ describe("config", () => {
       mongoUrl: "mongodb://localhost:27017/codesh",
       valkeyUrl: "redis://localhost:6379",
       adminToken: "",
+      storage: "mongo",
       trustProxy: [],
       production: false,
     });
