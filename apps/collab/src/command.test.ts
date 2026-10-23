@@ -119,9 +119,7 @@ describe.runIf(available)("collab content commands (§6.11)", () => {
     );
     expect(replies).toEqual([{ ok: true }]);
     // The winner may already have unloaded the doc under load; it must never be on both.
-    expect(
-      servers.filter((s) => s.collab.docs.has(share.id)).length,
-    ).toBeLessThanOrEqual(1);
+    expect(servers.filter((s) => s.collab.docs.has(share.id)).length).toBeLessThanOrEqual(1);
     expect(await storedText(harness.stores, share.id)).toBe("replaced");
 
     // Loaded on both: only the lock holder answers, clients on both converge.
