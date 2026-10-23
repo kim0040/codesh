@@ -7,7 +7,7 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "CODESH_INTEGRATION=1 vitest run",
+    "test": "CODESH_INTEGRATION=1 vitest run --exclude src/collab.integration.test.ts && CODESH_INTEGRATION=1 vitest run src/collab.integration.test.ts",
     "test:unit": "vitest run"
   },
   "dependencies": {

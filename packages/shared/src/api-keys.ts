@@ -1,7 +1,5 @@
-import { z } from "zod";
-
 /**
- * Valkey keys and channels that only `apps/api` (and, for `apiChannels.doc`, `apps/collab`) use.
+ * Valkey keys that only `apps/api` uses.
  * They extend the table of §7 and sit beside `keys.ts` so that file stays the contract's mirror.
  */
 
@@ -40,12 +38,3 @@ export const apiKeys = {
   /** Serialises a student's join so a double click cannot create two forks. */
   labJoinLock: (labId: string, clientId: string) => `lock:labjoin:${labId}:${clientId}` as const,
 } as const;
-
-export const apiChannels = {
-  /** API -> collab: a server-side change to a live document (restore, title / language change). */
-  doc: (shareId: string) => `doc:${shareId}` as const,
-} as const;
-
-/** Message on `doc:<shareId>`. `update` is a Yjs update, base64 encoded. */
-export const docUpdateMessageSchema = z.object({ update: z.string() });
-export type DocUpdateMessage = z.infer<typeof docUpdateMessageSchema>;

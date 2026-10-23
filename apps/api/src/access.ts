@@ -8,9 +8,10 @@ import {
   type Role,
   type ShareMeta,
   type ShareRecord,
+  signCollabToken,
 } from "@codesh/shared";
 import { touchCode } from "./codes.js";
-import { safeEqual, signCollabToken, verifyPin } from "./crypto.js";
+import { safeEqual, verifyPin } from "./crypto.js";
 import type { Ctx } from "./ctx.js";
 import { ApiError, notFound } from "./errors.js";
 import { refreshNearby } from "./presence.js";
@@ -161,7 +162,12 @@ export async function recordGrant(
   await ctx.valkey.expire(key, GRANT_TTL_SECONDS);
 }
 
-export function mintToken(ctx: Ctx, share: ShareRecord, session: Session, role: Role): string {
+export function mintToken(
+  ctx: Ctx,
+  share: ShareRecord,
+  session: Session,
+  role: Role,
+): Promise<string> {
   return signCollabToken(
     {
       shareId: share.id,

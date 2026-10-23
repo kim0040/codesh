@@ -1,13 +1,6 @@
-import {
-  createHash,
-  createHmac,
-  randomBytes,
-  scrypt as scryptCallback,
-  timingSafeEqual,
-} from "node:crypto";
-import { type CollabTokenPayload, collabTokenPayloadSchema } from "@codesh/shared";
+import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 
-/** PIN hashing (scrypt), edit keys and collab tokens (§8). */
+/** PIN hashing (scrypt), and edit keys (§8). */
 
 interface ScryptParams {
   N: number;
@@ -58,31 +51,4 @@ export const randomKey = () => randomBytes(18).toString("base64url");
 export function safeEqual(a: string, b: string): boolean {
   const digest = (value: string) => createHash("sha256").update(value).digest();
   return timingSafeEqual(digest(a), digest(b));
-}
-
-const sign = (body: string, secret: string) =>
-  createHmac("sha256", secret).update(body).digest("base64url");
-
-/** `base64url(JSON payload) + '.' + base64url(HMAC-SHA256(COLLAB_SECRET, base64url(JSON payload)))`. */
-export function signCollabToken(payload: CollabTokenPayload, secret: string): string {
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return `${body}.${sign(body, secret)}`;
-}
-
-export function verifyCollabToken(
-  token: string,
-  secret: string,
-  nowSeconds = Math.floor(Date.now() / 1000),
-): CollabTokenPayload | null {
-  const [body, signature, extra] = token.split(".");
-  if (!body || !signature || extra !== undefined) return null;
-  if (!safeEqual(signature, sign(body, secret))) return null;
-  try {
-    const payload = collabTokenPayloadSchema.parse(
-      JSON.parse(Buffer.from(body, "base64url").toString()),
-    );
-    return payload.exp > nowSeconds ? payload : null;
-  } catch {
-    return null;
-  }
 }

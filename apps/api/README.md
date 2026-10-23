@@ -10,12 +10,12 @@ pnpm --filter @codesh/api test         # unit + route tests (CODESH_INTEGRATION=
 pnpm --filter @codesh/api test:unit    # unit tests only; route tests are skipped
 ```
 
-Route tests use the real Valkey (database `1 + VITEST_POOL_ID`, flushed per harness) and the in-memory stores from `@codesh/storage`. `STORAGE=memory` starts the server with the memory stores too (development only; the default is `mongo`).
+Route tests use the real Valkey (database `1 + VITEST_POOL_ID`, flushed per harness) and the in-memory stores from `@codesh/storage`; `Harness.collab` stands in for collab on `cmd:*`. `collab.integration.test.ts` runs a real collab server on MongoDB and runs on its own after the route tests, because collab answers every `cmd:*` channel. `STORAGE=memory` starts the server with the memory stores too (development only; the default is `mongo`).
 
 ## Additions beyond §9
 
 - **Auth (optional, off by default).** `GET /api/auth/providers`, `GET /api/auth/oidc/login`, `GET /api/auth/oidc/callback`, `POST /api/auth/ldap/login`, `POST /api/auth/logout`. A provider is on when its block in the admin settings is set. OIDC `state` lives in `oidc:state:<state>` for 10 minutes, is bound to the browser's `clientId` and consumed with `GETDEL`. A verified identity is stored in `identity:<clientId>` and shows in `GET /api/session` as `identity`. With `guestAllowed=false`, everything except the auth and health routes needs an identity.
-- **`doc:<shareId>` channel.** Every update the API appends to the UpdateLog (rename, language change, restore) is also published here as `{update: <base64>}`. Collab should apply it to a live document; applying twice is harmless in Yjs.
+- **Content changes go through collab.** The API never writes `share_updates` (§6.11). `PATCH /api/shares/:id` with `title` / `language` sends `{kind: 'meta'}` and `POST /api/shares/:id/restore` sends `{kind: 'restore', seq}` on `cmd:<shareId>`, then waits for `cmd-reply:<requestId>`. A refusal maps to `not_found` / `too_large`; no reply within `COLLAB_COMMAND_TIMEOUT_MS` (or `failed`) answers 503 `unavailable` and changes nothing. New shares are the exception: their initial content is stored as a seq-0 `compact` snapshot before any client connects.
 - **Extra Valkey keys** (`apiKeys` in `packages/shared/src/api-keys.ts`): `sharenet:`, `shares:index`, `uploads:index`, `upload:meta:`, `pinfail:c:`, `pinfail:i:`, plus the keys listed in §8.
 - `POST /api/shares` accepts bodies up to 32 MiB so `settings.maxDocBytes` decides what is too large, not Fastify's 1 MiB default.
 

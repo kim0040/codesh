@@ -1,4 +1,11 @@
-import { apiKeys, channels, type PermMessage, type Settings, type SseEvent } from "@codesh/shared";
+import {
+  apiKeys,
+  COLLAB_COMMAND_TIMEOUT_MS,
+  channels,
+  type PermMessage,
+  type Settings,
+  type SseEvent,
+} from "@codesh/shared";
 import type { Stores } from "@codesh/storage";
 import type { FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
@@ -22,6 +29,8 @@ export interface Deps {
   presenceRefreshMs?: number;
   /** How long settings are cached per process; 0 in tests so a stored change applies at once. */
   settingsCacheMs?: number;
+  /** How long a content command waits for collab's reply (§6.11); shortened in tests. */
+  commandTimeoutMs?: number;
 }
 
 const SETTINGS_CACHE_MS = 5000;
@@ -39,6 +48,7 @@ export class Ctx {
   readonly heartbeatMs?: number;
   readonly presenceRefreshMs?: number;
   readonly settingsCacheMs: number;
+  readonly commandTimeoutMs: number;
   readonly trusted: Cidr[];
   /** Open SSE streams in this process per client, so presence outlives a closed second tab. */
   readonly streams = new Map<string, number>();
@@ -58,6 +68,7 @@ export class Ctx {
     this.heartbeatMs = deps.heartbeatMs;
     this.presenceRefreshMs = deps.presenceRefreshMs;
     this.settingsCacheMs = deps.settingsCacheMs ?? SETTINGS_CACHE_MS;
+    this.commandTimeoutMs = deps.commandTimeoutMs ?? COLLAB_COMMAND_TIMEOUT_MS;
     this.trusted = parseCidrs(deps.config.trustProxy);
   }
 
