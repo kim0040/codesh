@@ -3,6 +3,8 @@ import type { Stores } from "@codesh/storage";
 import type { ValkeyLock } from "./lock.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Ids per `existing` query, far below MongoDB's 16 MiB limit for one `$in`. */
+const EXISTING_BATCH = 10_000;
 
 export interface SweepResult {
   orphans: number;
@@ -26,8 +28,15 @@ export async function sweep(
       ...(await stores.snapshots.shareIds()),
       ...(await stores.files.shareIds()),
     ]);
-    const alive = await stores.shares.existing([...referenced]);
-    const orphans = [...referenced].filter((id) => !alive.has(id));
+    const ids = [...referenced];
+    const orphans: string[] = [];
+    for (let i = 0; i < ids.length; i += EXISTING_BATCH) {
+      const batch = ids.slice(i, i + EXISTING_BATCH);
+      const alive = await stores.shares.existing(batch);
+      orphans.push(...batch.filter((id) => !alive.has(id)));
+      // A long run must not let another instance start a second sweep.
+      await lock.renew(keys.sweeperLock);
+    }
     for (const id of orphans) {
       await stores.updates.deleteForShare(id);
       await stores.snapshots.deleteForShare(id);

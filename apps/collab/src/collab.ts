@@ -1,4 +1,6 @@
 import {
+  AWARENESS_MAX_STATE_BYTES,
+  AWARENESS_MAX_UPDATES_PER_SECOND,
   COLLAB_CLOSE_REASONS,
   COLLAB_COMMAND_ERRORS,
   COLLAB_DENY_REASONS,
@@ -17,6 +19,7 @@ import {
   keys,
   LAST_ACTIVE_WRITE_INTERVAL_MS,
   languageSchema,
+  MAX_DOC_BYTES_LIMIT,
   META_MIRROR_THROTTLE_MS,
   NEARBY_ITEM_TTL_SECONDS,
   NEARBY_PREVIEW_LINES,
@@ -36,6 +39,7 @@ import type { ShareUpdate, Stores } from "@codesh/storage";
 import type {
   afterHandleMessagePayload,
   afterUnloadDocumentPayload,
+  beforeHandleAwarenessPayload,
   beforeSyncPayload,
   beforeUnloadDocumentPayload,
   Connection,
@@ -64,6 +68,8 @@ export interface CollabContext {
   color: string;
   role: Role;
   shareId: string;
+  /** Perm messages this instance had received when access was checked (see `catchUp`). */
+  permMark: number;
 }
 
 export interface CollabTimings {
@@ -77,6 +83,8 @@ export interface CollabTimings {
   nearbyRefreshMs: number;
   lastActiveIntervalMs: number;
   settingsRefreshMs: number;
+  /** How often a doc with connections re-reads its share, for perm messages that got lost. */
+  reconcileMs: number;
   slowClientBytes: number;
   metaMirrorMs: number;
 }
@@ -92,6 +100,7 @@ export const DEFAULT_TIMINGS: CollabTimings = {
   nearbyRefreshMs: (NEARBY_ITEM_TTL_SECONDS * 1000) / 2,
   lastActiveIntervalMs: LAST_ACTIVE_WRITE_INTERVAL_MS,
   settingsRefreshMs: 30_000,
+  reconcileMs: 15_000,
   slowClientBytes: SLOW_CLIENT_BUFFER_BYTES,
   metaMirrorMs: META_MIRROR_THROTTLE_MS,
 };
@@ -125,9 +134,14 @@ class DocState {
   metaAt = 0;
   stopMetaObserver: () => void = () => {};
   lastActiveWrite = 0;
-  permVersion = -1;
+  /** Highest `version` of a per-client role message, by clientId. */
+  roleVersions = new Map<string, number>();
+  reconciledAt = Date.now();
+  reconciling = false;
   deleted = false;
   flushing = false;
+  flushFailures = 0;
+  flushRetryAt = 0;
   readonly closed: Promise<void>;
   markClosed!: () => void;
 
@@ -186,6 +200,34 @@ function onlyDeletes(update: Uint8Array): boolean {
   }
 }
 
+/** Perm messages are kept this long for connections that were authenticating meanwhile. */
+const PERM_REPLAY_MS = 60_000;
+/** Longest wait between flush attempts of a doc while MongoDB keeps failing. */
+const FLUSH_BACKOFF_MAX_MS = 5000;
+/** The same background error is logged at most this often. */
+const ERROR_LOG_INTERVAL_MS = 10_000;
+/** Yjs clients one connection may hold awareness for (a resync starts a new Y.Doc). */
+const AWARENESS_MAX_CLIENTS_PER_CONNECTION = 4;
+
+/** The first `lines` lines of a Y.Text, without building the whole string. */
+function firstLines(text: Y.Text, lines: number): string {
+  let head = "";
+  let breaks = 0;
+  for (let item = text._start; item !== null && breaks < lines; item = item.right) {
+    if (item.deleted || !(item.content instanceof Y.ContentString)) continue;
+    const { str } = item.content;
+    head += str;
+    for (const char of str) if (char === "\n") breaks++;
+  }
+  return head.split("\n", lines).join("\n");
+}
+
+interface RecentPerm {
+  mark: number;
+  at: number;
+  message: PermMessage;
+}
+
 /**
  * The collaboration extension: token auth, permission enforcement, batched persistence with a doc
  * lock, delayed unload, live permission changes, size limit, nearby previews, activity and content
@@ -204,6 +246,14 @@ export class Collab implements Extension<CollabContext> {
   private settingsAt = 0;
   private timers: NodeJS.Timeout[] = [];
   private readonly refused = new WeakSet<Connection>();
+  private readonly awarenessBudget = new WeakMap<Connection, { tokens: number; at: number }>();
+  /** Perm messages received so far, and the recent ones per share (see `catchUp`). */
+  private permCount = 0;
+  private readonly recentPerms = new Map<string, RecentPerm[]>();
+  /** `afterUnloadDocument` work still running, awaited by `onDestroy`. */
+  private readonly unloads = new Set<Promise<void>>();
+  private readonly loggedAt = new Map<string, number>();
+  private subscribed = false;
   private shuttingDown = false;
   private lockTicking = false;
 
@@ -224,12 +274,20 @@ export class Collab implements Extension<CollabContext> {
     const permPattern = channels.permPattern();
     const cmdPattern = channels.cmdPattern();
     this.deps.subscriber.on("pmessage", (pattern: string, channel: string, message: string) => {
+      // A rejection here would end the process; both handlers log their own errors.
+      const log = (error: unknown) => console.error(`collab: message on ${channel} failed`, error);
       if (pattern === permPattern)
-        void this.applyPermission(channel.slice(permPattern.length - 1), message);
+        this.applyPermission(channel.slice(permPattern.length - 1), message).catch(log);
       else if (pattern === cmdPattern)
-        void this.handleCommand(channel.slice(cmdPattern.length - 1), message);
+        this.handleCommand(channel.slice(cmdPattern.length - 1), message).catch(log);
+    });
+    // Pub/sub drops what was published while the connection was down: re-read every loaded share.
+    this.deps.subscriber.on("ready", () => {
+      if (!this.subscribed) return;
+      for (const state of this.docs.values()) void this.reconcile(state);
     });
     await this.deps.subscriber.psubscribe(permPattern, cmdPattern);
+    this.subscribed = true;
     this.timers.push(
       setInterval(() => this.flushTick(), this.timings.flushIntervalMs),
       setInterval(() => void this.lockTick(), this.timings.lockRenewMs),
@@ -250,6 +308,9 @@ export class Collab implements Extension<CollabContext> {
   }
 
   async onDestroy() {
+    // Hocuspocus calls this once the last doc left its map, which can be before the
+    // `afterUnloadDocument` of another doc (final flush, lock release) finished.
+    await Promise.allSettled([...this.unloads]);
     for (const timer of this.timers) clearInterval(timer);
     this.timers = [];
     await this.deps.subscriber
@@ -262,7 +323,11 @@ export class Collab implements Extension<CollabContext> {
   async onAuthenticate({ token, documentName, connectionConfig }: onAuthenticatePayload) {
     const payload = await verifyCollabToken(token, this.deps.secret);
     if (!payload || payload.shareId !== documentName) throw deny(COLLAB_DENY_REASONS.unauthorized);
-    const share = await this.deps.stores.shares.get(documentName);
+    // Perm messages from now on may not be reflected in the share read below.
+    const permMark = this.permCount;
+    const share = await this.available(`authentication for ${documentName}`, () =>
+      this.deps.stores.shares.get(documentName),
+    );
     if (!share) throw deny(COLLAB_DENY_REASONS.notFound);
     if (share.bans.includes(payload.clientId)) throw deny(COLLAB_DENY_REASONS.banned);
     connectionConfig.readOnly = isReadOnly(payload.role, share.locked);
@@ -272,6 +337,7 @@ export class Collab implements Extension<CollabContext> {
       color: payload.color,
       role: payload.role,
       shareId: payload.shareId,
+      permMark,
     };
     return result;
   }
@@ -287,17 +353,21 @@ export class Collab implements Extension<CollabContext> {
       else await this.release(previous);
     }
 
-    const share = await this.deps.stores.shares.get(documentName);
+    const share = await this.available(`loading ${documentName}`, () =>
+      this.deps.stores.shares.get(documentName),
+    );
     if (!share) throw deny(COLLAB_DENY_REASONS.notFound);
+    const lockKey = keys.docLock(documentName);
     const core = new PersistedDoc(documentName, document, this.deps.stores, {
       compactAfter: this.timings.compactAfter,
       historyIntervalMs: this.timings.historyIntervalMs,
+      // Valkey unreachable: skip the compaction rather than fail the flush with it.
+      stillOwner: () => this.lock.renew(lockKey).catch(() => false),
       onFlush: (ms) => this.deps.metrics.flushSeconds.observe(ms / 1000),
     });
-    const lockKey = keys.docLock(documentName);
     core.owner = await this.lock.acquire(lockKey).catch(() => false);
     try {
-      await core.load();
+      await this.available(`loading ${documentName}`, () => core.load());
     } catch (error) {
       if (core.owner) await this.lock.release(lockKey).catch(() => {});
       throw error;
@@ -311,15 +381,47 @@ export class Collab implements Extension<CollabContext> {
   }
 
   async connected({ connection, documentName }: connectedPayload<CollabContext>) {
-    const state = this.docs.get(documentName);
-    if (state) {
-      state.idleSince = null;
-      if (state.unloadTimer) clearTimeout(state.unloadTimer);
-      state.unloadTimer = null;
-    }
     guardSlowClient(connection.webSocket, this.timings.slowClientBytes, () =>
       this.deps.metrics.slowClients.inc(),
     );
+    const state = this.docs.get(documentName);
+    if (!state) return;
+    state.idleSince = null;
+    if (state.unloadTimer) clearTimeout(state.unloadTimer);
+    state.unloadTimer = null;
+    await this.catchUp(state, connection);
+  }
+
+  /**
+   * §6.7 for a connection that authenticated before a permission change and was registered on the
+   * doc after the change was applied to the doc's connections: applies what it missed.
+   */
+  private async catchUp(state: DocState, connection: Connection) {
+    if (state.deleted) {
+      connection.close({ code: 4404, reason: COLLAB_CLOSE_REASONS.deleted });
+      return;
+    }
+    const { permMark } = context(connection);
+    const missed = (this.recentPerms.get(state.name) ?? [])
+      .filter((entry) => entry.mark > permMark)
+      .map((entry) => entry.message);
+    if (missed.length === 0) return;
+    try {
+      if (missed.some((m) => m.kind === "delete")) return this.applyDelete(state);
+      if (missed.some((m) => m.kind === "lock")) {
+        const share = await this.deps.stores.shares.get(state.name);
+        if (state.deleted || state.document.isDestroyed) return;
+        if (!share) return this.applyDelete(state);
+        this.applyShare(state, share, false);
+      }
+      for (const message of missed) {
+        if (message.kind === "kick" || message.kind === "role")
+          await this.enforce(state, message, [connection]);
+      }
+    } catch (error) {
+      console.error(`collab: catching up a connection to ${state.name} failed`, error);
+      state.reconciledAt = 0;
+    }
   }
 
   async onDisconnect({ document, documentName }: onDisconnectPayload) {
@@ -347,9 +449,12 @@ export class Collab implements Extension<CollabContext> {
       await state.core.history(true);
       await state.core.compact();
     } catch (error) {
-      // Keep the doc in memory rather than lose updates; try again later.
       console.error(`collab: saving ${documentName} before unload failed`, error);
-      if (!this.shuttingDown) this.scheduleUnload(state, this.timings.unloadDelayMs);
+      // Shutting down: unload anyway so the process can exit. Connected clients still hold these
+      // updates and send them to the instance they reconnect to.
+      if (this.shuttingDown) return;
+      // Keep the doc in memory rather than lose updates; try again later.
+      this.scheduleUnload(state, this.timings.unloadDelayMs);
       return Promise.reject();
     }
   }
@@ -357,14 +462,22 @@ export class Collab implements Extension<CollabContext> {
   async afterUnloadDocument({ documentName }: afterUnloadDocumentPayload) {
     const state = this.docs.get(documentName);
     if (!state?.document.isDestroyed) return;
-    state.clearTimers();
+    const done = (async () => {
+      state.clearTimers();
+      try {
+        // Updates that arrived from other instances while extension-redis delayed the unload.
+        if (!state.deleted) await state.core.flush();
+      } catch (error) {
+        console.error(`collab: final flush of ${documentName} failed`, error);
+      }
+      await this.release(state);
+    })();
+    this.unloads.add(done);
     try {
-      // Updates that arrived from other instances while extension-redis delayed the unload.
-      if (!state.deleted) await state.core.flush();
-    } catch (error) {
-      console.error(`collab: final flush of ${documentName} failed`, error);
+      await done;
+    } finally {
+      this.unloads.delete(done);
     }
-    await this.release(state);
   }
 
   /** Forgets a doc: stops recording, gives up the lock and its nearby entry. */
@@ -378,6 +491,7 @@ export class Collab implements Extension<CollabContext> {
       await this.deps.redis.del(keys.nearbyItem(state.name)).catch(() => {});
     }
     if (this.docs.get(state.name) === state) this.docs.delete(state.name);
+    this.loggedAt.delete(`flush:${state.name}`);
     state.markClosed();
   }
 
@@ -415,7 +529,7 @@ export class Collab implements Extension<CollabContext> {
     if ((type !== 1 && type !== 2) || connection.readOnly) return;
     const state = this.docs.get(document.name);
     if (!state) return;
-    const max = this.settings.maxDocBytes;
+    const max = this.maxDocBytes();
     if (state.core.sizeEstimate + payload.byteLength <= max) return;
     if (onlyDeletes(payload)) return;
     if (state.core.measure() + payload.byteLength <= max) return;
@@ -433,12 +547,94 @@ export class Collab implements Extension<CollabContext> {
     connection.readOnly = isReadOnly(context(connection).role, state?.locked ?? false);
   }
 
+  /**
+   * §4 awareness from clients: at most `AWARENESS_MAX_UPDATES_PER_SECOND` updates per connection,
+   * `AWARENESS_MAX_STATE_BYTES` per state, only for Yjs clients no other connection here announced,
+   * and `user` always from the token. Dropped entries are simply not forwarded.
+   */
+  async beforeHandleAwareness({
+    connection,
+    document,
+    states,
+    removedClients,
+  }: beforeHandleAwarenessPayload<CollabContext>) {
+    // Updates from other instances (extension-redis) were checked there.
+    if (!connection) return;
+    if (!this.takeAwarenessToken(connection)) {
+      states.clear();
+      removedClients.clear();
+      return;
+    }
+    const { clientId, name, color } = context(connection);
+    const own = document.getClients(connection);
+    // Clients announced through another instance are not checked: after that instance died its
+    // clients reconnect here with the same Yjs client ids.
+    const ownedElsewhere = (yClientId: number) =>
+      document
+        .getConnections()
+        .some((c) => c !== connection && document.getClients(c).has(yClientId));
+    let owned = own.size;
+    for (const [yClientId, state] of [...states]) {
+      if (!own.has(yClientId)) {
+        if (ownedElsewhere(yClientId) || owned >= AWARENESS_MAX_CLIENTS_PER_CONNECTION) {
+          states.delete(yClientId);
+          continue;
+        }
+        owned++;
+      }
+      const next = { ...state, user: { clientId, name, color } };
+      if (JSON.stringify(next).length > AWARENESS_MAX_STATE_BYTES) states.delete(yClientId);
+      else states.set(yClientId, next);
+    }
+    for (const yClientId of [...removedClients]) {
+      if (!own.has(yClientId)) removedClients.delete(yClientId);
+    }
+  }
+
+  /** Token bucket: a burst of one second's budget, refilled continuously. */
+  private takeAwarenessToken(connection: Connection): boolean {
+    const now = Date.now();
+    const rate = AWARENESS_MAX_UPDATES_PER_SECOND;
+    const budget = this.awarenessBudget.get(connection) ?? { tokens: rate, at: now };
+    budget.tokens = Math.min(rate, budget.tokens + ((now - budget.at) * rate) / 1000);
+    budget.at = now;
+    this.awarenessBudget.set(connection, budget);
+    if (budget.tokens < 1) return false;
+    budget.tokens--;
+    return true;
+  }
+
+  /** `settings.maxDocBytes`, never above what one MongoDB document can store. */
+  private maxDocBytes(): number {
+    return Math.min(this.settings.maxDocBytes, MAX_DOC_BYTES_LIMIT);
+  }
+
+  /** Logs `error` unless the same `key` was logged within `ERROR_LOG_INTERVAL_MS`. */
+  private logThrottled(key: string, message: string, error: unknown) {
+    const now = Date.now();
+    if (now - (this.loggedAt.get(key) ?? 0) < ERROR_LOG_INTERVAL_MS) return;
+    this.loggedAt.set(key, now);
+    console.error(message, error);
+  }
+
+  /** Runs a database read for a client; a failure is reported as `unavailable`, not a refusal. */
+  private async available<T>(label: string, task: () => Promise<T>): Promise<T> {
+    try {
+      return await task();
+    } catch (error) {
+      if (isDenied(error, COLLAB_DENY_REASONS.notFound)) throw error;
+      console.error(`collab: ${label} failed`, error);
+      throw deny(COLLAB_DENY_REASONS.unavailable);
+    }
+  }
+
   // timers
 
   private flushTick() {
+    const now = Date.now();
     for (const state of this.docs.values()) {
       const { core } = state;
-      if (state.flushing || state.deleted || !core.owner) continue;
+      if (state.flushing || state.deleted || !core.owner || now < state.flushRetryAt) continue;
       if (core.pendingUpdates === 0 && !core.needsCompaction && !core.historyDue) continue;
       state.flushing = true;
       const work = async () => {
@@ -447,9 +643,22 @@ export class Collab implements Extension<CollabContext> {
         if (core.historyDue) await core.history();
       };
       work()
+        .then(() => {
+          state.flushFailures = 0;
+          state.flushRetryAt = 0;
+        })
         .catch((error) => {
           this.deps.metrics.flushErrors.inc();
-          console.error(`collab: flush of ${state.name} failed, retrying`, error);
+          // Back off exponentially so an outage does not become a retry and log storm; the
+          // buffer keeps every update meanwhile.
+          state.flushFailures++;
+          const delay = this.timings.flushIntervalMs * 2 ** state.flushFailures;
+          state.flushRetryAt = Date.now() + Math.min(delay, FLUSH_BACKOFF_MAX_MS);
+          this.logThrottled(
+            `flush:${state.name}`,
+            `collab: flush of ${state.name} failed (${state.flushFailures} in a row), retrying`,
+            error,
+          );
         })
         .finally(() => {
           state.flushing = false;
@@ -469,24 +678,125 @@ export class Collab implements Extension<CollabContext> {
 
   private async lockUpkeep() {
     await this.refreshSettings();
+    this.pruneRecentPerms();
     const now = Date.now();
+    const live: DocState[] = [];
     for (const state of [...this.docs.values()]) {
       if (state.deleted || state.document.isDestroyed) continue;
-      const key = keys.docLock(state.name);
-      try {
-        if (state.core.owner) {
-          if (!(await this.lock.renew(key))) state.core.disown();
-        } else if (await this.lock.acquire(key)) {
-          await state.core.adopt();
-        }
-      } catch (error) {
-        // Valkey or MongoDB unavailable: keep the current role and retry on the next tick.
-        console.error(`collab: lock upkeep of ${state.name} failed`, error);
+      if (this.orphaned(state)) {
+        // A load that failed after onLoadDocument (an `afterLoadDocument` hook threw): Hocuspocus
+        // dropped the document, so nothing would ever unload this copy or give up its lock.
+        console.error(`collab: dropping ${state.name}, its load did not complete`);
+        await this.release(state);
+        continue;
       }
-      if (state.core.owner && state.document.getConnectionsCount() > 0) {
-        if (now - state.nearbyAt >= this.timings.nearbyRefreshMs)
-          void this.publishNearby(state, true);
+      live.push(state);
+    }
+    await this.upkeepLocks(live);
+    for (const state of live) {
+      if (state.deleted || state.document.getConnectionsCount() === 0) continue;
+      if (now - state.reconciledAt >= this.timings.reconcileMs) void this.reconcile(state);
+      if (state.core.owner && now - state.nearbyAt >= this.timings.nearbyRefreshMs)
+        void this.publishNearby(state);
+    }
+  }
+
+  /** True for a doc Hocuspocus neither holds nor is loading. */
+  private orphaned(state: DocState): boolean {
+    return (
+      this.instance.documents.get(state.name) !== state.document &&
+      !this.instance.loadingDocuments.has(state.name)
+    );
+  }
+
+  /** Renews owned doc locks in one Valkey round trip and contends for the others in one more. */
+  private async upkeepLocks(states: DocState[]) {
+    const lockKey = (state: DocState) => keys.docLock(state.name);
+    try {
+      const owned = states.filter((s) => s.core.owner);
+      const renewed = await this.lock.renewMany(owned.map(lockKey));
+      // A renew also fails when the key is merely gone (Valkey restarted, or the TTL ran out
+      // during a stall). Taking it again keeps the buffer; only another holder costs ownership.
+      const contenders = [
+        ...owned.filter((_, i) => renewed[i] === false),
+        ...states.filter((s) => !s.core.owner),
+      ];
+      const acquired = await this.lock.acquireMany(contenders.map(lockKey));
+      await Promise.all(
+        contenders.map(async (state, i) => {
+          const got = acquired[i];
+          // null: that command failed, so keep the current role and retry on the next tick.
+          if (got === null || got === undefined) return;
+          if (state.core.owner) {
+            if (!got) state.core.disown();
+            return;
+          }
+          if (!got) return;
+          try {
+            if (this.docs.get(state.name) !== state || state.deleted || state.document.isDestroyed)
+              await this.lock.release(lockKey(state));
+            else await state.core.adopt();
+          } catch (error) {
+            this.logThrottled("lock", `collab: taking over ${state.name} failed`, error);
+          }
+        }),
+      );
+    } catch (error) {
+      // Valkey unavailable: keep the current roles and retry on the next tick.
+      this.logThrottled("lock", "collab: lock upkeep failed", error);
+    }
+  }
+
+  /**
+   * Re-reads the share and applies it to the doc's connections: lock, bans, existence. Covers perm
+   * messages lost while the Valkey subscriber reconnected and shares removed by the TTL index.
+   */
+  private async reconcile(state: DocState) {
+    if (state.reconciling || state.deleted || state.document.isDestroyed) return;
+    state.reconciling = true;
+    state.reconciledAt = Date.now();
+    try {
+      const share = await this.deps.stores.shares.get(state.name);
+      if (state.deleted || state.document.isDestroyed) return;
+      if (!share) {
+        console.warn(`collab: share ${state.name} no longer exists, closing it`);
+        return this.applyDelete(state);
       }
+      this.applyShare(state, share, false);
+    } catch (error) {
+      this.logThrottled("reconcile", `collab: re-reading share ${state.name} failed`, error);
+      state.reconciledAt = 0;
+    } finally {
+      state.reconciling = false;
+    }
+  }
+
+  /** Applies a freshly read share record; `announceLock` notifies even if `locked` is unchanged. */
+  private applyShare(state: DocState, share: ShareRecord, announceLock: boolean) {
+    const lockChanged = share.locked !== state.locked;
+    state.share = share;
+    state.locked = share.locked;
+    state.nearby = share.access.nearby;
+    for (const c of state.document.getConnections()) {
+      const { clientId, role } = context(c);
+      if (role !== "owner" && share.bans.includes(clientId)) {
+        c.close({ code: 4403, reason: COLLAB_CLOSE_REASONS.kicked });
+        continue;
+      }
+      const readOnly = isReadOnly(role, state.locked);
+      if (!this.refused.has(c)) c.readOnly = readOnly;
+      if (announceLock || lockChanged) {
+        this.notify(c, { type: "locked", locked: state.locked, readOnly });
+      }
+    }
+  }
+
+  private pruneRecentPerms() {
+    const now = Date.now();
+    for (const [shareId, entries] of this.recentPerms) {
+      const kept = entries.filter((entry) => now - entry.at < PERM_REPLAY_MS);
+      if (kept.length === 0) this.recentPerms.delete(shareId);
+      else this.recentPerms.set(shareId, kept);
     }
   }
 
@@ -504,37 +814,35 @@ export class Collab implements Extension<CollabContext> {
   private async touch(state: DocState, now: number) {
     const expiresAt = new Date(now + this.settings.anonymousTtlHours * 3600_000);
     try {
-      await this.deps.stores.shares.touch(
+      const found = await this.deps.stores.shares.touch(
         state.name,
         new Date(now),
         expiresAt,
         state.core.sizeEstimate,
       );
+      // Expired by the TTL index while loaded: nobody publishes a delete for that.
+      if (!found && !state.deleted) {
+        console.warn(`collab: share ${state.name} no longer exists, closing it`);
+        this.applyDelete(state);
+      }
     } catch (error) {
       console.error(`collab: activity write for ${state.name} failed`, error);
     }
   }
 
-  /** §6.9: `nearby:item:<id>` while the share is listed nearby; refreshes the share record first. */
-  private async publishNearby(state: DocState, refreshShare = false) {
+  /** §6.9: `nearby:item:<id>` while the share is listed nearby (`reconcile` keeps the flag current). */
+  private async publishNearby(state: DocState) {
     if (!state.core.owner || state.deleted) return;
     state.nearbyAt = Date.now();
     try {
-      if (refreshShare) {
-        const share = await this.deps.stores.shares.get(state.name);
-        if (share) {
-          state.share = share;
-          state.nearby = share.access.nearby;
-        }
-      }
       const key = keys.nearbyItem(state.name);
       if (!state.nearby) {
         await this.deps.redis.del(key);
         return;
       }
       const meta = state.document.getMap(YDOC.meta);
-      const text = state.document.getText(YDOC.fileText(DEFAULT_FILE_ID)).toString();
-      const preview = text.split("\n", NEARBY_PREVIEW_LINES).join("\n");
+      const text = state.document.getText(YDOC.fileText(DEFAULT_FILE_ID));
+      const preview = firstLines(text, NEARBY_PREVIEW_LINES);
       const title = meta.get("title");
       const language = meta.get("language");
       await this.deps.redis
@@ -579,6 +887,7 @@ export class Collab implements Extension<CollabContext> {
         updatedAt: new Date(),
       });
       if (share) state.share = share;
+      else if (!state.deleted) this.applyDelete(state);
     } catch (error) {
       console.error(`collab: mirroring meta of ${state.name} failed`, error);
     }
@@ -665,7 +974,7 @@ export class Collab implements Extension<CollabContext> {
         return COLLAB_COMMAND_ERRORS.invalid;
       }
     }
-    if (target && Y.encodeStateAsUpdate(target).byteLength > this.settings.maxDocBytes) {
+    if (target && Y.encodeStateAsUpdate(target).byteLength > this.maxDocBytes()) {
       return COLLAB_COMMAND_ERRORS.tooLarge;
     }
 
@@ -698,12 +1007,17 @@ export class Collab implements Extension<CollabContext> {
       if (target) await state.core.history(true);
       return undefined;
     } finally {
-      await connection.disconnect();
+      // Not awaited: disconnecting runs the store hooks, and extension-redis delays those by up to
+      // a second, which the reply must not wait for.
+      connection
+        .disconnect()
+        .catch((cause) => console.error(`collab: closing the command connection failed`, cause));
     }
   }
 
   // permissions (§6.7)
 
+  /** Handles one `perm:<shareId>` message; never rejects. */
   async applyPermission(shareId: string, raw: string) {
     let message: PermMessage;
     try {
@@ -712,12 +1026,30 @@ export class Collab implements Extension<CollabContext> {
       console.error(`collab: ignoring malformed perm message for ${shareId}`);
       return;
     }
-    const state = this.docs.get(shareId);
-    if (!state || state.document.isDestroyed) return;
-    if (message.version < state.permVersion) return;
-    state.permVersion = message.version;
+    // Kept for connections that are authenticating now and are not on the doc yet.
+    this.permCount++;
+    const recent = this.recentPerms.get(shareId) ?? [];
+    recent.push({ mark: this.permCount, at: Date.now(), message });
+    this.recentPerms.set(shareId, recent);
 
-    const connections = state.document.getConnections();
+    const state = this.docs.get(shareId);
+    if (!state || state.document.isDestroyed || state.deleted) return;
+    try {
+      await this.enforce(state, message, state.document.getConnections());
+    } catch (error) {
+      console.error(`collab: applying a ${message.kind} message to ${shareId} failed`, error);
+      // Read the share again on the next lock tick.
+      state.reconciledAt = 0;
+    }
+  }
+
+  /**
+   * Applies a perm message to `connections` of the doc. `kick`, `delete` and `lock` are applied
+   * whatever their `version`: the API's counter is not published in order and restarts with
+   * Valkey, kicking or deleting twice is harmless, and `lock` re-reads the share. Only per-client
+   * role changes are ordered, so an older one cannot undo a newer one.
+   */
+  private async enforce(state: DocState, message: PermMessage, connections: Connection[]) {
     const targets = (c: Connection) =>
       message.clientId === undefined || context(c).clientId === message.clientId;
 
@@ -731,6 +1063,14 @@ export class Collab implements Extension<CollabContext> {
       case "role": {
         const { role, clientId } = message;
         if (role !== undefined && clientId !== undefined) {
+          const newest = state.roleVersions.get(clientId) ?? -1;
+          if (message.version < newest) {
+            console.warn(
+              `collab: ignoring role message ${message.version} for ${state.name}, ${newest} was applied`,
+            );
+            return;
+          }
+          state.roleVersions.set(clientId, message.version);
           for (const c of connections.filter(targets)) {
             context(c).role = role;
             c.readOnly = isReadOnly(role, state.locked);
@@ -745,14 +1085,10 @@ export class Collab implements Extension<CollabContext> {
         return;
       }
       case "lock": {
-        const share = await this.deps.stores.shares.get(shareId);
+        const share = await this.deps.stores.shares.get(state.name);
+        if (state.deleted || state.document.isDestroyed) return;
         if (!share) return this.applyDelete(state);
-        state.share = share;
-        state.locked = share.locked;
-        for (const c of state.document.getConnections()) {
-          c.readOnly = isReadOnly(context(c).role, state.locked);
-          this.notify(c, { type: "locked", locked: state.locked, readOnly: c.readOnly });
-        }
+        this.applyShare(state, share, true);
         return;
       }
       case "delete":
@@ -761,6 +1097,7 @@ export class Collab implements Extension<CollabContext> {
   }
 
   private applyDelete(state: DocState) {
+    if (state.deleted) return;
     state.deleted = true;
     if (state.core.owner) {
       state.core.disown();

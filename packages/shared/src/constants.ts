@@ -33,8 +33,20 @@ export const COLLAB_COMMAND_TIMEOUT_MS = 5000;
 /** Y.Map `meta` title and language are copied into the share record at most this often per doc. */
 export const META_MIRROR_THROTTLE_MS = 2000;
 
+/**
+ * Upper bound of `settings.maxDocBytes`: a document's full state is stored as one MongoDB document
+ * (snapshot or log entry), which BSON limits to 16 MiB.
+ */
+export const MAX_DOC_BYTES_LIMIT = 12 * 1024 * 1024;
+/** Largest WebSocket frame the collab server accepts: a full state of the largest document. */
+export const COLLAB_MAX_PAYLOAD_BYTES = MAX_DOC_BYTES_LIMIT + 64 * 1024;
+/** History snapshots kept per share (oldest are dropped first), within `historyRetentionDays`. */
+export const HISTORY_MAX_SNAPSHOTS = 100;
+
 // §4 awareness
 export const AWARENESS_MAX_UPDATES_PER_SECOND = 30;
+/** Largest awareness state of one client (JSON) the collab server forwards. */
+export const AWARENESS_MAX_STATE_BYTES = 4096;
 
 // §7 presence
 export const PRESENCE_USER_TTL_SECONDS = 60;

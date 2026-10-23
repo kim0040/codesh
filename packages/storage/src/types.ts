@@ -55,9 +55,10 @@ export interface ShareStore {
   /**
    * Records activity: sets `lastActiveAt` and `updatedAt` to `at`, `sizeBytes` when given, and
    * `expiresAt` to `expiresAtIfUnsaved` unless the share is saved. One atomic write, so a
-   * concurrent save can never be overwritten with an expiry.
+   * concurrent save can never be overwritten with an expiry. False when the share does not exist
+   * (deleted, or expired by the TTL index).
    */
-  touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number): Promise<void>;
+  touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number): Promise<boolean>;
   addBan(id: string, clientId: string): Promise<void>;
   removeBan(id: string, clientId: string): Promise<void>;
   /** Removes shares whose `expiresAt` is before `now` and returns their ids (MongoDB uses a TTL index). */
@@ -108,6 +109,8 @@ export interface SnapshotStore {
   list(shareId: string, kind: SnapshotKind): Promise<SnapshotMeta[]>;
   /** Deletes snapshots of `kind` with `seq < seq`. */
   deleteBelow(shareId: string, kind: SnapshotKind, seq: number): Promise<number>;
+  /** Keeps the `count` snapshots of `kind` with the highest seq and deletes the rest. */
+  keepNewest(shareId: string, kind: SnapshotKind, count: number): Promise<number>;
   /** Retention: deletes snapshots of `kind` older than `before`. */
   deleteOlderThan(kind: SnapshotKind, before: Date): Promise<number>;
   deleteForShare(shareId: string): Promise<void>;

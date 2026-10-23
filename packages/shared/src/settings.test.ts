@@ -33,5 +33,6 @@ describe("settings defaults", () => {
   it("rejects out-of-range values", () => {
     expect(settingsSchema.safeParse({ subnetPrefixV4: 4 }).success).toBe(false);
     expect(settingsSchema.safeParse({ anonymousTtlHours: 0 }).success).toBe(false);
+    expect(settingsSchema.safeParse({ maxDocBytes: 16 * 1024 * 1024 }).success).toBe(false);
   });
 });

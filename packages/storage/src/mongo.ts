@@ -188,7 +188,7 @@ class MongoShareStore implements ShareStore {
   }
 
   async touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number) {
-    await this.shares.updateOne({ _id: id }, [
+    const result = await this.shares.updateOne({ _id: id }, [
       {
         $set: {
           lastActiveAt: at,
@@ -198,6 +198,7 @@ class MongoShareStore implements ShareStore {
         },
       },
     ]);
+    return result.matchedCount > 0;
   }
 
   async addBan(id: string, clientId: string) {
@@ -310,6 +311,19 @@ class MongoSnapshotStore implements SnapshotStore {
     return (await this.snapshots.deleteMany({ shareId, kind, seq: { $lt: seq } })).deletedCount;
   }
 
+  async keepNewest(shareId: string, kind: SnapshotKind, count: number) {
+    if (count <= 0) return (await this.snapshots.deleteMany({ shareId, kind })).deletedCount;
+    const [oldestKept] = await this.snapshots
+      .find({ shareId, kind }, { projection: { _id: 0, seq: 1 } })
+      .sort({ seq: -1 })
+      .skip(count - 1)
+      .limit(1)
+      .toArray();
+    if (!oldestKept) return 0;
+    return (await this.snapshots.deleteMany({ shareId, kind, seq: { $lt: oldestKept.seq } }))
+      .deletedCount;
+  }
+
   async deleteOlderThan(kind: SnapshotKind, before: Date) {
     return (await this.snapshots.deleteMany({ kind, at: { $lt: before } })).deletedCount;
   }
@@ -339,11 +353,17 @@ class MongoFileStore implements FileStore {
       contentType: rest.contentType,
     });
     const stream = this.bucket.openUploadStream(name, { metadata });
-    await new Promise<void>((resolve, reject) => {
-      stream.once("finish", () => resolve());
-      stream.once("error", reject);
-      stream.end(data);
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        stream.once("finish", () => resolve());
+        stream.once("error", reject);
+        stream.end(data);
+      });
+    } catch (error) {
+      // Removes the chunks written so far.
+      await stream.abort().catch(() => {});
+      throw error;
+    }
     return this.toRecord(stream.id as ObjectId, name, data.byteLength, metadata);
   }
 
@@ -394,13 +414,14 @@ class MongoFileStore implements FileStore {
     if (!_id) return null;
     const file = await this.bucket.find({ _id }).next();
     if (!file) return null;
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of this.bucket.openDownloadStream(_id)) chunks.push(chunk as Uint8Array);
+    // Copies each chunk into place as it arrives, so the file is held in memory once.
     const data = new Uint8Array(file.length);
     let offset = 0;
-    for (const chunk of chunks) {
-      data.set(chunk, offset);
-      offset += chunk.byteLength;
+    for await (const chunk of this.bucket.openDownloadStream(_id)) {
+      const bytes = chunk as Uint8Array;
+      if (offset + bytes.byteLength > data.byteLength) throw new Error(`upload ${id} is corrupt`);
+      data.set(bytes, offset);
+      offset += bytes.byteLength;
     }
     return {
       meta: this.toRecord(_id, file.filename, file.length, file.metadata as UploadMetadata),

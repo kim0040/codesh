@@ -15,11 +15,23 @@ const server = createCollabServer({
   instanceId: config.instanceId,
 });
 
+/** Below the usual 30 s grace period of a container stop, so the log line still gets out. */
+const SHUTDOWN_TIMEOUT_MS = 25_000;
+
+// One failed background task must not end the process and drop every open doc with it.
+process.on("unhandledRejection", (reason) => {
+  console.error("collab: unhandled rejection", reason);
+});
+
 let closing = false;
 async function shutdown(signal: string) {
   if (closing) return;
   closing = true;
   console.log(`${signal} received, flushing and shutting down`);
+  setTimeout(() => {
+    console.error(`collab: shutdown did not finish within ${SHUTDOWN_TIMEOUT_MS} ms, exiting`);
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS).unref();
   try {
     await server.destroy();
     await mongo.close();

@@ -1,3 +1,4 @@
+import { HISTORY_MAX_SNAPSHOTS } from "@codesh/shared";
 import { DuplicateSeqError, type Stores } from "@codesh/storage";
 import * as Y from "yjs";
 
@@ -22,6 +23,13 @@ export interface PersistedDocOptions {
   /** Compact once this many log entries were written since the last compaction. */
   compactAfter: number;
   historyIntervalMs: number;
+  /** History snapshots kept per share; older ones are deleted after each new one. */
+  maxHistory?: number;
+  /**
+   * Checked right before a compaction replaces log entries: false when this instance lost the doc
+   * lock, so it must not delete entries another writer may have added.
+   */
+  stillOwner?: () => Promise<boolean>;
   now?: () => number;
   /** Called with the duration of every successful log write. */
   onFlush?: (ms: number) => void;
@@ -36,16 +44,20 @@ export interface LoadedState {
   rows: number;
 }
 
+const LOAD_ATTEMPTS = 5;
+
 /** Latest compact snapshot plus the log entries after it (§6.4). */
 export async function loadPersisted(stores: PersistStores, shareId: string): Promise<LoadedState> {
-  for (let attempt = 0; ; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     const snapshot = await stores.snapshots.latest(shareId, "compact");
     const base = snapshot?.seq ?? 0;
     const entries = await stores.updates.read(shareId, base);
     // A compaction between the two reads deletes entries the snapshot we read does not cover;
     // the log is contiguous after a snapshot, so a gap means "read again".
-    const first = entries[0];
-    if (first && first.seq !== base + 1 && attempt < 3) continue;
+    if (entries.some((entry, i) => entry.seq !== base + 1 + i)) {
+      if (attempt < LOAD_ATTEMPTS) continue;
+      throw new Error(`update log of ${shareId} has a gap after seq ${base}`);
+    }
     const parts = [...(snapshot ? [snapshot.state] : []), ...entries.map((e) => e.data)];
     return {
       state:
@@ -154,6 +166,7 @@ export class PersistedDoc {
     return this.serial(async () => {
       await this.writeBuffer();
       if (!this.owner || this.rowsSinceCompact === 0) return;
+      if (this.options.stillOwner && !(await this.options.stillOwner())) return;
       const seq = this.seq;
       // May include updates still in the buffer; they get a later seq and re-applying is a no-op.
       const state = bytes(Y.encodeStateAsUpdate(this.doc));
@@ -186,6 +199,11 @@ export class PersistedDoc {
         at: new Date(this.lastHistoryAt),
         kind: "history",
       });
+      await this.stores.snapshots.keepNewest(
+        this.shareId,
+        "history",
+        this.options.maxHistory ?? HISTORY_MAX_SNAPSHOTS,
+      );
     });
   }
 

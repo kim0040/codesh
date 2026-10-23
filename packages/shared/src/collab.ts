@@ -19,6 +19,11 @@ export const COLLAB_DENY_REASONS = {
   unauthorized: "unauthorized",
   notFound: "not_found",
   banned: "banned",
+  /**
+   * MongoDB or Valkey failed while checking access or loading the document. Not a decision about
+   * access: the editor should connect again with backoff.
+   */
+  unavailable: "unavailable",
 } as const;
 export type CollabDenyReason = (typeof COLLAB_DENY_REASONS)[keyof typeof COLLAB_DENY_REASONS];
 

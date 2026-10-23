@@ -23,7 +23,7 @@ describe("collab token", () => {
     expect(await verifyCollabToken(token, "other", 1_000)).toBeNull();
     expect(await verifyCollabToken(`${body}x.${sig}`, "secret", 1_000)).toBeNull();
     expect(await verifyCollabToken(token, "secret", payload.exp)).toBeNull();
-    for (const bad of ["", "a", "a.b.c", "!!.??"]) {
+    for (const bad of ["", "a", "a.b.c", "!!.??", "a.b", "abcde.fghij", `${body}.${sig}a`]) {
       expect(await verifyCollabToken(bad, "secret", 1_000)).toBeNull();
     }
   });

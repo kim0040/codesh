@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_DOC_BYTES_LIMIT } from "./constants.js";
 
 /** Admin-editable settings (§10). Object fields use `prefault` so nested defaults apply. */
 
@@ -18,6 +19,7 @@ export const settingsSchema = z.object({
     .number()
     .int()
     .positive()
+    .max(MAX_DOC_BYTES_LIMIT)
     .default(5 * 1024 * 1024),
   maxUploadMB: z.number().positive().default(200),
   guestAllowed: z.boolean().default(true),
