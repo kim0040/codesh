@@ -15,7 +15,13 @@ function toBase64Url(bytes: Uint8Array): string {
 
 function fromBase64Url(text: string): Uint8Array | null {
   if (!/^[A-Za-z0-9_-]*$/.test(text)) return null;
-  const binary = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
+  let binary: string;
+  try {
+    binary = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
+  } catch {
+    // A length that is not a valid base64 length.
+    return null;
+  }
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
