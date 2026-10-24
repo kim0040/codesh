@@ -21,6 +21,7 @@ export interface AppUpdateState {
 
 const PERIOD_MS = 30 * 60_000;
 const MIN_GAP_MS = 60_000;
+const APPROVAL_MS = 30_000;
 
 let state: AppUpdateState = { available: false, serverVersion: null };
 let dismissedFor: string | null = null;
@@ -29,7 +30,7 @@ let updateServiceWorker: ((reload?: boolean) => Promise<void>) | null = null;
 let registration: ServiceWorkerRegistration | undefined;
 let lastCheck = 0;
 let started = false;
-let reloadApproved = false;
+let reloadApprovedUntil = 0;
 
 function publish(next: AppUpdateState) {
   state = next;
@@ -52,7 +53,10 @@ export function startAppUpdates(): void {
       onNeedRefresh: () => markAvailable(null),
       // Workbox broadcasts controlling to every tab. Approval belongs to this JS context only.
       onNeedReload: () => {
-        if (reloadApproved) void reloadWhenSynced();
+        dismissedFor = null;
+        markAvailable(null);
+        if (Date.now() < reloadApprovedUntil) void reloadWhenSynced();
+        else reloadApprovedUntil = 0;
       },
       onRegisteredSW: (_url, value) => {
         registration = value;
@@ -63,6 +67,11 @@ export function startAppUpdates(): void {
   window.setInterval(() => void checkServerVersion(), PERIOD_MS);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void checkServerVersion();
+  });
+  // Vite emits this before surfacing a stale lazy chunk failure. Offer a safe, explicit reload.
+  window.addEventListener("vite:preloadError", () => {
+    dismissedFor = null;
+    markAvailable(null);
   });
 }
 
@@ -90,7 +99,7 @@ export function onCollabConnected(): void {
 
 async function reloadWhenSynced(): Promise<boolean> {
   if (!(await flushPendingSessions())) {
-    reloadApproved = false;
+    reloadApprovedUntil = 0;
     return false;
   }
   // No await between the last pending check and reload: typing cannot slip into that gap.
@@ -103,13 +112,13 @@ export async function applyAppUpdate(): Promise<boolean> {
   if (registration && updateServiceWorker) {
     await registration.update().catch(() => undefined);
     if (!(await flushPendingSessions())) return false;
-    reloadApproved = true;
+    reloadApprovedUntil = Date.now() + APPROVAL_MS;
     if (registration.waiting) {
       try {
         await updateServiceWorker();
         return true;
       } catch {
-        reloadApproved = false;
+        reloadApprovedUntil = 0;
         return false;
       }
     }

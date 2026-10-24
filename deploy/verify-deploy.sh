@@ -17,7 +17,7 @@ set -euo pipefail
 OLD="${1:?usage: deploy/verify-deploy.sh <old version> <new version>}"
 NEW="${2:?usage: deploy/verify-deploy.sh <old version> <new version>}"
 ROOT="$(pwd)"
-DIST="$ROOT/deploy/dist"
+DIST="${VERIFY_DIST:-$ROOT/deploy/dist}"
 WORK="${VERIFY_DIR:-/data/workspace/codesh-verify}"
 FRESH="$WORK/fresh"
 LEGACY="$WORK/legacy"
@@ -50,8 +50,9 @@ teardown() {
   for spec in "$FRESH:codesh-verify-fresh" "$LEGACY:codesh-verify-legacy"; do
     dir="${spec%%:*}"
     project="${spec##*:}"
-    [ -f "$dir/docker-compose.yml" ] &&
+    if [ -f "$dir/docker-compose.yml" ]; then
       in_dir "$dir" "$project" docker compose down -v --remove-orphans >/dev/null 2>&1 || true
+    fi
   done
   rm -rf "$WORK"
 }
@@ -117,11 +118,12 @@ step "bundle checksums"
 (cd "$DIST" && sha256sum -c "codesh-$OLD.tar.gz.sha256" "codesh-$NEW.tar.gz.sha256")
 
 step "fresh install of $OLD"
-P=18280
+P="${VERIFY_HTTP_PORT:-18280}"
+TLS_PORT="${VERIFY_HTTPS_PORT:-18643}"
 FJ="$WORK/fresh.jar"
 tar xzf "$DIST/codesh-$OLD.tar.gz" -C "$FRESH" --strip-components=1
 cp "$FRESH/.env.example" "$FRESH/.env"
-for kv in HTTP_PORT=$P HTTPS_PORT=18643 NETWORK_SUBNET=172.29.95.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb; do
+for kv in HTTP_PORT=$P HTTPS_PORT=$TLS_PORT NETWORK_SUBNET=172.29.95.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb; do
   setenv "$FRESH/.env" "${kv%%=*}" "${kv#*=}"
 done
 in_dir "$FRESH" codesh-verify-fresh ./install.sh
@@ -131,16 +133,16 @@ least_privilege "$FRESH" codesh-verify-fresh
 no_password_in_ps "$FRESH"
 
 step "data"
-ID="$(create_data $P "$FJ")"
+ID="$(create_data "$P" "$FJ")"
 [ -n "$ID" ] || fail "share not created"
-has_marker $P "$FJ" "$ID" || fail "share content missing"
-UPLOAD="$(call $P "$FJ" /api/uploads -F "file=@$FRESH/VERSION;filename=notes.txt")"
+has_marker "$P" "$FJ" "$ID" || fail "share content missing"
+UPLOAD="$(call "$P" "$FJ" /api/uploads -F "file=@$FRESH/VERSION;filename=notes.txt")"
 echo "share $ID, upload $UPLOAD"
 ok "share and upload created"
 
 step "metrics"
-[ "$(status $P "$FJ" /metrics/api)" = 200 ] || fail "/metrics/api from the host"
-[ "$(status $P "$FJ" /metrics)" = 403 ] || fail "/metrics must be refused"
+[ "$(status "$P" "$FJ" /metrics/api)" = 200 ] || fail "/metrics/api from the host"
+[ "$(status "$P" "$FJ" /metrics)" = 403 ] || fail "/metrics must be refused"
 ok "metrics: host 200, /metrics 403"
 
 step "CSP and offline browser run"
@@ -155,11 +157,11 @@ FILE="$(sed -n 's/^backup: \(.*\) (.*/\1/p' <<<"$B")"
 ok "backup $(stat -c '%a %s' "$FILE")"
 
 step "restore"
-call $P "$FJ" "/api/shares/$ID" -o /dev/null -X DELETE
-[ "$(status $P "$FJ" "/api/shares/$ID")" = 404 ] || fail "share not deleted"
+call "$P" "$FJ" "/api/shares/$ID" -o /dev/null -X DELETE
+[ "$(status "$P" "$FJ" "/api/shares/$ID")" = 404 ] || fail "share not deleted"
 in_dir "$FRESH" codesh-verify-fresh ./restore.sh "$FILE" --yes
-[ "$(status $P "$FJ" "/api/shares/$ID")" = 200 ] || fail "share not restored"
-has_marker $P "$FJ" "$ID" || fail "restored content missing"
+[ "$(status "$P" "$FJ" "/api/shares/$ID")" = 200 ] || fail "share not restored"
+has_marker "$P" "$FJ" "$ID" || fail "restored content missing"
 least_privilege "$FRESH" codesh-verify-fresh
 ok "deleted share is back with its content"
 
@@ -198,54 +200,70 @@ ok "changed bundle refused"
 step "upgrade $OLD -> $NEW"
 in_dir "$FRESH" codesh-verify-fresh ./upgrade.sh "$DIST/codesh-$NEW.tar.gz"
 [ "$(sed -n 's/^CODESH_VERSION=//p' "$FRESH/.env")" = "$NEW" ] || fail "version not updated"
-has_marker $P "$FJ" "$ID" || fail "content missing after upgrade"
+has_marker "$P" "$FJ" "$ID" || fail "content missing after upgrade"
 least_privilege "$FRESH" codesh-verify-fresh
 ok "upgraded, data kept"
 
 step "HTTPS with the internal CA"
 cp "$FRESH/tls/internal.caddy.example" "$FRESH/tls/local.caddy"
 setenv "$FRESH/.env" SITE_ADDRESS localhost
-setenv "$FRESH/.env" PUBLIC_URL https://localhost:18643
+setenv "$FRESH/.env" PUBLIC_URL "https://localhost:$TLS_PORT"
 in_dir "$FRESH" codesh-verify-fresh docker compose up -d --wait caddy api
 in_dir "$FRESH" codesh-verify-fresh docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$WORK/root.crt"
-curl -fsS --cacert "$WORK/root.crt" -D "$WORK/https.headers" -o /dev/null https://localhost:18643/api/session
+curl -fsS --cacert "$WORK/root.crt" -D "$WORK/https.headers" -o /dev/null "https://localhost:$TLS_PORT/api/session"
 grep -Eiq '^set-cookie:.*; secure' "$WORK/https.headers" || fail "session cookie is not Secure"
-curl -fsS --cacert "$WORK/root.crt" -D "$WORK/hsts.headers" -o /dev/null https://localhost:18643/
+curl -fsS --cacert "$WORK/root.crt" -D "$WORK/hsts.headers" -o /dev/null "https://localhost:$TLS_PORT/"
 grep -Eiq '^strict-transport-security: max-age=31536000' "$WORK/hsts.headers" || fail "no HSTS"
 grep -Eiq '^content-security-policy:' "$WORK/hsts.headers" || fail "no CSP over HTTPS"
 ok "HTTPS: trusted local CA, Secure cookie, HSTS, CSP"
 
 step "legacy install (root user only) upgraded by its own upgrade.sh"
-LP=18380
+LP="${VERIFY_LEGACY_HTTP_PORT:-18380}"
+# Shared verification hosts may allocate only one HTTP/HTTPS pair to this worker.
+if [ "$LP" = "$P" ]; then in_dir "$FRESH" codesh-verify-fresh docker compose down; fi
 LJ="$WORK/legacy.jar"
 for f in .env.example lib.sh generate-secrets.sh install.sh upgrade.sh backup.sh restore.sh; do
   legacy_file "$f" >"$LEGACY/$f"
 done
 legacy_file docker-compose.yml |
-  awk '/^    build:/ { skip = 1; next } skip && /^      / { next } { skip = 0; print }' >"$LEGACY/docker-compose.yml"
+  awk '/^    build:/ { skip = 1; next } skip && /^      / { next } { skip = 0; print }' |
+  # Legacy Compose predates CODESH_REGISTRY and the codesh-web image name.
+  sed -e "s|image: codesh/caddy:|image: $(sed -n 's/^CODESH_REGISTRY=//p' "$FRESH/.env" | tail -n 1)/codesh-web:|" \
+      -e "s|image: codesh/|image: $(sed -n 's/^CODESH_REGISTRY=//p' "$FRESH/.env" | tail -n 1)/codesh-|" >"$LEGACY/docker-compose.yml"
 chmod +x "$LEGACY"/*.sh
 mkdir -p "$LEGACY/tls"
 ln -s "$FRESH/images.tar" "$LEGACY/images.tar"
 printf '%s\n' "$OLD" >"$LEGACY/VERSION"
 cp "$LEGACY/.env.example" "$LEGACY/.env"
-for kv in HTTP_PORT=$LP HTTPS_PORT=18743 NETWORK_SUBNET=172.29.96.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb; do
+setenv "$LEGACY/.env" CODESH_REGISTRY "$(sed -n 's/^CODESH_REGISTRY=//p' "$FRESH/.env" | tail -n 1)"
+for kv in HTTP_PORT=$LP HTTPS_PORT="${VERIFY_LEGACY_HTTPS_PORT:-18743}" NETWORK_SUBNET=172.29.96.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb; do
   setenv "$LEGACY/.env" "${kv%%=*}" "${kv#*=}"
 done
 in_dir "$LEGACY" codesh-verify-legacy ./install.sh
 grep -q MONGO_APP_PASSWORD "$LEGACY/.env" && fail "legacy .env already knows the app user"
-LID="$(create_data $LP "$LJ")"
-has_marker $LP "$LJ" "$LID" || fail "legacy share content missing"
+LID="$(create_data "$LP" "$LJ")"
+has_marker "$LP" "$LJ" "$LID" || fail "legacy share content missing"
 # The old upgrade.sh finishes, then its EXIT trap fails on a function-local variable ("tmp:
 # unbound variable"), exits 1 and leaves the extracted bundle in TMPDIR. Accept exactly that.
 if ! in_dir "$LEGACY" codesh-verify-legacy ./upgrade.sh "$DIST/codesh-$NEW.tar.gz" >"$WORK/legacy-upgrade.log" 2>&1; then
   tail -3 "$WORK/legacy-upgrade.log"
-  grep -q "upgrade: codesh $NEW is running" "$WORK/legacy-upgrade.log" &&
-    grep -q 'tmp: unbound variable' "$WORK/legacy-upgrade.log" || fail "legacy upgrade failed"
+  grep -q "upgrade: codesh $NEW is running" "$WORK/legacy-upgrade.log" || fail "legacy upgrade failed"
+  grep -q 'tmp: unbound variable' "$WORK/legacy-upgrade.log" || fail "legacy upgrade failed"
   echo "known: the old upgrade.sh exits 1 after a successful upgrade (trap bug fixed in this version)"
 fi
 [ "$(sed -n 's/^CODESH_VERSION=//p' "$LEGACY/.env")" = "$NEW" ] || fail "legacy version not updated"
 grep -Eq '^MONGO_APP_PASSWORD=[0-9a-f]{64}$' "$LEGACY/.env" || fail "no app password generated"
-has_marker $LP "$LJ" "$LID" || fail "legacy content missing after upgrade"
+[ -w "$LEGACY/state" ] || fail "legacy status mount is not writable by the operator"
+# The old upgrader has a fixed file list that omits update.sh. Follow OPERATIONS 15.5 using
+# the matching bundle whose archive checksum and content were verified above.
+in_dir "$LEGACY" codesh-verify-legacy ./upgrade.sh "$DIST/codesh-$NEW.tar.gz" >"$WORK/legacy-bootstrap.log" 2>&1 &&
+  fail "legacy wrapper accepted a missing update.sh"
+grep -q 'copy it from the verified bundle' "$WORK/legacy-bootstrap.log" || fail "missing legacy transition advice"
+tar xzf "$DIST/codesh-$NEW.tar.gz" -O "codesh-$NEW/update.sh" >"$LEGACY/update.sh"
+chmod +x "$LEGACY/update.sh"
+in_dir "$LEGACY" codesh-verify-legacy ./update.sh --bundle "$DIST/codesh-$NEW.tar.gz" >"$WORK/legacy-bootstrap.log" 2>&1
+grep -q "codesh $NEW is up to date" "$WORK/legacy-bootstrap.log" || fail "legacy updater was not installed"
+has_marker "$LP" "$LJ" "$LID" || fail "legacy content missing after upgrade"
 least_privilege "$LEGACY" codesh-verify-legacy
 no_password_in_ps "$LEGACY"
 B="$(in_dir "$LEGACY" codesh-verify-legacy ./backup.sh)"

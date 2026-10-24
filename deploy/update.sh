@@ -21,6 +21,7 @@
 # prerelease), UPDATE_API_URL (https://api.github.com), UPDATE_DOWNLOAD_URL (https://github.com),
 # UPDATE_HEALTH_TIMEOUT (180 s). No credentials: the release API and the images are public.
 set -euo pipefail
+trap '' PIPE
 umask 077
 cd "$(dirname "$0")"
 . ./lib.sh
@@ -30,7 +31,8 @@ LOG="$STATE/update.log"
 STATUS="$STATE/update.json"
 LAST_RUN="$STATE/last-run"
 AUTO_CONF="$STATE/auto.conf"
-ROLLBACK="$STATE/rollback"
+ROLLBACK=rollback
+MARKER="$STATE/transaction"
 UNIT=codesh-update
 SYSTEMD_DIR="${CODESH_SYSTEMD_DIR:-/etc/systemd/system}"
 CRON_TAG="# codesh-update $(pwd)"
@@ -38,7 +40,7 @@ FILES="docker-compose.yml .env.example VERSION lib.sh generate-secrets.sh instal
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "$0"; }
 
-say() { printf '%s update: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+say() { printf '%s update: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" || true; }
 
 # setting NAME default: the environment wins over .env
 setting() {
@@ -105,12 +107,57 @@ fetch() {
   fi
 }
 
-# Parse JSON with Node from the currently installed API image: no host jq/python or image pull.
+# Prefer an available host parser, otherwise use the installed (or loaded bundle) API image.
+parse_json() {
+  if command -v node >/dev/null 2>&1; then node -e "$2" "$CHANNEL"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import json, re, sys
+data = json.load(sys.stdin)
+if sys.argv[1] == "mongo":
+    print(data["services"]["mongo"]["image"])
+else:
+    for r in data if isinstance(data, list) else [data]:
+        if not isinstance(r, dict) or not isinstance(r.get("tag_name"), str): continue
+        if any(k in r and type(r[k]) is not bool for k in ("draft", "prerelease")) or r.get("draft"): continue
+        v = r["tag_name"].strip()
+        if v.startswith("v"): v = v[1:]
+        m = re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?", v)
+        if not m or any(int(n) > 9007199254740991 for n in m.group(1, 2, 3)): continue
+        if m[4] and any(n.isascii() and n.isdigit() and (len(n) > 1 and n[0] == "0" or int(n) > 9007199254740991) for n in m[4].split(".")): continue
+        if sys.argv[2] != "prerelease" and (r.get("prerelease") or m[4]): continue
+        print(v.split("+")[0])
+' "$1" "$CHANNEL"
+  elif command -v jq >/dev/null 2>&1; then
+    if [ "$1" = mongo ]; then jq -er '.services.mongo.image | select(type == "string" and length > 0)'
+    else
+      jq -r --arg channel "$CHANNEL" '
+        (if type == "array" then .[] else . end) | select(type == "object") |
+        select(((has("draft") | not) or (.draft | type) == "boolean") and
+          ((has("prerelease") | not) or (.prerelease | type) == "boolean") and .draft != true) |
+        select(.tag_name | type == "string") | . as $r |
+        (.tag_name | gsub("^\\s+|\\s+$"; "") | sub("^v"; "")) as $v |
+        (try ($v | capture("^(?<a>0|[1-9][0-9]*)\\.(?<b>0|[1-9][0-9]*)\\.(?<c>0|[1-9][0-9]*)(?:-(?<pre>[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$")) catch empty) |
+        select([.a,.b,.c] | all(tonumber <= 9007199254740991)) |
+        select((.pre // "" | split(".")) | all(if test("^[0-9]+$") then
+          (test("^0[0-9]") | not) and tonumber <= 9007199254740991 else true end)) |
+        select($channel == "prerelease" or ($r.prerelease != true and (.pre // "") == "")) |
+        $v | split("+")[0]'
+    fi
+  elif [ -n "$BUNDLE" ]; then
+    candidate run --rm --no-deps --pull never -T --entrypoint node api -e "$2" "$CHANNEL"
+  else
+    docker compose run --rm --no-deps --pull never -T --entrypoint node api -e "$2" "$CHANNEL"
+  fi
+}
+
 # Same tag syntax/channel rules as the API (drafts, flag-only prereleases, numeric identifiers).
 releases() {
   local file="$WORK/releases.json"
-  fetch "$API/repos/$REPO/releases?per_page=50" "$file" || return 1
-  docker compose run --rm --no-deps --pull never -T --entrypoint node api -e '
+  fetch "$API/repos/$REPO/releases?per_page=50" "$file" || {
+    say "cannot fetch release list from $API; check connectivity or use --bundle" >&2; return 1;
+  }
+  parse_json releases '
     const fs = require("node:fs");
     const data = JSON.parse(fs.readFileSync(0, "utf8"));
     for (const r of Array.isArray(data) ? data : [data]) {
@@ -124,7 +171,9 @@ releases() {
       if (process.argv[1] !== "prerelease" && (r.prerelease === true || m[4])) continue;
       console.log(v.split("+")[0]);
     }
-  ' "$CHANNEL" <"$file"
+  ' <"$file" || {
+    say "cannot parse release JSON; install host node/python3/jq or load the installed API image" >&2; return 1;
+  }
 }
 
 # newest <list> <policy>: the newest version above CURRENT the policy allows (any|major|patch|minor)
@@ -180,7 +229,7 @@ record() {
 
 # fail result message: records, logs and exits (1, or 3 for a refusal)
 fail() {
-  record "$1" "$CURRENT" "${TARGET:-}" "$2"
+  record "$1" "$CURRENT" "${TARGET:-}" "$2" || true
   say "$2" >&2
   [ "$1" = refused ] && exit 3
   exit 1
@@ -221,6 +270,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+KillMode=mixed
+TimeoutStopSec=30min
 ExecStart=$dir/update.sh --auto"
     put "$SYSTEMD_DIR/$UNIT.timer" "[Unit]
 Description=Daily codesh update window
@@ -318,8 +369,8 @@ candidate() {
 
 mongo_compatible() {
   local old new
-  old="$(docker compose config --format json | mongo_image)" || return 1
-  new="$(candidate config --format json | mongo_image)" || return 1
+  old="$(docker compose config --format json | mongo_image)" || return 2
+  new="$(candidate config --format json | mongo_image)" || return 2
   # Conservatively reject ANY mongo image change; even a minor change can alter FCV/on-disk data.
   if [ -z "$old" ] || [ "$old" != "$new" ]; then
     say "MongoDB image change ($old -> $new) needs a separately supported migration path" >&2; return 1
@@ -327,7 +378,7 @@ mongo_compatible() {
 }
 
 mongo_image() {
-  docker compose run --rm --no-deps --pull never -T --entrypoint node api -e '
+  parse_json mongo '
     const c = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
     if (!c.services?.mongo?.image) process.exit(1);
     console.log(c.services.mongo.image);
@@ -370,31 +421,42 @@ rollback() {
     [ -s "$BACKUP" ] || return 1
     docker compose up -d --wait --wait-timeout "$HEALTH_TIMEOUT" mongo valkey || return 1
     say "restoring the database from $BACKUP before starting $CURRENT"
-    mongo_transfer restore <"$BACKUP" || return 1
+    mongo_restore "$BACKUP" || return 1
   fi
   healthy && open_ingress || return 1
-  record rolled-back "$CURRENT" "$TARGET" "previous files restored; DB restore required: $DB_TOUCHED; back on $CURRENT" || return 1
+  rm -f "$MARKER" || say "warning: cannot clear $MARKER; remove it after verifying recovery" >&2
+  record rolled-back "$CURRENT" "$TARGET" "previous files restored; DB restore required: $DB_TOUCHED; back on $CURRENT" ||
+    say "warning: recovery complete but status could not be written" >&2
   say "rolled back: codesh $CURRENT is running"
 }
 
 # shellcheck disable=SC2317 # invoked through the EXIT trap
 cleanup() {
   local result=$?
-  trap - EXIT HUP INT TERM
+  # Always release the lock, including when a status or temporary-file write fails.
+  trap - EXIT
+  trap '' HUP INT TERM
+  set +e
   if [ "${TRANSACTION:-0}" = 1 ]; then
     if ! rollback; then
       docker compose stop caddy api collab || true
-      record failed "$CURRENT" "$TARGET" "recovery failed; ingress and writers stopped; keep state/rollback and $BACKUP; inspect $LOG"
+      record failed "$CURRENT" "$TARGET" "recovery failed; ingress and writers stopped; keep rollback and $BACKUP; inspect $LOG" || true
       say "recovery failed; ingress remains closed; see $LOG" >&2
     fi
     result=1
   fi
   if [ "$result" != 0 ] && [ "${RECORDED:-0}" = 0 ] && [ "${DRY:-0}" != 1 ] && [ -n "${CURRENT:-}" ]; then
-    record failed "$CURRENT" "${TARGET:-}" "update aborted before maintenance; installed files unchanged; see $LOG"
+    record failed "$CURRENT" "${TARGET:-}" "update aborted before maintenance; installed files unchanged; see $LOG" || true
   fi
-  [ -z "${WORK:-}" ] || rm -rf "$WORK"
+  [ -z "${WORK:-}" ] || rm -rf "$WORK" || true
   install_unlock
   exit "$result"
+}
+
+transaction_phase() {
+  {
+    printf 'FROM=%q\nTARGET=%q\nPHASE=%q\nBACKUP=%q\n' "$CURRENT" "$TARGET" "$1" "$BACKUP"
+  } >"$MARKER.tmp" && mv "$MARKER.tmp" "$MARKER"
 }
 
 update() {
@@ -414,7 +476,7 @@ update() {
   fi
   if [ -z "$TARGET" ]; then
     semver_ok "$CURRENT" || die "installed version '$CURRENT' is not a release; pass --version X.Y.Z"
-    list="$(releases)" || fail failed "cannot reach $API (no internet? use --bundle <file>)"
+    list="$(releases)" || fail failed "release discovery failed; see the connectivity or JSON parser error above"
     case "$mode" in
       auto) TARGET="$(newest "$list" "$AUTO_POLICY")" ;;
       *)
@@ -479,9 +541,8 @@ update() {
     [ "$(cat "$src/VERSION")" = "$TARGET" ] || fail failed "$asset has the wrong VERSION"
   fi
 
-  CANDIDATE="$WORK/candidate"
-  mkdir "$CANDIDATE"
-  cp -a "$src/." "$CANDIDATE/"
+  # The extracted tree is already verified. Reuse it instead of duplicating images.tar in TMPDIR.
+  CANDIDATE="$src"
   cp -p .env "$CANDIDATE/.env"
   (
     cd "$CANDIDATE"
@@ -497,41 +558,54 @@ update() {
   )
   local file
   for file in $FILES .env; do [ -f "$CANDIDATE/$file" ] || fail failed "missing required file: $file"; done
-  mongo_compatible || fail refused "MongoDB image changes require a supported migration; nothing was stopped or backed up"
   if [ -n "$BUNDLE" ]; then
     docker load -i "$CANDIDATE/images.tar" || fail failed "loading bundle images failed; nothing was stopped"
-  else
+  fi
+  if mongo_compatible; then :; else
+    local compatible_status=$?
+    [ "$compatible_status" = 1 ] || fail failed "cannot read Compose JSON; install host node/python3/jq or load the installed API image; nothing was stopped"
+    fail refused "MongoDB image changes require a supported migration; nothing was stopped or backed up"
+  fi
+  if [ -z "$BUNDLE" ]; then
     candidate pull || fail failed "pulling the images of $TARGET failed; nothing was stopped"
   fi
   # Offline images.tar is covered by the archive and content hashes; docker load has no RepoDigests.
   if [ -z "$BUNDLE" ]; then verify_images || fail failed "image verification failed; nothing was stopped"; fi
 
   # Snapshot before the first mutation. Until commit, every error/signal goes through cleanup.
-  rm -rf "$ROLLBACK"
+  backup_space || fail failed "not enough backup space; nothing was stopped"
+  # Older installers kept secrets under the API state mount. Preserve them outside it as well.
+  [ ! -e "$STATE/rollback" ] || mv "$STATE/rollback" "$ROLLBACK.legacy.$(date +%s).$$"
+  [ ! -e "$ROLLBACK" ] || mv "$ROLLBACK" "$ROLLBACK.previous.$(date +%s).$$"
   mkdir -p "$ROLLBACK"
   for file in $FILES .env IMAGES docs tls; do
     [ ! -e "$file" ] || cp -a "$file" "$ROLLBACK/"
   done
+  transaction_phase prepared
   TRANSACTION=1
   record failed "$CURRENT" "$TARGET" "maintenance started; completion not confirmed; ingress closed until verification"
-  stop_writes || fail failed "writers did not shut down cleanly"
+  stop_writes backup || fail failed "writers did not shut down cleanly"
   local out
   out="$(./backup.sh ./backups)" || fail failed "backup failed"
   printf '%s\n' "$out"
   BACKUP="$(sed -n 's/^backup: \(.*\) ([0-9]* bytes)$/\1/p' <<<"$out")"
   [ -n "$BACKUP" ] || fail failed "backup path was not returned"
   [ -s "$BACKUP" ] || fail failed "backup is empty"
+  gzip -t -- "$BACKUP" || fail failed "backup archive is corrupt; installed files unchanged"
+  transaction_phase backed-up
   install_files "$CANDIDATE"
+  transaction_phase installed
   DB_TOUCHED=1
   healthy || fail failed "$TARGET did not get healthy"
   # Commit before exposing the verified app. An ingress start can partly succeed and accept
   # writes before reporting failure; restoring the old backup after that would lose those writes.
   TRANSACTION=0
+  rm -f "$MARKER"
   if ! open_ingress; then
-    stop_writes || say "could not confirm writers stopped; inspect docker compose ps" >&2
+    stop_writes backup || say "could not confirm writers stopped; inspect docker compose ps" >&2
     fail failed "app verified but ingress failed; current files and DB retained; inspect logs and run docker compose up -d"
   fi
-  record updated "$CURRENT" "$TARGET" ""
+  record updated "$CURRENT" "$TARGET" "" || say "warning: update complete but status could not be written" >&2
   say "codesh $TARGET is running (backup: ${BACKUP:-none})"
 }
 
@@ -569,7 +643,7 @@ main() {
     for n in 2 1; do [ -f "$LOG.$n" ] && mv "$LOG.$n" "$LOG.$((n + 1))"; done
     mv "$LOG" "$LOG.1"
   fi
-  [ "$DRY" = 1 ] || exec > >(tee -a "$LOG") 2>&1
+  [ "$DRY" = 1 ] || exec > >(trap '' HUP INT TERM PIPE; exec tee -i -p -a "$LOG") 2>&1
 
   CURRENT="$(env_get CODESH_VERSION)"
   REPO="$(setting UPDATE_REPO kim0040/codesh)"
@@ -583,6 +657,11 @@ main() {
     enable-auto) enable_auto; return ;;
     disable-auto) disable_auto; return ;;
   esac
+
+  if [ -e "$MARKER" ]; then
+    RECORDED=1
+    die "unfinished transaction in $MARKER; keep rollback and backups, recover manually per OPERATIONS 15.7 before removing the marker"
+  fi
 
   need_docker
   WORK="$(mktemp -d)"

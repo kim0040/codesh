@@ -89,7 +89,11 @@ describe("app update", () => {
     const tabs: Array<{
       handlers: Map<string, Handler[]>;
       reload: ReturnType<typeof vi.fn>;
-      window: { location: { reload: ReturnType<typeof vi.fn> }; setInterval: typeof vi.fn };
+      window: {
+        location: { reload: ReturnType<typeof vi.fn> };
+        setInterval: typeof vi.fn;
+        addEventListener: typeof vi.fn;
+      };
       registration: { waiting: object | null; update: ReturnType<typeof vi.fn> };
       update: typeof import("./app-update");
     }> = [];
@@ -101,7 +105,7 @@ describe("app update", () => {
       vi.resetModules();
       const handlers = new Map<string, Handler[]>();
       const reload = vi.fn();
-      const window = { location: { reload }, setInterval: vi.fn() };
+      const window = { location: { reload }, setInterval: vi.fn(), addEventListener: vi.fn() };
       const registration = { waiting: {}, update: vi.fn(async () => undefined) };
       class Workbox {
         addEventListener(name: string, handler: Handler) {
@@ -143,7 +147,7 @@ describe("app update", () => {
     }
     expect(clicked.reload).toHaveBeenCalledTimes(1);
     expect(later.reload).not.toHaveBeenCalled();
-    expect(later.update.appUpdateState().dismissed).toBe(true);
+    expect(later.update.appUpdateState().dismissed).toBe(false);
     vi.stubGlobal("window", later.window);
     await later.update.applyAppUpdate();
     expect(later.reload).toHaveBeenCalledTimes(1);
@@ -158,7 +162,11 @@ describe("app update", () => {
     });
     vi.stubEnv("PROD", true);
     vi.stubGlobal("navigator", { serviceWorker: {} });
-    vi.stubGlobal("window", { location: { reload }, setInterval: vi.fn() });
+    vi.stubGlobal("window", {
+      location: { reload },
+      setInterval: vi.fn(),
+      addEventListener: vi.fn(),
+    });
     vi.stubGlobal("document", { addEventListener: vi.fn() });
     vi.stubGlobal("fetch", answer("1.1.0"));
     const update = await import("./app-update");
@@ -188,5 +196,39 @@ describe("app update", () => {
     mocks.flush.mockResolvedValue(true);
     expect(await update.applyAppUpdate()).toBe(true);
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("expires tab approval and re-shows a dismissed prompt after a stale chunk fails", async () => {
+    const reload = vi.fn();
+    const addEventListener = vi.fn();
+    const registration = { waiting: {}, update: vi.fn(async () => undefined) };
+    mocks.register.mockImplementation((options) => {
+      options?.onRegisteredSW?.("sw.js", registration as unknown as ServiceWorkerRegistration);
+      return async () => undefined;
+    });
+    vi.stubEnv("PROD", true);
+    vi.stubGlobal("navigator", { serviceWorker: {} });
+    vi.stubGlobal("window", { location: { reload }, setInterval: vi.fn(), addEventListener });
+    vi.stubGlobal("document", { addEventListener: vi.fn() });
+    vi.stubGlobal("fetch", answer("1.1.0"));
+    const now = vi.spyOn(Date, "now").mockReturnValue(100_000);
+    try {
+      const update = await import("./app-update");
+      update.startAppUpdates();
+      expect(await update.applyAppUpdate()).toBe(true);
+      now.mockReturnValue(131_000);
+      update.dismissAppUpdate();
+      mocks.register.mock.calls[0]?.[0]?.onNeedReload?.();
+      await Promise.resolve();
+      expect(reload).not.toHaveBeenCalled();
+      expect(update.appUpdateState().dismissed).toBe(false);
+      update.dismissAppUpdate();
+      const preload = addEventListener.mock.calls.find(([name]) => name === "vite:preloadError");
+      preload?.[1]();
+      expect(update.appUpdateState()).toMatchObject({ available: true, dismissed: false });
+      expect(reload).not.toHaveBeenCalled();
+    } finally {
+      now.mockRestore();
+    }
   });
 });

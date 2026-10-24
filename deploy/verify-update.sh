@@ -18,7 +18,7 @@ ROOT="$(pwd)"
 WORK="${VERIFY_DIR:-/data/workspace/codesh-verify-update}"
 REG_PORT="${VERIFY_REGISTRY_PORT:-5055}"
 REG="localhost:$REG_PORT/kim0040"
-P=18480
+P="${VERIFY_HTTP_PORT:-18480}"
 PROJECT=codesh-verify-update
 INSTALL="$WORK/install"
 SRV="$WORK/srv"
@@ -183,10 +183,11 @@ step "install 1.0.0 from the offline bundle"
 docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E "^$REG/codesh-[a-z]+:1\.0\.[12]$" | xargs -r docker image rm -f >/dev/null
 tar xzf "$WORK/deploy/dist/codesh-1.0.0-linux-amd64.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
-for kv in HTTP_PORT=$P HTTPS_PORT=18843 NETWORK_SUBNET=172.29.97.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
+for kv in HTTP_PORT=$P HTTPS_PORT="${VERIFY_HTTPS_PORT:-18843}" NETWORK_SUBNET=172.29.97.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
   sed -i "s|^${kv%%=*}=.*|$kv|" "$INSTALL/.env"
 done
 in_install ./install.sh | tail -n 2
+rm "$INSTALL/images.tar"
 [ "$(envv CODESH_REGISTRY)" = "$REG" ] || fail "CODESH_REGISTRY not taken from the bundle"
 ID="$(create_data marker-one)"
 [ -n "$ID" ] || fail "no share id"

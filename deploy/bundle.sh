@@ -56,6 +56,7 @@ case "$SOURCE" in
   *) die "BUNDLE_SOURCE must be build or registry" ;;
 esac
 
+# shellcheck disable=SC2094 # SHA256SUMS is explicitly excluded from the input list.
 sums() { (cd "$1" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS); }
 archive() {
   tar czf "dist/$1.tar.gz" -C dist "$NAME"

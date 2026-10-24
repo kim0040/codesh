@@ -12,5 +12,6 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 BUNDLE="${1:?usage: ./upgrade.sh <bundle.tar.gz> [--allow-major]}"
 shift
+[ -f ./update.sh ] || die "update.sh is missing after a legacy upgrade; copy it from the verified bundle of the installed version (OPERATIONS 15.5)"
 # The child inherits the installation lock; the wrapper releases the mkdir fallback on exit.
 ./update.sh --bundle "$BUNDLE" "$@"

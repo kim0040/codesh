@@ -22,9 +22,11 @@ if [ "${2:-}" != "--yes" ]; then
 fi
 
 # api and collab write to the database; collab flushes open documents on stop.
-stop_writes
+gzip -t -- "$ARCHIVE" || die "invalid gzip archive; database unchanged"
+backup_space
+stop_writes restore
 docker compose up -d --wait --wait-timeout 120 mongo valkey
-mongo_transfer restore <"$ARCHIVE"
+mongo_restore "$ARCHIVE"
 docker compose up -d --wait --wait-timeout 120 mongo mongo-users valkey api collab
 wait_api 120
 docker compose up -d --wait --wait-timeout 120

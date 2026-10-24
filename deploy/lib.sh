@@ -27,7 +27,7 @@ env_set() {
 # One installation-wide lock, inherited only by children of its holder. The mkdir fallback
 # deliberately leaves a stale lock after SIGKILL: an operator must verify the PID before removal.
 install_lock() {
-  local path
+  local path owner boot boot_time lock_time
   path="$(pwd -P)/state/install.lock"
   mkdir -p state
   INSTALL_LOCK_OWNED=0
@@ -47,15 +47,32 @@ install_lock() {
   fi
   # Also arbitrate through mkdir when flock exists, so callers with different PATHs cannot
   # bypass one another by selecting different primitives.
-  mkdir "$path.d" 2>/dev/null || die "installation is locked ($path.d); verify its owner before removing a stale lock"
+  if ! mkdir "$path.d" 2>/dev/null; then
+    owner="$(cat "$path.d/owner" 2>/dev/null || true)"
+    boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+    boot_time="$(awk '$1 == "btime" {print $2}' /proc/stat 2>/dev/null || true)"
+    lock_time="$(stat -c %Y "$path.d" 2>/dev/null || true)"
+    if [ "$CODESH_LOCK_KIND" = flock ] && {
+      { [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; } ||
+      { [ -n "$boot" ] && [ -f "$path.d/boot" ] && [ "$(cat "$path.d/boot")" != "$boot" ]; } ||
+      { [[ "$boot_time" =~ ^[0-9]+$ && "$lock_time" =~ ^[0-9]+$ ]] && [ "$lock_time" -lt "$boot_time" ]; };
+    }; then
+      rm -f "$path.d/owner" "$path.d/boot"
+      rmdir "$path.d" || die "cannot reclaim stale installation lock"
+      mkdir "$path.d" || die "cannot reclaim stale installation lock"
+    else
+      die "installation is locked ($path.d); verify its owner before removing a stale lock"
+    fi
+  fi
   printf '%s\n' "$$" >"$path.d/owner"
+  cat /proc/sys/kernel/random/boot_id >"$path.d/boot" 2>/dev/null || true
   INSTALL_LOCK_OWNED=1
   export CODESH_LOCK_PATH="$path" CODESH_LOCK_PID="$$" CODESH_LOCK_KIND
 }
 
 install_unlock() {
   if [ "${INSTALL_LOCK_OWNED:-0}" = 1 ]; then
-    rm -f "$CODESH_LOCK_PATH.d/owner"
+    rm -f "$CODESH_LOCK_PATH.d/owner" "$CODESH_LOCK_PATH.d/boot"
     rmdir "$CODESH_LOCK_PATH.d"
   fi
 }
@@ -109,17 +126,21 @@ wait_api() {
 # Stop ingress first; compose stop waits for collab's SIGTERM flush and process exit.
 # A killed/failed collab must never be mistaken for a consistent backup boundary.
 stop_writes() {
-  local id
+  local id service
   docker compose stop caddy || return 1
   docker compose stop --timeout 40 api collab || return 1
-  for id in $(docker compose ps -a -q collab); do
-    [ "$(docker inspect --format '{{.State.ExitCode}} {{.State.OOMKilled}}' "$id")" = '0 false' ] || {
-      echo "collab did not shut down cleanly; refusing to back up" >&2; return 1;
-    }
+  # A manual restore deliberately replaces this DB, including after a crashed/OOM writer.
+  [ "${1:-}" != restore ] || return 0
+  for service in api collab; do
+    for id in $(docker compose ps -a -q "$service"); do
+      [ "$(docker inspect --format '{{.State.ExitCode}} {{.State.OOMKilled}}' "$id")" = '0 false' ] || {
+        echo "$service did not shut down cleanly; refusing to back up" >&2; return 1;
+      }
+    done
   done
 }
 
-# mongo_transfer dump|restore: mongodump to stdout, or mongorestore from stdin, as the root user
+# mongo_transfer dump|validate|restore: Mongo tools as the root user, archive on stdin/stdout.
 # inside the mongo container. The password goes through a private config file, never arguments.
 mongo_transfer() {
   # shellcheck disable=SC2016 # expanded by the shell in the container
@@ -132,6 +153,7 @@ mongo_transfer() {
     set -- --quiet --host localhost --username codesh --authenticationDatabase admin --config "$cfg" --archive --gzip
     case "$0" in
       dump) mongodump "$@" --db codesh ;;
+      validate) mongorestore "$@" --dryRun --nsInclude "codesh.*" ;;
       restore)
         # --drop alone only drops collections in the archive, leaving failed migrations behind.
         mongosh --quiet --host localhost --eval "if (!db.getSiblingDB(\"admin\").auth(\"codesh\", process.env.MONGO_INITDB_ROOT_PASSWORD)) throw new Error(\"auth failed\"); db.getSiblingDB(\"codesh\").dropDatabase()" >/dev/null
@@ -139,6 +161,43 @@ mongo_transfer() {
       *) exit 2 ;;
     esac
   ' "$1"
+}
+
+# Validate twice before the destructive operation, and retain the current DB even if restore
+# subsequently fails (OOM, server mismatch, disk pressure). Call only with all writers stopped.
+mongo_restore() {
+  gzip -t -- "$1" || { echo "invalid gzip archive; database unchanged" >&2; return 1; }
+  mongo_transfer validate <"$1" || { echo "mongorestore dry run failed; database unchanged" >&2; return 1; }
+  # Use this engine's validated dump even after rollback restored an older backup.sh.
+  mongo_backup ./backups >&2 || return 1
+  mongo_transfer restore <"$1"
+}
+
+mongo_backup() (
+  set -euo pipefail
+  umask 077
+  local dir="$1" part file
+  mkdir -p "$dir" || return 1
+  part="$(mktemp "$dir/.backup.XXXXXX")" || return 1
+  file="$dir/codesh-$(date +%Y%m%d-%H%M%S)-${part##*.}.archive.gz"
+  trap 'rm -f "$part"' EXIT
+  mongo_transfer dump >"$part" || return 1
+  [ -s "$part" ] || { echo "mongodump produced no data" >&2; return 1; }
+  gzip -t -- "$part" || { echo "mongodump archive is corrupt; backup not published" >&2; return 1; }
+  chmod 600 "$part" && mv "$part" "$file" || return 1
+  echo "backup: $file ($(wc -c <"$file" | tr -d ' ') bytes)"
+)
+
+# Reserve space for both the pre-update dump and the safety dump used during recovery.
+backup_space() {
+  local latest bytes free
+  latest="$(find backups -maxdepth 1 -name 'codesh-*.archive.gz' -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d ' ' -f 2- || true)"
+  [ -n "$latest" ] || return 0
+  bytes="$(wc -c <"$latest")" || return 1
+  free="$(df -Pk backups | awk 'NR == 2 {print $4}')" || return 1
+  [ "$((free * 1024))" -ge "$((bytes * 2))" ] || {
+    echo "insufficient free space: need twice the last backup size before maintenance" >&2; return 1;
+  }
 }
 
 # SHA-256 detects corruption and mismatch; obtain the checksum via a trusted delivery channel.
