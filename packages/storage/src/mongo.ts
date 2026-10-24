@@ -7,6 +7,8 @@ import {
   type LabStudent,
   SETTINGS_DOC_ID,
   type Settings,
+  type ShareLabelRecord,
+  type ShareLabels,
   type ShareRecord,
   type SnapshotKind,
   type SnapshotRecord,
@@ -28,6 +30,7 @@ import {
   DuplicateSeqError,
   type FileStore,
   FileTooLargeError,
+  type LabelStore,
   type LabStore,
   type LabUpdate,
   type NewUpload,
@@ -50,6 +53,7 @@ export const COLLECTIONS = {
   updates: "share_updates",
   snapshots: "share_snapshots",
   labs: "labs",
+  labels: "share_labels",
   settings: "settings",
   audit: "audit",
 } as const;
@@ -60,6 +64,7 @@ const DUPLICATE_KEY = 11000;
 
 type ShareDoc = Omit<ShareRecord, "id"> & { _id: string };
 type LabDoc = Omit<LabRecord, "id"> & { _id: string };
+type LabelDoc = ShareLabelRecord & { _id: string };
 type UpdateDoc = { _id?: ObjectId; shareId: string; seq: number; data: Binary; at: Date };
 type SnapshotDoc = Omit<SnapshotRecord, "state"> & { state: Binary };
 type SettingsDoc = Settings & { _id: string };
@@ -536,6 +541,49 @@ class MongoLabStore implements LabStore {
   }
 }
 
+const labelKey = (clientId: string, shareId: string) => `${clientId}:${shareId}`;
+
+function fromLabelDoc({ _id: _, ...rest }: LabelDoc): ShareLabelRecord {
+  return rest;
+}
+
+class MongoLabelStore implements LabelStore {
+  constructor(private readonly labels: Collection<LabelDoc>) {}
+
+  async get(clientId: string, shareId: string) {
+    const doc = await this.labels.findOne({ _id: labelKey(clientId, shareId) });
+    return doc ? fromLabelDoc(doc) : null;
+  }
+
+  async set(clientId: string, shareId: string, labels: ShareLabels, at: Date) {
+    const entry: ShareLabelRecord = {
+      clientId,
+      shareId,
+      folder: labels.folder,
+      tags: [...labels.tags],
+      updatedAt: at,
+    };
+    await this.labels.replaceOne({ _id: labelKey(clientId, shareId) }, entry, { upsert: true });
+    return entry;
+  }
+
+  async delete(clientId: string, shareId: string) {
+    return (await this.labels.deleteOne({ _id: labelKey(clientId, shareId) })).deletedCount === 1;
+  }
+
+  async listForClient(clientId: string) {
+    return (await this.labels.find({ clientId }).toArray()).map(fromLabelDoc);
+  }
+
+  async deleteForShare(shareId: string) {
+    return (await this.labels.deleteMany({ shareId })).deletedCount;
+  }
+
+  async shareIds() {
+    return this.labels.distinct("shareId");
+  }
+}
+
 class MongoSettingsStore implements SettingsStore {
   constructor(private readonly settings: Collection<SettingsDoc>) {}
 
@@ -578,6 +626,7 @@ export function createMongoStores(db: Db): Stores {
     snapshots: new MongoSnapshotStore(db.collection<SnapshotDoc>(COLLECTIONS.snapshots)),
     files: new MongoFileStore(db),
     labs: new MongoLabStore(db.collection<LabDoc>(COLLECTIONS.labs)),
+    labels: new MongoLabelStore(db.collection<LabelDoc>(COLLECTIONS.labels)),
     settings: new MongoSettingsStore(db.collection<SettingsDoc>(COLLECTIONS.settings)),
     audit: new MongoAuditStore(db.collection<AuditDoc>(COLLECTIONS.audit)),
   };
@@ -606,6 +655,10 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db
       .collection(COLLECTIONS.labs)
       .createIndexes([{ key: { expiresAt: 1 }, name: "expiresAt_ttl", expireAfterSeconds: 0 }]),
+    db.collection(COLLECTIONS.labels).createIndexes([
+      { key: { clientId: 1 }, name: "clientId" },
+      { key: { shareId: 1 }, name: "shareId" },
+    ]),
     db.collection(COLLECTIONS.audit).createIndexes([{ key: { at: -1 }, name: "at_desc" }]),
     db.collection(`${UPLOADS_BUCKET}.files`).createIndexes([
       { key: { filename: 1, uploadDate: 1 }, name: "filename_1_uploadDate_1" },

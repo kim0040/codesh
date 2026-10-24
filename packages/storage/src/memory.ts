@@ -5,6 +5,8 @@ import {
   type LabRecord,
   type LabStudent,
   type Settings,
+  type ShareLabelRecord,
+  type ShareLabels,
   type ShareRecord,
   type SnapshotKind,
   type SnapshotRecord,
@@ -16,6 +18,7 @@ import {
   DuplicateSeqError,
   type FileStore,
   FileTooLargeError,
+  type LabelStore,
   type LabStore,
   type LabUpdate,
   type NewUpload,
@@ -358,6 +361,52 @@ class MemoryLabStore implements LabStore {
   }
 }
 
+class MemoryLabelStore implements LabelStore {
+  private readonly entries = new Map<string, ShareLabelRecord>();
+
+  private key = (clientId: string, shareId: string) => `${clientId}:${shareId}`;
+
+  async get(clientId: string, shareId: string) {
+    const entry = this.entries.get(this.key(clientId, shareId));
+    return entry ? copy(entry) : null;
+  }
+
+  async set(clientId: string, shareId: string, labels: ShareLabels, at: Date) {
+    const entry: ShareLabelRecord = {
+      clientId,
+      shareId,
+      folder: labels.folder,
+      tags: [...labels.tags],
+      updatedAt: at,
+    };
+    this.entries.set(this.key(clientId, shareId), entry);
+    return copy(entry);
+  }
+
+  async delete(clientId: string, shareId: string) {
+    return this.entries.delete(this.key(clientId, shareId));
+  }
+
+  async listForClient(clientId: string) {
+    return [...this.entries.values()].filter((entry) => entry.clientId === clientId).map(copy);
+  }
+
+  async deleteForShare(shareId: string) {
+    let removed = 0;
+    for (const [key, entry] of [...this.entries]) {
+      if (entry.shareId === shareId) {
+        this.entries.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  async shareIds() {
+    return [...new Set([...this.entries.values()].map((entry) => entry.shareId))];
+  }
+}
+
 class MemorySettingsStore implements SettingsStore {
   private settings: Settings | null = null;
 
@@ -399,6 +448,7 @@ export function createMemoryStores(): Stores {
     snapshots: new MemorySnapshotStore(),
     files: new MemoryFileStore(),
     labs: new MemoryLabStore(),
+    labels: new MemoryLabelStore(),
     settings: new MemorySettingsStore(),
     audit: new MemoryAuditStore(),
   };

@@ -68,3 +68,16 @@ export const MAX_FILES_PER_SHARE = 100;
 export const MAX_NOTE_LENGTH = 200;
 export const MIN_PIN_LENGTH = 4;
 export const MAX_PIN_LENGTH = 32;
+
+// Labels (§5 `share_labels`): a person's own folder and tags for a share
+export const MAX_FOLDER_LENGTH = 60;
+export const MAX_TAGS_PER_SHARE = 10;
+export const MAX_TAG_LENGTH = 30;
+
+// Templates (§10 `templates`)
+export const MAX_TEMPLATES = 50;
+export const MAX_TEMPLATE_NAME_LENGTH = 60;
+export const MAX_TEMPLATE_DESCRIPTION_LENGTH = 200;
+export const MAX_TEMPLATE_ID_LENGTH = 40;
+/** Ids of the built-in templates start with this; settings templates may not. */
+export const BUILTIN_TEMPLATE_PREFIX = "builtin-";
