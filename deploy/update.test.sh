@@ -29,27 +29,95 @@ base="http://127.0.0.1:$port"
 # --- fake docker: logs every call; compose reads CODESH_VERSION from ./.env like the real one ----
 cat >"$F/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
+set -euo pipefail
 printf '%s\n' "$*" >>"$DOCKER_CALLS"
-version() { sed -n 's/^CODESH_VERSION=//p' .env | tail -n 1; }
-registry() { r="$(sed -n 's/^CODESH_REGISTRY=//p' .env | tail -n 1)"; printf '%s' "${r:-ghcr.io/kim0040}"; }
+envfile=.env
+compose_file=docker-compose.yml
 if [ "$1" = compose ]; then
   shift
+  while [[ "${1:-}" == --* || "${1:-}" = -f ]]; do
+    case "$1" in
+      --env-file) envfile="$2"; shift 2 ;;
+      -f) compose_file="$2"; shift 2 ;;
+      --project-directory) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  version="$(sed -n 's/^CODESH_VERSION=//p' "$envfile" | tail -1)"
+  registry="$(sed -n 's/^CODESH_REGISTRY=//p' "$envfile" | tail -1)"
+  registry="${registry:-ghcr.io/kim0040}"
   case "$1" in
     version) exit 0 ;;
-    config) for n in web api collab; do printf '%s/codesh-%s:%s\n' "$(registry)" "$n" "$(version)"; done ;;
-    pull) [ -n "${FAKE_PULL_FAIL:-}" ] && exit 1; exit 0 ;;
-    up) [ "$(version)" = "${FAKE_UNHEALTHY:-none}" ] && { echo "container api is unhealthy" >&2; exit 1; }; exit 0 ;;
-    exec) case "${!#}" in dump) printf 'fake-dump\n' ;; restore) cat >/dev/null; echo restored >>"$DOCKER_CALLS" ;; esac ;;
+    config)
+      if [[ "$*" == *--format* ]]; then
+        mongo="$(sed -n 's/^    image: \(mongo:[^ ]*\).*/\1/p' "$compose_file" | head -1)"
+        printf '{"services":{"mongo":{"image":"%s"}}}\n' "$mongo"
+      else for n in web api collab; do printf '%s/codesh-%s:%s\n' "$registry" "$n" "$version"; done; fi ;;
+    run)
+      if [ -n "${FAKE_NO_API_IMAGE:-}" ]; then echo 'installed API image is missing' >&2; exit 125; fi
+      while [ "$1" != -e ]; do shift; done
+      node "$@" ;;
+    pull)
+      if [ -n "${FAKE_PULL_BLOCK:-}" ]; then
+        touch "$FAKE_PULL_BLOCK.started"
+        while [ ! -f "$FAKE_PULL_BLOCK.continue" ]; do sleep .05; done
+      fi
+      [ -z "${FAKE_PULL_FAIL:-}" ] || exit 1 ;;
+    stop)
+      [[ "$*" != *caddy* ]] || touch "$FAKE_DB.closed"
+      [[ "$*" != *collab* || -n "${FAKE_NO_FLUSH:-}" ]] || printf 'shutdown-flushed\n' >>"$FAKE_DB" ;;
+    ps) printf '%s-fixture\n' "${!#}" ;;
+    up)
+      if [ "$version" = "${FAKE_INGRESS_FAIL:-none}" ] && [[ " $* " != *' api '* ]]; then
+        printf 'accepted-at-ingress\n' >>"$FAKE_DB"
+        exit 1
+      fi
+      printf 'up:%s:%s\n' "$version" "$*" >>"$DOCKER_CALLS"
+      if [[ " $* " == *' api '* ]]; then
+        if [ "$version" = "${FAKE_HEALTH_BLOCK_VERSION:-none}" ]; then
+          printf 'incompatible-schema\n' >"$FAKE_DB"
+          touch "$FAKE_HEALTH_BLOCK.started"
+          while [ ! -e "$FAKE_HEALTH_BLOCK.continue" ]; do sleep .05; done
+        fi
+        if [ "$version" = "${FAKE_ROLLBACK_BLOCK_VERSION:-none}" ]; then
+          touch "$FAKE_ROLLBACK_BLOCK.started"
+          while [ ! -e "$FAKE_ROLLBACK_BLOCK.continue" ]; do sleep .05; done
+        fi
+        if [ "$version" = "${FAKE_UNHEALTHY:-none}" ]; then
+          printf 'incompatible-schema\n' >"$FAKE_DB"
+          [ -z "${FAKE_STATUS_FAIL:-}" ] || mkdir -p state/update.json.tmp
+          if [ -n "${FAKE_CORRUPT_BACKUP:-}" ]; then
+            printf corrupt >"$(ls -t backups/codesh-*.archive.gz | head -n 1)"
+          fi
+          echo "container api is unhealthy" >&2; exit 1
+        fi
+        grep -q incompatible-schema "$FAKE_DB" && { echo 'old API cannot read changed schema' >&2; exit 1; }
+      fi ;;
+    exec)
+      case "${!#}" in
+        dump)
+          [ -f "$FAKE_DB.closed" ] || exit 1
+          if [ -n "${FAKE_DUMP_CORRUPT:-}" ]; then printf corrupt; else gzip -c "$FAKE_DB"; fi ;;
+        validate) gzip -t; [ -z "${FAKE_DRYRUN_FAIL:-}" ] || exit 1 ;;
+        restore) gzip -dc >"$FAKE_DB"; echo restored >>"$DOCKER_CALLS" ;;
+        *) exit 0 ;;
+      esac ;;
   esac
   exit 0
+fi
+if [ "$1" = inspect ]; then
+  writer_exit="${FAKE_WRITER_EXIT:-0}"
+  case "${!#}" in
+    api-fixture) writer_exit="${FAKE_API_EXIT:-$writer_exit}" ;;
+    collab-fixture) writer_exit="${FAKE_COLLAB_EXIT:-$writer_exit}" ;;
+  esac
+  printf '%s false\n' "$writer_exit"; exit 0
 fi
 if [ "$1" = image ] && [ "$2" = inspect ]; then
   ref="${!#}"
   name="${ref%:*}"
   printf '%s@sha256:%s\n' "$name" "$(printf '%s' "${name##*/}${FAKE_DIGEST_SALT:-}" | sha256sum | cut -c1-64)"
-  exit 0
 fi
-exit 0
 DOCKER
 cat >"$F/bin/systemctl" <<'SYSTEMCTL'
 #!/usr/bin/env bash
@@ -61,6 +129,8 @@ cat >"$F/bin/crontab" <<'CRONTAB'
 if [ "${1:-}" = -l ]; then cat "$CRONTAB_FILE" 2>/dev/null || exit 1; else cat >"$CRONTAB_FILE.new" && mv "$CRONTAB_FILE.new" "$CRONTAB_FILE"; fi
 CRONTAB
 chmod +x "$F/bin"/*
+export FAKE_DB="$F/database"
+printf 'initial-data\n' >"$FAKE_DB"
 export PATH="$F/bin:$PATH" DOCKER_CALLS="$F/docker.calls" CRONTAB_FILE="$F/crontab"
 export UPDATE_API_URL="$base/api" UPDATE_DOWNLOAD_URL="$base/dl" UPDATE_HEALTH_TIMEOUT=3
 digest() { printf '%s' "$1" | sha256sum | cut -c1-64; }
@@ -71,6 +141,10 @@ release() {
   local v="$1" dir="$F/srv/dl/kim0040/codesh/releases/download/v$1" stage="$F/stage/codesh-$1"
   mkdir -p "$dir" "$stage/docs" "$stage/tls" "$stage/state"
   cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml} "$stage/"
+  cp "$root/deploy/README.md" "$stage/README.md"
+  printf '# doc\n' >"$stage/docs/OPERATIONS.md"
+  printf '# tls\n' >"$stage/tls/tls.example"
+  [ "${2:-}" != mongo-change ] || sed -i 's/mongo:8.0.34/mongo:9.0.0/g' "$stage/docker-compose.yml"
   printf '# release %s\n' "$v" >>"$stage/update.sh"
   sed "s/^CODESH_VERSION=.*/CODESH_VERSION=$v/" "$root/deploy/.env.example" >"$stage/.env.example"
   printf 'NEW_IN_%s=yes\n' "${v//./_}" >>"$stage/.env.example"
@@ -79,6 +153,7 @@ release() {
     if [ "${2:-}" = bad-digest ]; then printf 'codesh-%s sha256:%s\n' "$n" "$(digest "other-$n")"
     else printf 'codesh-%s sha256:%s\n' "$n" "$(digest "codesh-$n")"; fi
   done >"$stage/IMAGES"
+  # shellcheck disable=SC2094 # manifest is excluded from find
   (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
   tar czf "$dir/codesh-deploy-$v.tar.gz" -C "$F/stage" "codesh-$v"
   (cd "$dir" && sha256sum "codesh-deploy-$v.tar.gz" >SHA256SUMS)
@@ -91,7 +166,9 @@ release 1.0.2 bad-checksum
 release 1.0.3 bad-digest
 release 1.0.4
 release 1.0.5
+release 1.0.6 mongo-change
 release 1.1.0
+release 1.1.1
 release 2.0.0
 releases_json() {
   printf '['
@@ -99,7 +176,7 @@ releases_json() {
   for v in "$@"; do
     [ "$first" = 1 ] || printf ','
     first=0
-    printf '{"tag_name":"v%s","name":"codesh %s","draft":false,"prerelease":%s,"body":"has \\"tag_name\\": \\"v9.9.9\\" inside"}' \
+    printf '{"tag_name":"v%s","name":"codesh %s","draft":false,"prerelease":%s,"body":"has tag_name inside"}' \
       "$v" "$v" "$([[ "$v" == *-* ]] && echo true || echo false)"
   done
   printf ']'
@@ -112,7 +189,7 @@ for _ in $(seq 50); do curl -fs "$base/healthz" >/dev/null 2>&1 && break; sleep 
 
 # --- an installation of 1.0.0 --------------------------------------------------------------------
 I="$F/install"
-cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml,.env.example} "$I/"
+cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml,.env.example,README.md} "$I/"
 sed -e 's/^CODESH_VERSION=.*/CODESH_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" "$I/.env.example" >"$I/.env"
 (cd "$I" && ./generate-secrets.sh .env >/dev/null)
 envv() { sed -n "s/^$1=//p" "$I/.env" | tail -n 1; }
@@ -133,7 +210,7 @@ step "a major version is refused"
 if run ./update.sh --version 2.0.0 --yes; then fail "major update accepted"; else [ $? = 3 ] || fail "exit code"; fi
 grep -q 'new major version' "$F/run.log" || fail "major refusal message"
 status | grep -q '"result":"refused"' || fail "refusal not recorded"
-calls | grep -q '^compose pull' && fail "pulled during a refusal"
+calls | grep -q 'pull$' && fail "pulled during a refusal"
 ok "2.0.0 refused without --allow-major, recorded"
 
 step "checksum mismatch: refused before backup or pull"
@@ -141,7 +218,7 @@ step "checksum mismatch: refused before backup or pull"
 run ./update.sh --version 1.0.2 --yes && fail "accepted a tampered archive"
 grep -q 'checksum mismatch: codesh-deploy-1.0.2.tar.gz' "$F/run.log" || fail "wrong refusal"
 calls | grep -q 'exec -T mongo' && fail "backup ran"
-calls | grep -q '^compose pull' && fail "pulled"
+calls | grep -q 'pull$' && fail "pulled"
 [ "$(envv CODESH_VERSION)" = 1.0.0 ] || fail "version changed"
 status | grep -q '"result":"failed","from":"1.0.0","to":"1.0.2"' || fail "failure not recorded"
 ok "1.0.2 with a wrong checksum refused; no backup, no pull, .env unchanged"
@@ -155,11 +232,14 @@ run ./update.sh --version 1.0.1 --yes || fail "update failed"
 tail -n 1 "$I/update.sh" | grep -q '^# release 1.0.1' || fail "update.sh not replaced"
 grep -q 'exec -T mongo' "$DOCKER_CALLS" || fail "no backup"
 ls "$I"/backups/codesh-*.archive.gz >/dev/null || fail "no backup file"
-grep -q '^compose pull' "$DOCKER_CALLS" || fail "no pull"
+grep -q 'pull$' "$DOCKER_CALLS" || fail "no pull"
 grep -q '^compose up -d --wait' "$DOCKER_CALLS" || fail "no up"
 status | grep -q '"result":"updated","from":"1.0.0","to":"1.0.1"' || fail "status not updated"
 [ "$(stat -c %a "$I/state/update.json")" = 644 ] || fail "update.json is not readable by the api container"
 [ "$(stat -c %a "$I/state/update.log")" = 600 ] || fail "update.log is not private"
+[ ! -e "$I/state/transaction" ] || fail "committed transaction marker remains"
+[ -f "$I/rollback/.env" ] || fail "snapshot not preserved outside state"
+[ ! -e "$I/state/rollback" ] || fail "secrets remain in the API state mount"
 grep -q 'updating 1.0.0 -> 1.0.1' "$I/state/update.log" || fail "not logged"
 ok "1.0.1 installed: files, setting, backup, pull, up, status, log"
 
@@ -188,7 +268,68 @@ tail -n 1 "$I/update.sh" | grep -q '^# release 1.0.1' || fail "update.sh not rol
 grep -q '^restored' "$DOCKER_CALLS" || fail "backup not restored"
 [ "$(grep -c '^compose up' "$DOCKER_CALLS")" -ge 2 ] || fail "previous version not started"
 status | grep -q '"result":"rolled-back","from":"1.0.1","to":"1.0.4"' || fail "rollback not recorded"
-ok "1.0.4 unhealthy: back on 1.0.1, database restored, recorded"
+grep -q '^initial-data$' "$FAKE_DB" || fail "backup data lost"
+grep -q '^shutdown-flushed$' "$FAKE_DB" || fail "collab flush not in backup"
+grep -q '^CODESH_VERSION=1.0.0$' "$I"/rollback.previous.*/.env || fail "previous snapshot was discarded"
+python3 - "$DOCKER_CALLS" <<'ORDER'
+import sys
+s=open(sys.argv[1]).read().splitlines()
+r=s.index('restored')
+assert not any(x.startswith('up:1.0.1:') and ' api ' in x+' ' for x in s[:r]), s
+assert any(x.startswith('up:1.0.1:') and ' api ' in x+' ' for x in s[r+1:]), s
+ORDER
+ok "1.0.4 changed the DB: restore precedes the old API; pre-backup collab flush survives"
+
+step "corrupt archives, failed dry runs and corrupt dumps never replace the current DB"
+cp "$FAKE_DB" "$F/db-before"
+printf corrupt >"$F/corrupt.gz"
+: >"$DOCKER_CALLS"
+run ./restore.sh "$F/corrupt.gz" --yes && fail "corrupt restore accepted"
+cmp "$FAKE_DB" "$F/db-before" || fail "corrupt restore changed DB"
+grep -q 'restore\|stop' "$DOCKER_CALLS" && fail "corrupt restore reached Mongo or stopped writers"
+gzip -c "$F/db-before" >"$F/valid.gz"
+FAKE_NO_FLUSH=1 FAKE_DRYRUN_FAIL=1 run ./restore.sh "$F/valid.gz" --yes && fail "failed dry run accepted"
+cmp "$FAKE_DB" "$F/db-before" || fail "dry run failure changed DB"
+grep -q '^restored$' "$DOCKER_CALLS" && fail "restore ran after a failed dry run"
+FAKE_DUMP_CORRUPT=1 run ./backup.sh "$F/corrupt-backups" && fail "corrupt dump published"
+find "$F/corrupt-backups" -type f | grep -q . && fail "corrupt dump retained"
+FAKE_NO_FLUSH=1 FAKE_WRITER_EXIT=137 run ./restore.sh "$F/valid.gz" --yes || fail "restore after crashed/OOM writers failed"
+cmp "$FAKE_DB" "$F/db-before" || fail "restore data mismatch"
+ok "gzip and dry-run failures retain DB; restore tolerates crashed writers and takes safety dump"
+
+step "status write failure after successful recovery keeps ingress open and releases lock"
+: >"$DOCKER_CALLS"
+FAKE_STATUS_FAIL=1 FAKE_UNHEALTHY=1.0.4 run ./update.sh --version 1.0.4 --yes && fail "bad update succeeded"
+[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "status failure prevented rollback"
+[ ! -e "$I/state/install.lock.d" ] || fail "status failure leaked lock"
+[ ! -e "$I/state/transaction" ] || fail "finished recovery left marker"
+grep -q 'recovery complete but status could not be written' "$F/run.log" || fail "status warning missing"
+tail -n 1 "$DOCKER_CALLS" | grep -q '^up:1.0.1:' || fail "recovered service stopped after status failure"
+rmdir "$I/state/update.json.tmp"
+ok "disk-full equivalent status failure leaves recovered service running and unlocks"
+
+step "a corrupt rollback archive retains the failed-state DB, marker and snapshot, and unlocks"
+: >"$DOCKER_CALLS"
+FAKE_STATUS_FAIL=1 FAKE_CORRUPT_BACKUP=1 FAKE_UNHEALTHY=1.0.4 run ./update.sh --version 1.0.4 --yes && fail "bad update succeeded"
+grep -q '^incompatible-schema$' "$FAKE_DB" || fail "corrupt rollback archive destroyed the current DB"
+grep -q '^restored$' "$DOCKER_CALLS" && fail "corrupt archive restored"
+[ -e "$I/state/transaction" ] || fail "failed recovery lost transaction marker"
+[ -e "$I/rollback/.env" ] || fail "failed recovery lost snapshot"
+[ ! -e "$I/state/install.lock.d" ] || fail "failed recovery with status error leaked lock"
+rmdir "$I/state/update.json.tmp"
+run ./restore.sh "$F/valid.gz" --yes || fail "manual recovery from corrupt rollback archive failed"
+rm "$I/state/transaction"
+ok "corrupt rollback archive leaves current DB intact; failed status cannot leak lock; manual restore works"
+
+step "both API and Collab abnormal exit prevent a consistency backup"
+for service in API COLLAB; do
+  : >"$DOCKER_CALLS"
+  run env "FAKE_${service}_EXIT=137" ./update.sh --version 1.0.4 --yes && fail "$service abnormal exit accepted"
+  grep -q "${service,,} did not shut down cleanly" "$F/run.log" || fail "$service exit not checked"
+  grep -q 'dump\|^restored$' "$DOCKER_CALLS" && fail "$service failure backed up an inconsistent boundary"
+  [ ! -e "$I/state/install.lock.d" ] || fail "$service failure leaked lock"
+done
+ok "API and Collab exit 137 each refuse the backup boundary and safely recover"
 
 step "automatic updates: off by default, patch policy, systemd timer"
 run ./update.sh --auto && fail "--auto ran without being enabled"
@@ -202,10 +343,12 @@ grep -q 'dry-run: systemctl enable --now codesh-update.timer' "$F/run.log" || fa
 : >"$DOCKER_CALLS"
 CODESH_INIT=systemd CODESH_SYSTEMD_DIR="$F/systemd" run ./update.sh --enable-auto --at 03:30 --policy patch || fail "enable failed"
 grep -q "ExecStart=$I/update.sh --auto" "$F/systemd/codesh-update.service" || fail "service unit"
+grep -q '^KillMode=mixed$' "$F/systemd/codesh-update.service" || fail "systemd kills recovery children"
+grep -q '^TimeoutStopSec=30min$' "$F/systemd/codesh-update.service" || fail "systemd recovery budget"
 grep -q 'OnCalendar=\*-\*-\* 03:30:00' "$F/systemd/codesh-update.timer" || fail "timer unit"
 grep -q 'systemctl enable --now codesh-update.timer' "$DOCKER_CALLS" || fail "timer not enabled"
 status | grep -q '"auto":{"enabled":true,"at":"03:30","policy":"patch"}' || fail "auto not in status"
-status | grep -q '"result":"rolled-back"' || fail "enable lost the last run"
+status | grep -q '"lastRun":{"at":' || fail "enable lost the last run"
 # 1.0.5 is the newest patch of 1.0; 1.1.0 is a minor update the patch policy leaves alone.
 run ./update.sh --auto || fail "--auto failed"
 [ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "--auto did not pick 1.0.5"
@@ -230,11 +373,273 @@ grep -q keep-me "$CRONTAB_FILE" || fail "other cron entries lost on disable"
 run ./update.sh --enable-auto --at 25:00 && fail "accepted --at 25:00"
 ok "cron entry added once, removed, other entries kept; bad time refused"
 
+step "Mongo image changes are refused before maintenance and backup"
+: >"$DOCKER_CALLS"
+run ./update.sh --version 1.0.6 --yes && fail "Mongo major change accepted"
+grep -q 'supported migration' "$F/run.log" || fail "no Mongo migration refusal"
+grep -q 'stop\|dump' "$DOCKER_CALLS" && fail "stopped or backed up before Mongo refusal"
+[ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "Mongo refusal changed files"
+ok "Mongo image change refused before any writes or backup"
+
+step "insufficient backup space refuses maintenance"
+cat >"$F/bin/df" <<'SPACE'
+#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nfixture 100 100 0 100%% /\n'
+SPACE
+chmod +x "$F/bin/df"
+: >"$DOCKER_CALLS"
+run ./update.sh --version 1.1.0 --yes && fail "maintenance accepted without backup space"
+grep -q 'twice the last backup size' "$F/run.log" || fail "space refusal missing"
+grep -q 'stop\|dump' "$DOCKER_CALLS" && fail "maintenance started without backup space"
+rm "$F/bin/df"
+ok "twice the last backup size required before stopping ingress or writers"
+
+step "stable parses objects, not tag-like text, and excludes draft/flag-only prerelease"
+cp "$F/srv/api/repos/kim0040/codesh/releases" "$F/releases.original"
+cat >"$F/srv/api/repos/kim0040/codesh/releases" <<'JSON'
+[{"tag_name":"v8.0.0","prerelease":true},{"tag_name":"v9.0.0","draft":true},
+ {"tag_name":"v3.0.0-rc.1"},{"tag_name":"v5.0.0-01"},{"tag_name":"v06.0.0"},
+ {"tag_name":"v7.0.0-rc..1"},{"tag_name":"v4.0.0","prerelease":"false"},{"tag_name":"v7.0.0","draft":null},
+ {"tag_name":"v1.1.0+build.1","body":"\"tag_name\":\"v99.0.0\""}]
+JSON
+run ./update.sh --check || fail "mixed releases check"
+grep -q 'newest 1.1.0 ' "$F/run.log" || fail "stable picked a draft, prerelease or invalid version"
+UPDATE_CHANNEL=prerelease run ./update.sh --check || fail "prerelease check"
+grep -q 'newest 8.0.0 ' "$F/run.log" || fail "prerelease channel did not include flag-only prerelease"
+cat >"$F/parser-env" <<'PARSER'
+command() {
+  if [ "${1:-}" = -v ]; then
+    case ",${HIDE_PARSERS:-}," in *",${2:-},"*) return 1 ;; esac
+  fi
+  builtin command "$@"
+}
+PARSER
+for hidden in node node,python3 node,python3,jq; do
+  if [ "$hidden" = node,python3 ] && ! command -v jq >/dev/null; then continue; fi
+  BASH_ENV="$F/parser-env" HIDE_PARSERS="$hidden" run ./update.sh --check || fail "parser fallback $hidden"
+  grep -q 'newest 1.1.0 ' "$F/run.log" || fail "parser fallback changed channel rules: $hidden"
+done
+FAKE_NO_API_IMAGE=1 run ./update.sh --check || fail "host parser requires an API image"
+BASH_ENV="$F/parser-env" HIDE_PARSERS=node,python3,jq FAKE_NO_API_IMAGE=1 run ./update.sh --check && fail "missing parser/image accepted"
+grep -q 'install host node/python3/jq or load the installed API image' "$F/run.log" || fail "missing API image advice"
+mv "$F/releases.original" "$F/srv/api/repos/kim0040/codesh/releases"
+ok "mixed JSON list channel rules and semver validation"
+
+step "writes during download/pull and the shutdown flush survive a failed update"
+: >"$DOCKER_CALLS"
+FAKE_PULL_BLOCK="$F/pull" FAKE_UNHEALTHY=1.1.0 run ./update.sh --version 1.1.0 --yes &
+job=$!
+for _ in $(seq 100); do [ -f "$F/pull.started" ] && break; sleep .05; done
+[ -f "$F/pull.started" ] || fail "pull did not start"
+printf 'accepted-during-pull\n' >>"$FAKE_DB"
+grep -q 'dump' "$DOCKER_CALLS" && fail "backup happened before downloads completed"
+touch "$F/pull.continue"
+wait "$job" && fail "bad image succeeded"
+grep -q '^accepted-during-pull$' "$FAKE_DB" || fail "write during pull lost"
+grep -q '^shutdown-flushed$' "$FAKE_DB" || fail "shutdown flush lost"
+ok "writes accepted while pulling are backed up and survive rollback"
+
+step "transaction restores partial cp/mv failures and TERM; no DB restore before app start"
+for injection in cp mv term; do
+  cat >"$F/bin/$([[ "$injection" = mv ]] && echo mv || echo cp)" <<'INJECT'
+#!/usr/bin/env bash
+set -euo pipefail
+for arg in "$@"; do
+  if [ "$arg" = ./VERSION.new ] && [ ! -f "$INJECT_ONCE" ]; then
+    touch "$INJECT_ONCE"
+    if [ "$INJECT_MODE" = term ]; then kill -TERM "$PPID"; sleep .1; fi
+    exit 1
+  fi
+done
+exec "/bin/$(basename "$0")" "$@"
+INJECT
+  chmod +x "$F/bin/$([[ "$injection" = mv ]] && echo mv || echo cp)"
+  : >"$DOCKER_CALLS"
+  INJECT_ONCE="$F/inject-$injection" INJECT_MODE="$injection" run ./update.sh --version 1.1.0 --yes && fail "injected $injection succeeded"
+  [ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "env not restored"
+  [ "$(cat "$I/VERSION")" = 1.0.5 ] || fail "partial swap not restored"
+  status | grep -q '"result":"rolled-back"' || fail "transaction state unclear"
+  grep -q '^restored$' "$DOCKER_CALLS" && fail "restored DB before new app touched it"
+  rm -f "$F/bin/cp" "$F/bin/mv"
+done
+ok "cp, mv (disk-full equivalent), TERM restore files and .env without unnecessary DB restore"
+
+step "process-group INT, HUP and TERM (including a second signal during recovery)"
+for signal in INT HUP TERM; do
+  : >"$DOCKER_CALLS"
+  FAKE_HEALTH_BLOCK_VERSION=1.1.0 FAKE_HEALTH_BLOCK="$F/signal-$signal" \
+    FAKE_ROLLBACK_BLOCK_VERSION=1.0.5 FAKE_ROLLBACK_BLOCK="$F/recovery-$signal" \
+    python3 - "$I" "$F/run.log" "$F/signal-$signal" "$F/recovery-$signal" "$signal" <<'SIGNAL'
+import os, signal, subprocess, sys, time
+install, log, gate, recovery, name = sys.argv[1:]
+def until(predicate):
+    deadline = time.monotonic() + 20
+    while not predicate():
+        if time.monotonic() > deadline: raise AssertionError("signal fixture timed out")
+        time.sleep(.025)
+with open(log, "w") as out:
+    p = subprocess.Popen(["setsid", "./update.sh", "--version", "1.1.0", "--yes"], cwd=install, stdout=out, stderr=out)
+    try:
+        until(lambda: os.path.exists(gate + ".started"))
+        os.killpg(p.pid, getattr(signal, "SIG" + name))
+        until(lambda: os.path.exists(recovery + ".started"))
+        os.killpg(p.pid, getattr(signal, "SIG" + name))
+        open(recovery + ".continue", "w").close()
+        assert p.wait(timeout=20) != 0
+    finally:
+        if p.poll() is None: os.killpg(p.pid, signal.SIGKILL); p.wait()
+SIGNAL
+  [ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "$signal did not restore version"
+  grep -q '^initial-data$' "$FAKE_DB" || fail "$signal lost data"
+  grep -q '^restored$' "$DOCKER_CALLS" || fail "$signal skipped DB recovery"
+  status | grep -q '"result":"rolled-back"' || fail "$signal skipped status"
+  [ ! -e "$I/state/install.lock.d" ] || fail "$signal leaked lock"
+done
+ok "setsid process-group INT/HUP/TERM preserve tee, DB recovery and lock cleanup; repeated signals ignored"
+
+step "an interrupted transaction refuses rerun without replacing snapshot or status"
+printf 'target=1.1.0 phase=installed\n' >"$I/state/transaction"
+cp "$I/state/update.json" "$F/status-before"
+sha256sum "$I/rollback/.env" >"$F/snapshot-before"
+: >"$DOCKER_CALLS"
+run ./update.sh --yes && fail "unfinished transaction accepted"
+grep -q 'unfinished transaction' "$F/run.log" || fail "missing recovery instructions"
+cmp "$I/state/update.json" "$F/status-before" || fail "unfinished status overwritten"
+sha256sum -c "$F/snapshot-before" >/dev/null || fail "unfinished snapshot overwritten"
+grep -q 'stop\|pull' "$DOCKER_CALLS" && fail "unfinished transaction mutated stack"
+rm "$I/state/transaction"
+ok "unfinished marker blocks rerun and preserves previous snapshot and status"
+
+step "offline release SHA256SUMS and a shared lock for every entry point"
+# Make an offline archive whose scripts are the same transaction engine.
+offline="$F/stage/codesh-1.1.0"
+printf 'images\n' >"$offline/images.tar"
+# shellcheck disable=SC2094 # manifest is excluded from find
+(cd "$offline" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS)
+tar czf "$F/offline.tar.gz" -C "$F/stage" codesh-1.1.0
+(cd "$F" && sha256sum offline.tar.gz >SHA256SUMS)
+(cd "$I" && . ./lib.sh; install_lock; trap install_unlock EXIT; touch "$F/lock-held"; sleep 3) &
+holder=$!
+for _ in $(seq 100); do [ -f "$F/lock-held" ] && break; sleep .02; done
+for entry in './update.sh --bundle' './upgrade.sh' './restore.sh'; do
+  # Deliberate word splitting: each fixture names a command and its fixed flags.
+  # shellcheck disable=SC2086
+  run $entry "$F/offline.tar.gz" --yes && fail "entrypoint overlapped: $entry"
+  grep -q 'another update' "$F/run.log" || fail "not blocked by lock: $entry"
+done
+run ./update.sh --auto && fail "auto overlapped"
+grep -q 'another update' "$F/run.log" || fail "auto not blocked by lock"
+wait "$holder"
+step "flock reclaims a dead or pre-boot owner, but mkdir fallback remains manual"
+mkdir "$I/state/install.lock.d"
+printf '2147483647\n' >"$I/state/install.lock.d/owner"
+run ./update.sh --check || fail "dead owner was not reclaimed under flock"
+mkdir "$I/state/install.lock.d"
+printf '%s\n' "$$" >"$I/state/install.lock.d/owner"
+printf 'previous-boot\n' >"$I/state/install.lock.d/boot"
+run ./update.sh --check || fail "previous boot owner was not reclaimed"
+# Hide flock via a PATH shim for command lookup, while leaving the rest of the host available.
+mkdir "$F/no-flock"
+for tool in /usr/local/bin/* /usr/bin/* /bin/*; do
+  [ -f "$tool" ] || continue
+  [ "${tool##*/}" = flock ] || ln -sf "$tool" "$F/no-flock/${tool##*/}"
+done
+(cd "$I" && PATH="$F/no-flock" bash -c '. ./lib.sh; install_lock; trap install_unlock EXIT; touch "$1"; sleep 3' _ "$F/mkdir-held") &
+holder=$!
+for _ in $(seq 100); do [ -f "$F/mkdir-held" ] && break; sleep .02; done
+PATH="$F/no-flock" run ./update.sh --version 1.1.0 --yes && fail "mkdir fallback overlapped"
+wait "$holder"
+[ ! -e "$I/state/install.lock.d" ] || fail "mkdir lock leaked"
+mkdir "$I/state/install.lock.d"
+printf '2147483647\n' >"$I/state/install.lock.d/owner"
+PATH="$F/bin:$F/no-flock" run ./update.sh --check && fail "mkdir fallback reclaimed stale lock automatically"
+rm "$I/state/install.lock.d/owner" && rmdir "$I/state/install.lock.d"
+# Prove the bundle images are loaded from the extraction tree, with no second images.tar copy.
+cat >"$F/bin/cp" <<'COPY'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in *images.tar|*/candidate/*|*/codesh-1.1.0/.) echo 'duplicated offline image tree' >&2; exit 1 ;; esac
+done
+exec /bin/cp "$@"
+COPY
+chmod +x "$F/bin/cp"
+: >"$DOCKER_CALLS"
+BASH_ENV="$F/parser-env" HIDE_PARSERS=node,python3,jq PATH="$F/bin:$F/no-flock" run ./upgrade.sh "$F/offline.tar.gz" || fail "nested offline update under mkdir lock failed"
+rm "$F/bin/cp"
+python3 - "$DOCKER_CALLS" <<'LOAD'
+import sys
+s = open(sys.argv[1]).read().splitlines()
+load = next(i for i, x in enumerate(s) if x.startswith("load -i "))
+parsers = [i for i, x in enumerate(s) if " run --rm --no-deps --pull never" in x]
+assert parsers and all(i > load and "--env-file " in s[i] for i in parsers), s
+LOAD
+[ "$(envv CODESH_VERSION)" = 1.1.0 ] || fail "offline update version"
+[ ! -e "$I/state/install.lock.d" ] || fail "nested mkdir lock leaked"
+ok "flock + mkdir contention, nested offline upgrade, released SHA256SUMS (no sidecar)"
+
+step "bounded real HTTP requests, redirect refusal, HTTPS Host and SNI arguments"
+python3 - "$F/health.port" <<'HEALTH' &
+import http.server, sys, time
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/stall': time.sleep(5)
+        self.send_response(302 if self.path == '/redirect' else 204)
+        self.end_headers()
+    def log_message(self, *args): pass
+s=http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+open(sys.argv[1], 'w').write(str(s.server_port))
+s.serve_forever()
+HEALTH
+health=$!
+for _ in $(seq 100); do [ -s "$F/health.port" ] && break; sleep .02; done
+hp="$(cat "$F/health.port")"
+(
+  cd "$I"; . ./lib.sh
+  env_set HTTP_PORT "$hp"
+  SECONDS=0
+  wait_healthy 1 /stall && exit 1
+  [ "$SECONDS" -le 2 ] || exit 1
+  wait_healthy 1 /redirect && exit 1
+  wait_healthy 3 /ok || exit 1
+) >"$F/health.log" 2>&1 || fail "bounded health checks"
+kill "$health"
+cat >"$F/bin/curl" <<'CURL'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$HEALTH_CALLS"
+printf 204
+CURL
+chmod +x "$F/bin/curl"
+HEALTH_CALLS="$F/health.args" run bash -c '. ./lib.sh; env_set SITE_ADDRESS https://codesh.corp; env_set HTTPS_PORT 8443; wait_healthy 3 /readyz' || fail "HTTPS health"
+grep -q -- '--resolve codesh.corp:8443:127.0.0.1.*--connect-timeout 3 --max-time 3.*https://codesh.corp:8443/readyz' "$F/health.args" || fail "Host/SNI or bounded timeout missing"
+rm "$F/bin/curl"
+ok "stalled response bounded, 302 refused, only 2xx accepted, correct HTTPS origin/SNI"
+
+step "unsupported scheduler paths fail before modifying systemd or cron"
+for suffix in 'with space' "apostrophe'path" 'percent%path'; do
+  special="$F/$suffix"
+  mkdir "$special"
+  cp "$I"/{update.sh,lib.sh,.env} "$special/"
+  for init in systemd cron; do
+    (cd "$special" && CODESH_INIT="$init" ./update.sh --enable-auto --dry-run) >"$F/run.log" 2>&1 && fail "accepted scheduler path $suffix"
+    grep -q 'automatic updates require an install path' "$F/run.log" || fail "path refusal message"
+  done
+done
+ok "space, apostrophe, percent refused for both schedulers"
+
 step "a source checkout is not updated in place"
 mkdir -p "$F/checkout/deploy" && touch "$F/checkout/package.json" && mkdir "$F/checkout/.git"
 cp -r "$I"/. "$F/checkout/deploy/"
 (cd "$F/checkout/deploy" && ./update.sh --yes) >"$F/run.log" 2>&1 && fail "updated a source checkout"
 grep -q 'source checkout' "$F/run.log" || fail "checkout message"
 ok "refused with the git pull / docker compose build hint"
+
+step "a partly opened ingress must not trigger a DB rollback that discards accepted writes"
+: >"$DOCKER_CALLS"
+FAKE_INGRESS_FAIL=1.1.1 run ./update.sh --version 1.1.1 --yes && fail "failed ingress reported success"
+[ "$(envv CODESH_VERSION)" = 1.1.1 ] || fail "verified version was put back after ingress opened"
+grep -q '^accepted-at-ingress$' "$FAKE_DB" || fail "write accepted while ingress opened was lost"
+grep -q '^restored$' "$DOCKER_CALLS" && fail "restored an old DB after ingress could accept writes"
+status | grep -q 'current files and DB retained' || fail "ingress recovery state unclear"
+ok "ingress activation failure stops writers and retains current DB and files for recovery"
 
 printf '\nupdate.test.sh: all checks passed\n'

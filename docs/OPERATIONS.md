@@ -510,7 +510,7 @@ API와 Collab은 `codesh` DB의 `readWrite` 역할만 가진 `codesh_app` 사용
 
 API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1분에 한 번)를 제공합니다. 자동 업데이트 상태는 `update.sh`가 쓰는 `state/update.json`을 API 컨테이너에 읽기 전용으로 연결(`./state:/codesh-state:ro`)해서 보여 줍니다. 어떤 컨테이너도 Docker 소켓에 접근하지 않으므로 콘솔에서 업데이트를 실행할 수는 없습니다.
 
-열려 있는 브라우저 탭은 서버의 `/api/version`이 자기 빌드와 다르면 "새 버전이 있어요 · 새로고침" 알림을 띄웁니다(탭을 열 때, 다시 볼 때, 30분마다, 실시간 연결이 다시 붙을 때 확인). 탭은 스스로 새로고침하지 않으므로 편집 중인 사람이 작업을 잃지 않으며, "나중에"를 누르면 다음 버전이 나올 때까지 다시 묻지 않습니다.
+열려 있는 브라우저 탭은 서버의 `/api/version`이 자기 빌드와 다르면 "새 버전이 있어요 · 새로고침" 알림을 띄웁니다(탭을 열 때, 다시 볼 때, 30분마다, 실시간 연결이 다시 붙을 때 확인). 새로고침을 누른 탭만 다시 불러오며, 다른 탭은 그대로 유지됩니다. 승인한 탭도 열려 있는 문서의 미전송 변경을 서버가 확인할 때까지 기다리고, 5초 안에 확인되지 않으면 새로고침하지 않습니다. 연결을 복구한 뒤 다시 시도하십시오. "나중에"를 누르면 다음 버전이 나올 때까지 숨깁니다. 다른 탭의 승인으로 서비스 워커가 교체되거나 이전 lazy chunk 로드가 실패하면 다시 알립니다. 탭별 새로고침 승인은 30초 뒤 만료됩니다.
 
 ### 15.4 수동 업데이트 (인터넷이 되는 서버)
 설치 폴더(`install.sh`를 실행한 곳)에서 실행합니다. Docker 권한이 있는 사용자 또는 root로 실행하십시오.
@@ -522,23 +522,24 @@ API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1
 ./update.sh --allow-major        # 새 주 버전(2.0.0 등)까지. 릴리스 노트의 변경 사항을 먼저 읽으십시오
 ```
 `update.sh`는 다음 순서로 진행하며, 앞 단계가 실패하면 그 뒤는 실행하지 않습니다.
-1. GitHub 릴리스 목록에서 대상 버전을 고릅니다. 주 버전이 바뀌는 업데이트와 이전 버전으로 내리는 것은 거절합니다(되돌리기는 15.7).
-2. 릴리스의 `SHA256SUMS`와 이미지가 없는 배포 파일 `codesh-deploy-<버전>.tar.gz`를 받아 체크섬을 확인하고, 압축 안의 `SHA256SUMS`도 확인합니다. 하나라도 다르면 백업 전에 중단합니다.
-3. `backup.sh`로 데이터베이스를 백업하고, 지금의 Compose 파일·스크립트·`.env`를 `state/rollback/`에 복사합니다.
-4. 새 Compose 파일과 스크립트를 설치하고 `.env`의 `CODESH_VERSION`을 바꿉니다. 새 버전이 추가한 설정은 기본값으로 채우고 기존 값은 그대로 둡니다.
-5. `docker compose pull`로 GHCR(`CODESH_REGISTRY`)에서 이미지를 받고, 각 이미지의 digest가 릴리스의 `IMAGES` 목록과 같은지 확인합니다. 다르거나 받지 못하면 파일을 되돌리고 아무것도 재시작하지 않은 채 중단합니다.
-6. `docker compose up -d`로 재시작하고 `/healthz`와 `/readyz`가 응답할 때까지 기다립니다(`UPDATE_HEALTH_TIMEOUT`, 기본 180초).
-7. 정상이 아니면 자동으로 되돌립니다(15.7).
+1. 설치 단위 공통 잠금을 취득한 뒤 현재 버전을 읽고 대상 릴리스를 고릅니다. `stable`은 draft와 prerelease 플래그 또는 접미사가 있는 버전을 제외합니다. JSON 파싱에는 호스트의 Node, Python3, jq 순으로 사용하고, 없으면 **현재 설치된 API 이미지의 Node**를 일회성 컨테이너로 사용합니다(`--pull never`). 이미지가 없으면 파서 오류와 복구 방법을 표시하며, 오프라인 번들은 먼저 load한 후보 API 이미지를 사용합니다.
+2. 릴리스의 `SHA256SUMS`와 배포 파일 `codesh-deploy-<버전>.tar.gz`를 받고 외부·내부 체크섬을 확인합니다. 새 파일·설정은 임시 폴더에서 준비합니다. MongoDB 이미지가 달라지면(주 버전뿐 아니라 모든 이미지 변경) 지원되는 별도 마이그레이션 경로가 필요하므로 백업·서비스 중지 전에 거절합니다.
+3. 설치 파일을 바꾸지 않은 채 새 이미지를 모두 pull하고 `IMAGES`의 digest와 비교합니다. 다운로드·검증 중에는 기존 서버가 계속 쓰기를 받습니다. 실패하면 서비스는 그대로 유지됩니다.
+4. 마지막 DB 백업 크기의 2배 이상 여유 공간이 있는지 확인합니다(첫 백업 전에는 비교 기준이 없습니다). 현재 파일·`.env`·문서·TLS 설정을 API에 마운트되지 않는 `rollback/`에 보관하고 `state/transaction`에 대상·단계·백업 경로를 기록한 뒤 maintenance에 들어갑니다. 기존 스냅샷은 `rollback.previous.<시각>.<PID>/`로 보존합니다. Caddy를 먼저 멈추고 API·Collab을 정지합니다. Collab의 SIGTERM flush 및 API·Collab의 정상 종료를 기다린 뒤 `backup.sh`로 백업하고 gzip 무결성을 확인하므로 다운로드 중 받은 쓰기와 종료 직전 편집도 백업에 들어갑니다.
+5. 파일·설정을 교체하고 새 앱을 기동합니다. Caddy는 정지한 채 컨테이너 내부 `/healthz`·`/readyz`의 2xx 응답을 확인합니다(`UPDATE_HEALTH_TIMEOUT`, 기본 180초; 각 요청도 남은 시간으로 제한). 검증 후 ingress를 엽니다.
+6. 검증 전 파일 복사·rename 오류나 HUP/INT/TERM, 기동 실패는 자동 복구로 이어집니다(15.7). 앱 검증을 통과한 뒤 ingress 활성화가 실패하면 이미 승인된 쓰기를 보존하기 위해 현재 파일·DB를 유지하고 쓰기를 닫은 채 `failed`로 기록합니다. 로그를 확인한 뒤 `docker compose up -d`로 재개합니다. SIGKILL·전원 차단처럼 trap이 실행되지 못한 경우에는 `state/transaction`, `state/update.json`, `rollback/`을 확인하고 수동 복구합니다. 미완료 transaction이 있으면 버전이 같더라도 다음 업데이트를 거절하며 스냅샷을 덮어쓰지 않습니다.
 
-모든 실행은 `state/update.log`(1 MiB에서 교체, 이전 파일 3개 보관)에 남고, 결과는 `state/update.json`에 기록되어 콘솔에 표시됩니다. 비밀값은 명령행 인자로 전달하지 않으며, GHCR 공개 이미지는 로그인 없이 받습니다. 이전 버전의 이미지는 되돌리기를 위해 남겨 두므로 여유 공간이 부족하면 확인 후 `docker image prune`으로 정리하십시오.
+모든 실행은 `state/update.log`(1 MiB에서 교체, 이전 파일 3개 보관)에 남고, 결과는 `state/update.json`에 기록되어 콘솔에 표시됩니다. 비밀값은 명령행 인자로 전달하지 않으며, GHCR 공개 이미지는 로그인 없이 받습니다. 복구가 끝난 뒤 상태 파일 기록이 실패해도 서비스는 유지되며 잠금은 해제됩니다. `rollback/`과 `rollback.previous.*`에는 `.env`·TLS 개인 키가 있으므로 설치 폴더 접근 권한을 제한하고 보관 정책에 따라 정리하십시오. 구버전의 `state/rollback/`도 다음 업데이트에서 `rollback.legacy.*`로 옮깁니다. 이전 버전의 이미지는 되돌리기를 위해 남겨 두므로 여유 공간이 부족하면 확인 후 `docker image prune`으로 정리하십시오.
 
 ### 15.5 오프라인 업데이트 (인터넷이 없는 서버)
-인터넷이 되는 컴퓨터에서 [릴리스 페이지](https://github.com/kim0040/codesh/releases)의 번들(`codesh-<버전>-linux-amd64.tar.gz` 또는 `-linux-arm64.tar.gz`)과 같은 이름의 `.sha256` 파일을 받아 서버의 설치 폴더 옆에 복사한 뒤 실행합니다.
+인터넷이 되는 컴퓨터에서 [릴리스 페이지](https://github.com/kim0040/codesh/releases)의 번들(`codesh-<버전>-linux-amd64.tar.gz` 또는 `-linux-arm64.tar.gz`)과 릴리스의 `SHA256SUMS` 파일을 받아 서버의 설치 폴더 옆에 복사한 뒤 실행합니다.
 ```sh
 ./upgrade.sh ../codesh-<버전>-linux-amd64.tar.gz
-./update.sh --bundle ../codesh-<버전>-linux-amd64.tar.gz    # 같은 동작에 콘솔용 기록을 더함
+./update.sh --bundle ../codesh-<버전>-linux-amd64.tar.gz    # 같은 잠금·검증·복구 경로
 ```
-`upgrade.sh`는 체크섬을 확인하고, 먼저 백업한 뒤, `docker load`로 이미지를 불러와 재시작합니다(9.3). 자동 되돌리기는 하지 않으므로 새 버전이 시작되지 않으면 15.7의 수동 절차를 따릅니다.
+`upgrade.sh`와 `update.sh --bundle`은 같은 업데이트 엔진을 사용합니다. 번들 옆의 `<번들>.sha256` 또는 릴리스 `SHA256SUMS`를 확인하고 내부 체크섬으로 `images.tar`를 검증합니다. 이미지를 먼저 load한 뒤 온라인과 같은 maintenance·백업·자동 복구를 수행합니다. Docker load는 registry digest를 보존하지 않으므로 오프라인 무결성 검증은 아카이브·내용 체크섬을 사용합니다. 주 버전 변경에는 `--allow-major`가 필요합니다. 추출된 `images.tar`는 후보 폴더에 다시 복사하지 않습니다. 임시 공간이 작으면 `TMPDIR=/충분한/공간 ./upgrade.sh ...`로 번들 추출 위치를 지정하십시오.
+
+`update.sh`가 없던 구버전의 `upgrade.sh`는 복사할 파일 목록이 고정되어 있습니다. 이 버전으로 처음 전환한 뒤에는 체크섬을 검증한 **방금 설치한 동일 버전** 번들을 별도 폴더에 추출하여 `update.sh`를 설치 폴더에 복사하고 실행 권한을 주십시오. 이후부터 온라인·오프라인 업데이트를 같은 엔진으로 실행할 수 있습니다. 새 `generate-secrets.sh`는 Docker가 상태 마운트를 root 소유로 만들기 전에 운영자 소유의 `state/`를 준비합니다.
 
 ### 15.6 자동 업데이트 (선택, 기본 꺼짐)
 ```sh
@@ -546,15 +547,20 @@ sudo ./update.sh --enable-auto --at 04:00 --policy patch     # 켜기
 sudo ./update.sh --enable-auto --dry-run                     # 무엇을 설치할지 보기만
 sudo ./update.sh --disable-auto                              # 끄기
 ```
+- systemd 서비스는 `KillMode=mixed`, `TimeoutStopSec=30min`으로 복구 중 자식 프로세스를 보존하며, Docker보다 뒤에 시작하여 종료 시 Docker보다 먼저 멈춥니다. 복구 중 추가 HUP/INT/TERM은 무시합니다. 대형 DB에서 복구가 30분을 넘으면 서비스 override로 stop timeout을 늘리십시오.
 - systemd가 있으면 `/etc/systemd/system/codesh-update.service`와 `.timer`(매일 `--at` 시각, 최대 15분 무작위 지연, 꺼져 있던 동안 놓친 실행은 켜질 때 한 번)를 설치하고, 없으면 현재 사용자의 crontab에 한 줄을 추가합니다. 한 호스트에 설치 하나를 기준으로 합니다.
+- 자동 업데이트 설치 경로는 영문자·숫자·`/ . _ -`만 허용합니다. 공백·작은따옴표·`%` 등이 있는 경로는 systemd/cron 파일을 쓰기 전에 거절합니다.
 - 타이머는 `./update.sh --auto`를 실행합니다. 정책에 맞는 릴리스만 적용하며, 주 버전이 바뀌는 업데이트는 정책과 상관없이 자동으로 적용하지 않습니다.
   - `patch`(기본값): 같은 `x.y`의 버그 수정 릴리스만(1.2.0 → 1.2.3).
   - `minor`: 같은 주 버전의 기능 릴리스까지(1.2.0 → 1.5.1).
 - 업데이트 순서와 되돌리기는 수동 업데이트와 같고, 결과는 콘솔의 "자동 업데이트"에 표시됩니다. 사용자가 적은 시간대를 고르십시오. 재시작하는 동안 실시간 편집은 잠시 끊겼다가 자동으로 다시 연결됩니다.
 
 ### 15.7 되돌리기 (롤백)
-- 자동: 새 버전이 `/healthz`·`/readyz`를 통과하지 못하면 `update.sh`가 `state/rollback/`의 파일과 `.env`를 되돌리고, 호스트에 남아 있는 이전 이미지로 재시작한 뒤, 업데이트 직전의 백업을 복원합니다. 결과는 "rolled-back"으로 기록되고 종료 코드는 1입니다.
-- 수동: 업데이트 직후 문제를 발견했다면 `state/rollback/`의 파일을 설치 폴더로 복사하고(`.env` 포함) `docker compose up -d` 후 `./restore.sh backups/<업데이트 직전 백업> --yes`를 실행합니다. 오프라인 업그레이드도 같은 방법으로, `upgrade.sh`가 만든 백업과 이전 번들의 파일을 사용합니다.
+- 자동: ingress와 실패한 API·Collab을 먼저 멈추고 이전 파일을 복구합니다. 새 앱 기동을 시도했다면 **DB 인프라만 먼저 시작하여 백업을 복원한 뒤** 이전 앱을 기동합니다. 복원은 호스트 `gzip -t`와 Mongo `mongorestore --dryRun`을 모두 통과하고 현재 DB의 안전 백업을 `backups/`에 추가한 뒤에만 DB를 삭제합니다. 안전 백업이 실패하면 삭제하지 않습니다. 새 릴리스가 추가한 collection도 지우고 백업의 DB를 되살립니다. 파일 교체 중 실패처럼 새 앱이 DB에 접근하기 전이면 DB 복원은 생략합니다. 이전 앱의 health/readiness 검증 후에만 ingress를 엽니다. 성공한 복구는 `rolled-back`, 복구 실패는 `failed`와 복구 지침으로 기록되며 종료 코드는 1입니다.
+- 수동: API·Collab·Caddy를 먼저 멈추고 `rollback/`의 파일을 설치 폴더로 복사합니다(`.env`, `docs`, `tls` 포함). 앱을 먼저 기동하지 말고 `./restore.sh backups/<업데이트 직전 백업> --yes`를 실행합니다. 이 명령은 비정상 종료·OOM 상태의 API·Collab도 정지시키고 공통 잠금 아래 백업 검증·현재 DB 안전 백업 → DB 복원 → 앱 검증 → ingress 개방 순서로 동작합니다. 복구와 실제 readiness를 확인한 뒤에만 `state/transaction`을 제거하고 업데이트를 재시도하십시오.
+- 온라인·오프라인 업데이트, 자동 타이머, backup/restore는 같은 설치 잠금을 사용합니다. `flock`이 없으면 atomic mkdir(`state/install.lock.d`)로 잠급니다. `flock` 획득 후 `owner` PID가 죽었거나 이전 부팅의 잠금임을 확인하면 자동 회수합니다. `flock` 없는 mkdir fallback에서 SIGKILL 뒤 남은 잠금은 `owner` PID와 실제 프로세스를 확인한 뒤에만 제거합니다. 복구가 실패하면 ingress를 닫은 채 `rollback/`, `state/transaction`, 백업과 로그를 보존합니다.
+
+현재 한계: commit 직후 신호가 오면 서비스가 정상이어도 콘솔의 마지막 상태가 maintenance로 남을 수 있으므로 실제 readiness와 로그를 확인하십시오. `+build` 메타데이터가 붙은 릴리스 태그는 다운로드 대상에서 메타데이터가 빠져 안전하게 실패할 수 있으므로 배포 태그에 사용하지 마십시오. Valkey의 조인 코드·grant·ban 등은 롤백하지 않으므로 키 형식 변경은 이전 앱과 호환되어야 합니다.
 
 ### 15.8 릴리스 확인과 출처 증명
 릴리스의 모든 파일과 GHCR 이미지에는 GitHub의 빌드 출처 증명이 붙습니다. GitHub CLI로 확인할 수 있습니다(인터넷 필요).
