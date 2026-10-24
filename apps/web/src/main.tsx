@@ -1,10 +1,10 @@
-import { registerSW } from "virtual:pwa-register";
 import { applyStoredTheme } from "@codesh/ui";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+import { startAppUpdates } from "./lib/app-update";
 import { queryClient } from "./lib/query";
 import { routeTree } from "./routeTree.gen";
 
@@ -24,9 +24,8 @@ declare module "@tanstack/react-router" {
   }
 }
 
-if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  registerSW({ immediate: true });
-}
+// Service worker in prompt mode and the server version checks (lib/app-update.ts).
+startAppUpdates();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root is missing from index.html");

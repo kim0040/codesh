@@ -1,4 +1,5 @@
 import type {
+  AdminUpdateResponse,
   CreateInviteBody,
   CreateLabBody,
   CreateShareBody,
@@ -238,6 +239,10 @@ export const api = {
       >("GET", "/api/admin/audit", { query, headers: bearer(token) }),
     stats: (token: string) =>
       request<StatsResponse>("GET", "/api/admin/stats", { headers: bearer(token) }),
+    update: (token: string) =>
+      request<AdminUpdateResponse>("GET", "/api/admin/update", { headers: bearer(token) }),
+    checkUpdate: (token: string) =>
+      request<AdminUpdateResponse>("POST", "/api/admin/update/check", { headers: bearer(token) }),
   },
 };
 

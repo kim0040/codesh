@@ -1,4 +1,5 @@
 import { HocuspocusProviderWebsocket } from "@hocuspocus/provider";
+import { onCollabConnected } from "../app-update";
 
 /**
  * One WebSocket per tab (docs/ARCHITECTURE.md §11). Every document of this tab, the editor and the
@@ -27,17 +28,21 @@ export function acquireSocket(docHint: string): {
     clearTimeout(closeTimer);
     closeTimer = null;
   }
-  socket ??= new HocuspocusProviderWebsocket({
-    url: collabUrl(docHint),
-    // Retry forever with a short, capped backoff: a LAN server restart should heal in seconds.
-    maxAttempts: 0,
-    delay: 400,
-    factor: 1.6,
-    minDelay: 200,
-    maxDelay: 4000,
-    jitter: true,
-    messageReconnectTimeout: 30_000,
-  });
+  if (!socket) {
+    socket = new HocuspocusProviderWebsocket({
+      url: collabUrl(docHint),
+      // Retry forever with a short, capped backoff: a LAN server restart should heal in seconds.
+      maxAttempts: 0,
+      delay: 400,
+      factor: 1.6,
+      minDelay: 200,
+      maxDelay: 4000,
+      jitter: true,
+      messageReconnectTimeout: 30_000,
+    });
+    // A reconnect may reach an updated server: the tab then offers a reload (lib/app-update.ts).
+    socket.on("connect", onCollabConnected);
+  }
   refs++;
   let released = false;
   return {

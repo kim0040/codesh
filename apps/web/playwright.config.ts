@@ -57,6 +57,8 @@ export default defineConfig({
         RATE_LIMIT_API_PER_MIN: "100000",
         RATE_LIMIT_CODE_PER_MIN: "100000",
         RATE_LIMIT_CREATE_PER_MIN: "100000",
+        // No outbound request from tests; p-updates.spec.ts mocks the update state instead.
+        UPDATE_CHECK: "off",
       },
       reuseExistingServer: false,
       stdout: "pipe",

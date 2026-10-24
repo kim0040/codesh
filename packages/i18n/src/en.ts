@@ -9,6 +9,10 @@ export const en = {
   // ── App ──
   "app.name": "codesh",
   "app.tagline": "Share code in real time on your network",
+  "app.update.title": "A new version is available",
+  "app.update.body": "Reload to use it. Your edits stay as they are.",
+  "app.update.reloadAction": "Reload",
+  "app.update.laterAction": "Later",
 
   // ── Common ──
   "common.add": "Add",
@@ -818,6 +822,55 @@ export const en = {
   "admin.loading": "Loading…",
   "admin.error.title": "Couldn't load this page",
   "admin.error.body": "Check the admin token and your connection, then try again.",
+
+  // Updates (docs/OPERATIONS.md "업데이트"); admins only.
+  "admin.nav.updates": "Updates",
+  "admin.update.badge": "New version",
+  "admin.update.title": "Updates",
+  "admin.update.current": "Installed version",
+  "admin.update.latest": "Latest release",
+  "admin.update.released": "Released",
+  "admin.update.checked": "Last checked {time}",
+  "admin.update.checkAction": "Check now",
+  "admin.update.checking": "Checking…",
+  "admin.update.available": "Version {version} is available",
+  "admin.update.upToDate": "You're on the latest version",
+  "admin.update.unreachable": "Can't check: no internet connection",
+  "admin.update.unreachableHint":
+    "codesh keeps working as usual. The server tries again in about 12 hours.",
+  "admin.update.disabled": "The update check is off",
+  "admin.update.disabledHint": "Set UPDATE_CHECK=on in .env and restart to see new releases here.",
+  "admin.update.pending": "Not checked yet",
+  "admin.update.pendingHint": "The first check runs a few minutes after the server starts.",
+  "admin.update.noRelease": "No release has been published yet",
+  "admin.update.rateLimited": "Checked a moment ago. Try again in a minute.",
+  "admin.update.privacy":
+    "The check sends one plain request to GitHub (api.github.com) that carries only the version number. UPDATE_CHECK=off turns it off.",
+  "admin.update.notes": "Release notes",
+  "admin.update.notesEmpty": "This release has no notes.",
+  "admin.update.releaseLink": "Release page",
+  "admin.update.newTab": "(opens in a new tab)",
+  "admin.update.how.title": "How to update",
+  "admin.update.how.online": "Server with internet: in the codesh folder, run",
+  "admin.update.how.offline":
+    "Server without internet: download the bundle for your server (linux-amd64 or linux-arm64) and its .sha256 file from the release page, copy both next to codesh, then run",
+  "admin.update.how.safety":
+    "update.sh backs up the database first and goes back to the current version if the new one does not start. upgrade.sh also backs up first.",
+  "admin.update.copyAction": "Copy",
+  "admin.update.auto.title": "Automatic updates",
+  "admin.update.auto.on": "On: every day around {time}, {policy}",
+  "admin.update.auto.policy.patch": "bug-fix releases only",
+  "admin.update.auto.policy.minor": "feature and bug-fix releases",
+  "admin.update.auto.off": "Off. To turn them on, run this on the server:",
+  "admin.update.auto.unknown":
+    "The server's updater status isn't available here. Installations made with install.sh show it.",
+  "admin.update.lastRun": "Last run {time}",
+  "admin.update.result.updated": "Updated {from} → {to}",
+  "admin.update.result.upToDate": "Already up to date",
+  "admin.update.result.checked": "Checked only",
+  "admin.update.result.refused": "{to} was not applied: it needs a manual update",
+  "admin.update.result.failed": "Failed without changes. See state/update.log on the server.",
+  "admin.update.result.rolledBack": "{to} did not start, so {from} is running again",
 
   // ── Identity ──
   "identity.title": "Choose a name",
