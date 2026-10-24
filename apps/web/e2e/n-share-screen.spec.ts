@@ -53,6 +53,12 @@ test("controls clicked with the mouse show no focus ring; Tab shows one", async 
       if (id === "history-button") await page.getByTestId(id).click();
     }
 
+    // A menu item chosen with the mouse does not hand a keyboard ring back to the trigger.
+    await page.getByTestId("menu-button").click();
+    await page.getByRole("menuitem", { name: "Copy all" }).click();
+    await expect(page.getByRole("menu")).toBeHidden();
+    expect((await focusRing(page)).ring, "menu trigger after a click").toBe(false);
+
     // From the keyboard: the tab strip, then on into the editor.
     await page.getByTestId("tab-main.ts").focus();
     await page.keyboard.press("ArrowRight");

@@ -103,6 +103,8 @@ function PaletteBody() {
             setActive(0);
           }}
           onKeyDown={(event) => {
+            // Enter that finishes a Korean (IME) syllable is not a choice yet.
+            if (event.nativeEvent.isComposing) return;
             if (event.key === "ArrowDown") {
               event.preventDefault();
               setActive((index) => Math.min(results.length - 1, index + 1));

@@ -392,6 +392,7 @@ export function HistoryView() {
                 value={fileId}
                 onValueChange={setFileId}
                 options={fileOptions}
+                className="w-auto max-w-64"
               />
             ) : null}
             <span className="text-caption text-fg-3 tabular" data-testid="history-stats">
@@ -655,11 +656,18 @@ function DiffPane({
       <div className="flex shrink-0 items-center border-b border-line text-caption text-fg-3">
         {!narrow ? (
           <div className="grid min-w-0 flex-1 grid-cols-2">
-            <span className="truncate px-3 py-1">{beforeLabel}</span>
-            <span className="truncate border-s border-line px-3 py-1">{afterLabel}</span>
+            <span className="truncate px-3 py-1" title={beforeLabel}>
+              {beforeLabel}
+            </span>
+            <span className="truncate border-s border-line px-3 py-1" title={afterLabel}>
+              {afterLabel}
+            </span>
           </div>
         ) : (
-          <span className="min-w-0 flex-1 truncate px-3 py-1">
+          <span
+            className="min-w-0 flex-1 truncate px-3 py-1"
+            title={`${beforeLabel} → ${afterLabel}`}
+          >
             {beforeLabel} → {afterLabel}
           </span>
         )}
