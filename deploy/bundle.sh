@@ -82,12 +82,12 @@ printf '%s\n' "$VERSION" >"$STAGE/VERSION"
 # Pulled images have registry digests: update.sh checks that it pulls exactly these, also from a
 # mirror that keeps them. One line per image: <name> sha256:<digest>.
 if [ "$SOURCE" = registry ]; then
-  for service in $CODESH_SERVICES; do
-    ref="$(compose config --images "$service")"
-    digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" | grep -m 1 "^${ref%:*}@sha256:")" ||
-      die "no registry digest for $ref"
-    name="${ref%:*}"
-    printf '%s %s\n' "${name##*/}" "${digest##*@}" >>"$STAGE/IMAGES"
+  # The names of docker-compose.yml (`config --images <service>` also lists the dependencies).
+  for name in codesh-api codesh-collab codesh-web codesh-mdns; do
+    ref="$REGISTRY/$name:$VERSION"
+    digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" |
+      grep -m 1 "^$REGISTRY/$name@sha256:")" || die "no registry digest for $ref"
+    printf '%s %s\n' "$name" "${digest##*@}" >>"$STAGE/IMAGES"
   done
 fi
 
