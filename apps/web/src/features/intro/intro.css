@@ -850,6 +850,8 @@ button.ix-ed-tab:hover {
 }
 .ix-way-label {
   display: block;
+  width: fit-content;
+  max-width: calc(100% - 24px);
   transition: transform 220ms var(--ix-ease);
 }
 .ix-way-btn:hover,
