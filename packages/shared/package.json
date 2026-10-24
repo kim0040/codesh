@@ -15,5 +15,5 @@
   "devDependencies": {
     "@types/node": "22.20.5"
   },
-  "sideEffects": false
+  "sideEffects": ["./src/zod.ts"]
 }

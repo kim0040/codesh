@@ -1,4 +1,3 @@
-import { z } from "zod";
 import {
   ACCESS_LEVELS,
   MAX_FILES_PER_SHARE,
@@ -20,6 +19,7 @@ import {
 import { shareLabelsViewSchema } from "./labels.js";
 import { settingsSchema } from "./settings.js";
 import { colorSchema, displayNameSchema } from "./user.js";
+import { z } from "./zod.js";
 
 /** Request and response bodies of the HTTP API (§9). Dates travel as ISO 8601 strings. */
 

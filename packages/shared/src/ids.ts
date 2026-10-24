@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { DEFAULT_FILE_ID, JOIN_CODE_LENGTH } from "./constants.js";
+import { z } from "./zod.js";
 
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const ID_LENGTH = 8;

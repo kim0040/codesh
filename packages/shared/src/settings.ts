@@ -1,6 +1,6 @@
-import { z } from "zod";
 import { MAX_DOC_BYTES_LIMIT, MAX_TEMPLATES, MAX_TEMPLATES_TOTAL_BYTES } from "./constants.js";
 import { settingsTemplateSchema, templateBytes } from "./templates.js";
+import { z } from "./zod.js";
 
 /** Admin-editable settings (§10). Object fields use `prefault` so nested defaults apply. */
 

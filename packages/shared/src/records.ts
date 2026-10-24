@@ -1,6 +1,6 @@
-import { z } from "zod";
 import { ACCESS_LEVELS } from "./constants.js";
 import { clientIdSchema, joinCodeSchema, shareIdSchema, uploadIdSchema } from "./ids.js";
+import { z } from "./zod.js";
 
 /**
  * Domain shapes of the MongoDB collections (§5). They use `id` instead of Mongo's `_id`;

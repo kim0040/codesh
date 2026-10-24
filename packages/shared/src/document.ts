@@ -1,7 +1,7 @@
-import { z } from "zod";
 import { MAX_PATH_LENGTH } from "./constants.js";
 import { fileIdSchema } from "./ids.js";
 import { userRefSchema } from "./user.js";
+import { z } from "./zod.js";
 
 /** Names of the shared types inside one Y.Doc (§4). */
 export const YDOC = {

@@ -14,10 +14,11 @@ RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store pnpm fetch
 COPY . .
 RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store \
     pnpm install --offline --frozen-lockfile --filter @codesh/web... \
-    && pnpm --filter @codesh/web build
+    && pnpm --filter @codesh/web build \
+    && node deploy/caddy/csp.mjs
 
 FROM ${CADDY_IMAGE} AS runtime
-COPY deploy/caddy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=web /repo/Caddyfile.production /etc/caddy/Caddyfile
 COPY --from=web /repo/apps/web/dist /srv
 RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 EXPOSE 80 443

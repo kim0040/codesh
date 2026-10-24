@@ -1,7 +1,7 @@
-import { z } from "zod";
 import { roleSchema } from "./http.js";
 import { clientIdSchema, shareIdSchema } from "./ids.js";
 import { colorSchema } from "./user.js";
+import { z } from "./zod.js";
 
 /** Payload signed into the collab token (§8). `exp` is Unix seconds. */
 export const collabTokenPayloadSchema = z.object({
