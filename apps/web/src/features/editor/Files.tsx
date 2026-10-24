@@ -327,7 +327,8 @@ export function FileTabs({
                 draggable
                 onDragStart={(event) => setFileDrag(event, file.id)}
                 onClick={() => ctx.setActiveFileId(file.id)}
-                className="flex h-8 max-w-48 items-center gap-1.5 ps-2.5 pe-1 text-body-sm coarse:h-10"
+                // The strip scrolls sideways, which clips anything drawn outside it: ring inside.
+                className="flex h-8 max-w-48 items-center gap-1.5 rounded-t-md ps-2.5 pe-1 text-body-sm focus-visible:-outline-offset-2 coarse:h-10"
                 data-testid={`tab-${file.path}`}
               >
                 <span
@@ -466,7 +467,9 @@ export function FileTree({ ops }: { ops: FileOps }) {
           </IconButton>
         ) : null}
       </div>
-      <ul className="min-h-0 flex-1 overflow-y-auto p-1.5">{tree.map((node) => row(node, 0))}</ul>
+      <ul className="min-h-0 flex-1 overflow-y-auto p-1.5 [scrollbar-gutter:stable]">
+        {tree.map((node) => row(node, 0))}
+      </ul>
     </nav>
   );
 }

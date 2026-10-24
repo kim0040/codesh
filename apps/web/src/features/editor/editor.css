@@ -11,13 +11,27 @@
   height: 100%;
 }
 
+/*
+ * The focus ring is drawn above the sticky gutter (an outline on the editor was half hidden behind
+ * it, leaving stray bars), and only when focus came from the keyboard (see `pointerFocus`).
+ */
 .cm-host .cm-editor.cm-focused {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline: none;
 }
 
+.cm-host .cm-editor.cm-focused:not([data-pointer-focus])::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 300;
+  border: 2px solid var(--focus);
+  pointer-events: none;
+}
+
+/* A scrollbar that appears as the file grows would otherwise rewrap every wrapped line. */
 .cm-host .cm-scroller {
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .cm-host .cm-content {
