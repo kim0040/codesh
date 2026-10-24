@@ -55,7 +55,7 @@ Releases attach these bundles as `codesh-<version>-linux-amd64.tar.gz` and `-lin
 
 ```sh
 sha256sum -c codesh-<version>.tar.gz.sha256     # compare the value with one received over a trusted channel
-tar xzf codesh-<version>.tar.gz && cd codesh-<version>
+tar xzf codesh-<version>.tar.gz && cd codesh-<version>       # release files are named codesh-<version>-linux-amd64 (or -arm64)
 PUBLIC_URL=http://codesh.local ./install.sh      # loads images, writes .env with new secrets, starts, waits for /healthz
 ./backup.sh                                     # mongodump -> ./backups/codesh-<time>.archive.gz
 ./restore.sh backups/codesh-<time>.archive.gz   # stops api+collab, mongorestore --drop, starts them

@@ -37,7 +37,7 @@ deploy/bundle.sh [버전]
 ```sh
 sha256sum -c codesh-<버전>.tar.gz.sha256
 tar xzf codesh-<버전>.tar.gz
-cd codesh-<버전>
+cd codesh-<버전>        # 릴리스 파일은 이름이 codesh-<버전>-linux-amd64(또는 -arm64)입니다
 PUBLIC_URL=http://codesh.local ./install.sh
 ```
 `install.sh` 스크립트는 다음 작업을 순차적으로 수행합니다.
