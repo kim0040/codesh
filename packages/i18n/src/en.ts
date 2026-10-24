@@ -612,6 +612,10 @@ export const en = {
   "history.restoreBody":
     "Everyone sees the code change to that version. You can restore another version later.",
   "history.compareAction": "Compare with now",
+  "history.compareLabel": "Compare with",
+  "history.previous": "Previous version",
+  "history.position": "{n} / {total}",
+  "history.versionError": "Couldn't load this version.",
   "history.loading": "Loading history…",
   "history.error.title": "Couldn't load history",
   "history.error.body": "Check your connection and try again.",

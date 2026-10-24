@@ -620,6 +620,10 @@ export const ko: KoDictionary = {
   "history.restoreBody":
     "모든 참여자의 화면이 그 버전으로 바뀌어요. 나중에 다른 버전으로 다시 복원할 수 있어요.",
   "history.compareAction": "현재와 비교",
+  "history.compareLabel": "비교 대상",
+  "history.previous": "이전 버전",
+  "history.position": "{n} / {total}",
+  "history.versionError": "이 버전을 불러오지 못했어요.",
   "history.loading": "이력을 불러오는 중…",
   "history.error.title": "이력을 불러오지 못했어요",
   "history.error.body": "연결을 확인한 뒤 다시 시도해 주세요.",
