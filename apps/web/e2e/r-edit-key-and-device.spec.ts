@@ -45,6 +45,9 @@ async function keepCopies(page: Page): Promise<void> {
 /**
  * Records every IndexedDB open and delete of the page, from before the app starts. The log is in
  * sessionStorage, so it survives the page reloading itself (sign-out, dev server).
+ *
+ * The methods are replaced on `IDBFactory.prototype`: WebKit does not keep properties set on the
+ * `indexedDB` object itself, and by the time the app runs they can be gone.
  */
 async function logIndexedDb(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -52,15 +55,16 @@ async function logIndexedDb(page: Page): Promise<void> {
       const log = JSON.parse(sessionStorage.getItem("idb-log") ?? "[]") as string[];
       sessionStorage.setItem("idb-log", JSON.stringify([...log, entry]));
     };
-    const open = indexedDB.open.bind(indexedDB);
-    const remove = indexedDB.deleteDatabase.bind(indexedDB);
-    indexedDB.open = (name: string, version?: number) => {
+    const factory = IDBFactory.prototype;
+    const open = factory.open;
+    const remove = factory.deleteDatabase;
+    factory.open = function (this: IDBFactory, name: string, version?: number) {
       push(`open ${name}`);
-      return open(name, version);
+      return open.call(this, name, version);
     };
-    indexedDB.deleteDatabase = (name: string) => {
+    factory.deleteDatabase = function (this: IDBFactory, name: string) {
       push(`delete ${name}`);
-      return remove(name);
+      return remove.call(this, name);
     };
   });
 }
@@ -254,13 +258,68 @@ test("a fragment link works the same, also when pasted into a tab that is alread
     await guest.page.evaluate((next) => {
       window.location.hash = next;
     }, hash);
-    await expect(guest.page.getByTestId("banner-readonly")).toBeHidden();
     await expect.poll(() => new URL(guest.page.url()).hash).toBe("");
+    // The editor of the new join, not the moment between two documents when there is none.
     await waitForEditor(guest.page);
+    await expect(guest.page.getByTestId("banner-readonly")).toHaveCount(0);
     await type(guest.page, " + pasted");
     await expect.poll(() => editorText(owner.page)).toContain("+ pasted");
     const key = hash.slice("#key=".length);
     expect(urls.filter((url) => url.includes(key))).toEqual([]);
+  } finally {
+    await closeAll(owner, guest);
+  }
+});
+
+test("a key pasted while the open document was still authenticating as a viewer edits", async ({
+  browser,
+}) => {
+  const owner = await newUser(browser, "Owner");
+  const guest = await newUser(browser, "Guest");
+  try {
+    const id = await createShare(owner.page);
+    await viewOnly(owner, id);
+    // The server's answers to authentication (Hocuspocus Auth messages) reach the guest late.
+    const hold = { on: false, held: 0, pending: 0 };
+    await guest.context.routeWebSocket(/\/collab/, (ws) => {
+      const server = ws.connectToServer();
+      ws.onMessage((message) => server.send(message));
+      server.onMessage((message) => {
+        if (hold.on && typeof message !== "string" && message[1 + (message[0] ?? 0)] === 2) {
+          hold.held++;
+          hold.pending++;
+          setTimeout(() => {
+            hold.pending--;
+            ws.send(message);
+          }, 1500);
+          return;
+        }
+        ws.send(message);
+      });
+    });
+    await guest.page.goto(`/${id}`);
+    await waitForEditor(guest.page);
+    await expect(guest.page.getByTestId("banner-readonly")).toBeVisible();
+
+    // A new key makes the open document authenticate again, as a viewer; that answer is held
+    // while the key is pasted, so it arrives after the next document of the share took over.
+    hold.on = true;
+    const rotated = await owner.context.request.patch(`/api/shares/${id}`, {
+      data: { access: { rotateEditKey: true } },
+    });
+    expect(rotated.ok()).toBe(true);
+    const share = await owner.context.request.get(`/api/shares/${id}`);
+    const { editKey } = ((await share.json()) as { access: { editKey: string } }).access;
+    await expect.poll(() => hold.held).toBeGreaterThan(0);
+    await guest.page.evaluate((next) => {
+      window.location.hash = `#key=${next}`;
+    }, editKey);
+    // Every answer delivered, the last one decides.
+    await expect
+      .poll(async () => hold.pending === 0 && (await guest.page.getByTestId("editor").count()) > 0)
+      .toBe(true);
+    await waitForEditor(guest.page);
+    await expect(guest.page.getByTestId("banner-readonly")).toHaveCount(0);
   } finally {
     await closeAll(owner, guest);
   }
@@ -578,8 +637,9 @@ for (const databases of ["missing", "rejected"] as const) {
 
       // Another page of this profile, where the browser cannot list its databases.
       const page = await owner.context.newPage();
+      // On the prototype, like logIndexedDb: WebKit can drop a property of `indexedDB` itself.
       await page.addInitScript((mode) => {
-        Object.defineProperty(indexedDB, "databases", {
+        Object.defineProperty(IDBFactory.prototype, "databases", {
           configurable: true,
           value: mode === "missing" ? undefined : () => Promise.reject(new Error("SecurityError")),
         });
