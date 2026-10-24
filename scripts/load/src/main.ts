@@ -26,7 +26,7 @@ import {
   type WorkerConfig,
   type WorkerResults,
 } from "./protocol.js";
-import { startResourceSampler } from "./resources.js";
+import { checkBudgets, startResourceSampler } from "./resources.js";
 import { clientCount, type LabGroup, type ShareGroup } from "./scenarios.js";
 import { increase, metricValue, summarize } from "./stats.js";
 
@@ -51,6 +51,7 @@ const counters = { rateLimited: 0, clients: 0 };
 const failures = new Map<string, number>();
 const shares: Share[] = [];
 const jobs: ClientJob[] = [];
+const nullIfNaN = (value: number) => (Number.isNaN(value) ? null : value);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const fail = (reason: string, count = 1) =>
   failures.set(reason, (failures.get(reason) ?? 0) + count);
@@ -547,19 +548,30 @@ async function main() {
       max: Math.max(...outputs.map((o) => o.lagMs.max)),
     },
   };
+  // The collab metrics URL is one address behind Caddy: with several replicas each scrape may reach
+  // a different process, and counters (or peaks) of different processes cannot be told from a
+  // restart. Counter rates and peaks are then unsupported; the docker figures cover all replicas.
+  const collabReplicas = resourceReport.services.collab?.replicas ?? null;
+  const collabMetricsSupported = collabReplicas === null || collabReplicas <= 1;
   const peak = (name: string) =>
-    Math.max(0, ...[...samples, after].map((s) => s.collab?.[name] ?? 0));
+    collabMetricsSupported
+      ? Math.max(0, ...[...samples, after].map((s) => s.collab?.[name] ?? 0))
+      : Number.NaN;
   const series = [atStart, ...samples, after];
   const perSecond = (value: number | null) =>
     value === null ? null : Math.round((value / seconds) * 10) / 10;
   const collabRate = (name: string) =>
-    perSecond(
-      increase(
-        series.map((x) => x.collab),
-        name,
-      ),
-    );
+    collabMetricsSupported
+      ? perSecond(
+          increase(
+            series.map((x) => x.collab),
+            name,
+          ),
+        )
+      : null;
   const server = {
+    collabReplicas,
+    collabMetricsSupported,
     collabCpuCores: collabRate("codesh_collab_process_cpu_seconds_total"),
     apiCpuCores: perSecond(
       increase(
@@ -571,17 +583,29 @@ async function main() {
     wsMessagesPerS: collabRate("codesh_collab_ws_messages_sent_total"),
     wsBytesPerS: collabRate("codesh_collab_ws_bytes_sent_total"),
     flushesPerS: collabRate("codesh_collab_flush_seconds_count"),
-    awarenessDropped: increase(
-      series.map((x) => x.collab),
-      "codesh_collab_awareness_dropped_total",
+    awarenessDropped: collabMetricsSupported
+      ? increase(
+          series.map((x) => x.collab),
+          "codesh_collab_awareness_dropped_total",
+        )
+      : null,
+    collabLagP99Ms: nullIfNaN(
+      Math.round(peak("codesh_collab_nodejs_eventloop_lag_p99_seconds") * 1e4) / 10,
     ),
-    collabLagP99Ms: Math.round(peak("codesh_collab_nodejs_eventloop_lag_p99_seconds") * 1e4) / 10,
-    collabLagMaxMs: Math.round(peak("codesh_collab_nodejs_eventloop_lag_max_seconds") * 1e4) / 10,
-    collabRssPeakMiB:
+    collabLagMaxMs: nullIfNaN(
+      Math.round(peak("codesh_collab_nodejs_eventloop_lag_max_seconds") * 1e4) / 10,
+    ),
+    collabRssPeakMiB: nullIfNaN(
       Math.round((peak("codesh_collab_process_resident_memory_bytes") / 1024 ** 2) * 10) / 10,
-    collabHeapPeakMiB:
+    ),
+    collabHeapPeakMiB: nullIfNaN(
       Math.round((peak("codesh_collab_nodejs_heap_size_used_bytes") / 1024 ** 2) * 10) / 10,
+    ),
   };
+
+  // Server budgets (docs/OPERATIONS.md §11.1) are checked when container sampling was asked for
+  // (--docker-project); a service with no samples then fails. Without it they are not checked.
+  const budgets = opts.dockerProject ? checkBudgets(resourceReport.services, attempted) : null;
 
   const targets = {
     editP95Ms: { limit: 100, value: editLatency.p95, ok: editLatency.p95 < 100 },
@@ -596,6 +620,7 @@ async function main() {
     },
     cursorsConverged: { limit: 0, value: result.cursorGaps, ok: result.cursorGaps === 0 },
     errors: { limit: 0, value: errorCount, ok: errorCount === 0 },
+    ...budgets,
     ...(stormReport
       ? {
           resyncedWithin5s: {
@@ -607,6 +632,7 @@ async function main() {
       : {}),
   };
   const ok = Object.values(targets).every((t) => t.ok) && syncedClients === attempted;
+  const resourcesChecked = budgets !== null;
 
   const report = {
     scenario: plan.scenario,
@@ -648,6 +674,7 @@ async function main() {
     resources: resourceReport,
     metrics: { before, atStart, samples, after },
     targets,
+    resourcesChecked,
     ok,
   };
 
@@ -709,7 +736,7 @@ async function main() {
   }
   for (const [name, usage] of Object.entries(resourceReport.services)) {
     rows.push([
-      `docker ${name} cpu avg/peak %, mem peak`,
+      `docker ${name}${usage.replicas > 1 ? ` x${usage.replicas} summed` : ""} cpu avg/peak %, mem peak`,
       `${usage.cpuAvg} / ${usage.cpuPeak}, ${usage.memPeakMiB} MiB`,
     ]);
   }
@@ -723,7 +750,21 @@ async function main() {
   for (const [reason, count] of failures) console.log(`  error x${count}: ${reason}`);
   for (const [name, target] of Object.entries(targets)) {
     if (!target.ok)
-      console.log(`  target missed: ${name} = ${target.value} (limit ${target.limit})`);
+      console.log(
+        `  target missed: ${name} = ${target.value ?? "no data"} (limit ${target.limit})`,
+      );
+  }
+  if (!collabMetricsSupported) {
+    console.log(
+      `  collab runs ${collabReplicas} replicas: counter rates, event-loop lag and RSS from /metrics/collab are unsupported (shown as -); the docker rows above add the replicas up`,
+    );
+  }
+  if (!resourcesChecked) {
+    console.log(
+      opts.dockerProject
+        ? `  server resource budgets: none documented for ${attempted} clients`
+        : "  server resource budgets: not checked (no --docker-project); this verdict is protocol and latency only",
+    );
   }
   console.log(`\nresult: ${ok ? "OK" : "FAILED"}  (${file})`);
 
