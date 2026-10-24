@@ -720,7 +720,7 @@ async function main() {
     ],
     [
       "collab ws msgs/s / KiB/s",
-      `${f(server.wsMessagesPerS)} / ${f((server.wsBytesPerS ?? 0) / 1024)}`,
+      `${f(server.wsMessagesPerS)} / ${f(server.wsBytesPerS === null ? null : server.wsBytesPerS / 1024)}`,
     ],
   ];
   if (stormReport) {
