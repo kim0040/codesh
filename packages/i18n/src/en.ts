@@ -518,6 +518,7 @@ export const en = {
   "toast.saved": "Saved to my shares",
   "toast.unsaved": "Removed from my shares",
   "toast.deleted": "Share deleted",
+  "toast.commentDeleted": "Comment deleted",
   "toast.forked": "Copy created",
   "toast.downloadStarted": "Download started",
   "toast.formatted": "Code formatted",

@@ -532,6 +532,7 @@ export const ko: KoDictionary = {
   "toast.saved": "내 공유에 저장했어요",
   "toast.unsaved": "내 공유에서 제거했어요",
   "toast.deleted": "공유를 삭제했어요",
+  "toast.commentDeleted": "댓글을 삭제했어요",
   "toast.forked": "복사본을 만들었어요",
   "toast.downloadStarted": "다운로드를 시작했어요",
   "toast.formatted": "코드를 정리했어요",
