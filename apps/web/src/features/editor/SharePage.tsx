@@ -4,7 +4,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, isApiError } from "../../lib/api";
 import type { JoinCredentials } from "../../lib/collab/session";
-import { useLinkKey } from "../../lib/credentials";
+import { isKeyRemembered, noteKeyAdmitted, useLinkKey } from "../../lib/credentials";
+import { isDenial, leaveAfterDenial, leaveBeforeChallenge } from "../../lib/device";
 import { errorText } from "../../lib/errors";
 import { useSseEvent } from "../../lib/events";
 import { useT } from "../../lib/i18n";
@@ -39,7 +40,8 @@ type JoinState =
 export function SharePage({ idOrCode }: { idOrCode: string }) {
   if (isJoinCode(idOrCode)) return <CodeResolver code={idOrCode} />;
   if (!isShareId(idOrCode)) return <NotFoundShare />;
-  return <JoinGate shareId={idOrCode} />;
+  // One gate per share: credentials and attempts never carry over to another one.
+  return <JoinGate key={idOrCode} shareId={idOrCode} />;
 }
 
 function CodeResolver({ code }: { code: string }) {
@@ -83,26 +85,48 @@ function JoinGate({ shareId }: { shareId: string }) {
   const attemptId = useRef(0);
   // A PIN or an approval was asked for: the offline copy waits for the server's say (session.ts).
   const sensitiveRef = useRef(false);
+  // The open document ended with edits the server had not confirmed; the gate says so.
+  const [lostEdits, setLostEdits] = useState(false);
 
   const attempt = useCallback(
     async (credentials: JoinCredentials) => {
       const id = ++attemptId.current;
       credentialsRef.current = credentials;
+      /**
+       * A PIN or approval asked for at the door, not in answer to a PIN typed here: whatever an
+       * earlier visit left (a copy, a key that let this tab in) goes before the gate shows. A key
+       * the link just brought stays with this gate for the next attempt.
+       */
+      const challenge = async (next: JoinState) => {
+        sensitiveRef.current = true;
+        if (!credentials.pin) {
+          const remembered = isKeyRemembered(shareId);
+          if (remembered) credentialsRef.current = {};
+          await leaveBeforeChallenge(shareId, remembered);
+          if (id !== attemptId.current) return;
+        }
+        setState(next);
+      };
       try {
         const result = await api.joinShare(shareId, credentials);
         if (id !== attemptId.current) return;
-        if ("token" in result) setState({ phase: "ready", role: result.role, credentials });
-        else {
-          sensitiveRef.current = true;
-          setState({ phase: "waiting" });
-        }
+        if ("token" in result) {
+          if (credentials.editKey) noteKeyAdmitted(shareId);
+          setLostEdits(false);
+          setState({ phase: "ready", role: result.role, credentials });
+        } else await challenge({ phase: "waiting" });
       } catch (error) {
         if (id !== attemptId.current) return;
+        // The server's own refusal: a copy and a key from an earlier visit go, also when no
+        // document is open (the tab was closed when the ban came).
+        if (isDenial(error)) {
+          credentialsRef.current = {};
+          void leaveAfterDenial(shareId);
+        }
         if (isApiError(error, "pin_required")) {
-          sensitiveRef.current = true;
-          setState({ phase: "pin", invalid: false, rateLimited: false, busy: false });
+          await challenge({ phase: "pin", invalid: false, rateLimited: false, busy: false });
         } else if (isApiError(error, "pin_invalid")) {
-          setState({ phase: "pin", invalid: true, rateLimited: false, busy: false });
+          await challenge({ phase: "pin", invalid: true, rateLimited: false, busy: false });
         } else if (isApiError(error, "rate_limited")) {
           setState({ phase: "pin", invalid: false, rateLimited: true, busy: false });
         } else if (isApiError(error, "banned")) setState({ phase: "banned" });
@@ -115,21 +139,51 @@ function JoinGate({ shareId }: { shareId: string }) {
     [shareId],
   );
 
+  // The key this gate joined with; undefined before the first join.
+  const joinedWith = useRef<{ key: string | undefined } | undefined>(undefined);
   const sessionReady = Boolean(session.data);
   useEffect(() => {
     if (!sessionReady) return;
+    // A new key (pasted link) joins again; a dropped key (forget, denial) is cleanup, not a join.
+    const joined = joinedWith.current;
+    if (joined && (editKey === undefined || editKey === joined.key)) return;
+    joinedWith.current = { key: editKey };
     setState({ phase: "loading" });
     void attempt(editKey ? { editKey } : {});
-    return () => {
-      attemptId.current++;
-    };
   }, [sessionReady, attempt, editKey]);
+  useEffect(
+    () => () => {
+      attemptId.current++;
+      joinedWith.current = undefined;
+    },
+    [],
+  );
+
+  /** The open document left the share. A PIN or approval asked for anew starts the join over. */
+  const onLeft = useCallback(
+    (rejoin: boolean, lost: boolean) => {
+      credentialsRef.current = {};
+      setLostEdits(lost);
+      if (rejoin) {
+        setState({ phase: "loading" });
+        void attempt({});
+      } else
+        setState((current) =>
+          current.phase === "ready" ? { ...current, credentials: {} } : current,
+        );
+    },
+    [attempt],
+  );
 
   // Waiting room: the owner's answer arrives as an event; a slow poll covers a missed one.
   useSseEvent("approval-result", (result) => {
     if (result.shareId !== shareId) return;
     if (result.approved) void attempt(credentialsRef.current);
-    else setState({ phase: "denied" });
+    else {
+      credentialsRef.current = {};
+      void leaveAfterDenial(shareId);
+      setState({ phase: "denied" });
+    }
   });
   const waiting = state.phase === "waiting";
   useEffect(() => {
@@ -165,6 +219,7 @@ function JoinGate({ shareId }: { shareId: string }) {
           invalid={state.invalid}
           rateLimited={state.rateLimited}
           busy={state.busy}
+          lostEdits={lostEdits}
           onSubmit={(pin) => {
             setState({ ...state, busy: true });
             void attempt({ ...credentialsRef.current, pin });
@@ -174,13 +229,14 @@ function JoinGate({ shareId }: { shareId: string }) {
     case "waiting":
       return (
         <WaitingRoom
+          lostEdits={lostEdits}
           onCancel={() => {
             window.history.length > 1 ? window.history.back() : window.location.assign("/");
           }}
         />
       );
     case "denied":
-      return <DeniedScreen />;
+      return <DeniedScreen lostEdits={lostEdits} />;
     case "banned":
       return <KickedScreen banned />;
     case "notfound":
@@ -205,6 +261,7 @@ function JoinGate({ shareId }: { shareId: string }) {
           role={state.role}
           credentials={state.credentials}
           sensitive={sensitiveRef.current}
+          onLeft={onLeft}
           me={{
             clientId: session.data.clientId,
             name: session.data.name ?? "",

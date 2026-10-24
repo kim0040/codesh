@@ -204,6 +204,7 @@ export const en = {
 
   // ── Editor: body ──
   "editor.loading": "Opening the share…",
+  "editor.unsentLost": "Changes that had not reached the server could not be kept.",
   "editor.readOnly": "You can view this share but not edit it",
   "editor.locked": "The owner locked editing. You can still read the code.",
   "editor.preview.title": "Markdown preview",
@@ -379,13 +380,21 @@ export const en = {
     "Keeps your edits in this browser while the connection is down. Turn it off on a device other people use. A share with a PIN or approval loads its copy only after you are let in again.",
   "settings.forget.action": "Forget on this device",
   "settings.forget.hint":
-    "Deletes this share’s offline copy and saved edit key from this browser, in every tab. The share on the server stays.",
+    "Closes this share in every tab of this browser and deletes its offline copy and saved edit key. No copy of it is kept again until you turn copies on for it. The share on the server stays.",
   "settings.signOut.action": "Sign out, forget all",
   "settings.signOut.hint":
     "Ends the sign-in and deletes every offline copy and edit key in this browser. Other open tabs are cleared too.",
+  "editor.deviceCopy.title": "Keep offline copies on this device?",
+  "editor.deviceCopy.body":
+    "A copy keeps your edits while the connection is down. Choose not to on a device other people use. You can change this in Settings.",
+  "editor.deviceCopy.keepAction": "Keep on this device",
+  "editor.deviceCopy.skipAction": "Not on this device",
   "toast.forgotten": "Forgotten on this device",
   "toast.forgetFailed":
-    "Some data could not be deleted. Clear this site’s data in the browser settings.",
+    "Some offline copies on this device might remain. To remove them, clear this site’s data in the browser settings.",
+  "settings.unsent.title": "Some changes have not reached the server",
+  "settings.unsent.body": "These changes have not reached the server and will be lost.",
+  "settings.unsent.leaveAction": "Leave anyway",
 
   // ── Status bar and connection ──
   "status.connected": "Connected",
@@ -412,8 +421,12 @@ export const en = {
   "status.language.changed": "Language changed: {language}",
   "conn.reconnecting.title": "Reconnecting…",
   "conn.reconnecting.body": "Your changes are kept on this device and sync once you're back.",
+  "conn.reconnecting.bodyMemory":
+    "Your changes are only in this tab and sync once you're back. Keep it open.",
   "conn.offline.title": "You're offline",
   "conn.offline.body": "Changes are kept on this device and merge when you reconnect.",
+  "conn.offline.bodyMemory":
+    "Changes are only in this tab until you reconnect. Closing or reloading it loses them.",
   "conn.synced": "Back online. Your changes were merged.",
   "conn.disconnected.title": "Disconnected",
   "conn.disconnected.body": "Can't reach the server. Retrying automatically.",

@@ -6,6 +6,10 @@ import { useSyncExternalStore } from "react";
 export const KEYMAPS = ["default", "vim", "emacs", "sublime"] as const;
 export type Keymap = (typeof KEYMAPS)[number];
 
+/** Keep offline copies on this device: not asked yet (no copy), yes, or no. */
+export const OFFLINE_COPY_CHOICES = ["undecided", "yes", "no"] as const;
+export type OfflineCopyChoice = (typeof OFFLINE_COPY_CHOICES)[number];
+
 export interface EditorPrefs {
   /** `auto` follows the app theme: Slate in dark, Paper in light. */
   editorTheme: ThemeId | "auto";
@@ -19,8 +23,11 @@ export interface EditorPrefs {
   smoothTyping: boolean;
   /** Show invites as system notifications while the tab is in the background. */
   notifications: boolean;
-  /** Keep an offline copy of each share in this browser (IndexedDB). */
-  offlineCopy: boolean;
+  /**
+   * Keep an offline copy of each share in this browser (IndexedDB). Device-wide; nothing is
+   * written while it is `undecided` (lib/device.ts).
+   */
+  offlineCopy: OfflineCopyChoice;
 }
 
 export const FONT_SIZE_MIN = 10;
@@ -37,7 +44,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
   keymap: "default",
   smoothTyping: true,
   notifications: false,
-  offlineCopy: true,
+  offlineCopy: "undecided",
 };
 
 const STORAGE_KEY = "codesh.prefs";
@@ -58,6 +65,7 @@ export function sanitizePrefs(input: unknown): EditorPrefs {
     typeof raw[key] === "boolean" ? (raw[key] as boolean) : fallback;
   const theme = raw.editorTheme;
   const keymap = raw.keymap;
+  const offlineCopy = raw.offlineCopy;
   return {
     editorTheme: isThemeId(theme) ? theme : "auto",
     fontSize: num("fontSize", d.fontSize, FONT_SIZE_MIN, FONT_SIZE_MAX),
@@ -68,7 +76,12 @@ export function sanitizePrefs(input: unknown): EditorPrefs {
     keymap: KEYMAPS.find((k) => k === keymap) ?? d.keymap,
     smoothTyping: bool("smoothTyping", d.smoothTyping),
     notifications: bool("notifications", d.notifications),
-    offlineCopy: bool("offlineCopy", d.offlineCopy),
+    // Before the choice existed the setting was a boolean that defaulted to on without asking:
+    // `true` was never a decision, `false` was.
+    offlineCopy:
+      offlineCopy === false
+        ? "no"
+        : (OFFLINE_COPY_CHOICES.find((c) => c === offlineCopy) ?? d.offlineCopy),
   };
 }
 
@@ -93,18 +106,22 @@ function emit() {
   for (const listener of listeners) listener();
 }
 
-export function setPrefs(patch: Partial<EditorPrefs>): void {
+/** False when the change could not be stored: it still applies until the tab closes. */
+export function setPrefs(patch: Partial<EditorPrefs>): boolean {
   current = sanitizePrefs({ ...getPrefs(), ...patch });
+  let stored = true;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
   } catch {
-    // Blocked storage: the change still applies until the tab closes.
+    stored = false;
   }
   emit();
+  return stored;
 }
 
+/** Back to the defaults; the device choice about offline copies is not an editor preference and stays. */
 export function resetPrefs(): void {
-  setPrefs({ ...DEFAULT_PREFS });
+  setPrefs({ ...DEFAULT_PREFS, offlineCopy: getPrefs().offlineCopy });
 }
 
 export function subscribePrefs(listener: () => void): () => void {

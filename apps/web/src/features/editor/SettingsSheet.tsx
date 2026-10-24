@@ -1,6 +1,8 @@
 import { EDITOR_THEMES, type ThemeId } from "@codesh/highlight";
 import {
   Button,
+  Dialog,
+  DialogContent,
   getStoredTheme,
   IconButton,
   Select,
@@ -11,9 +13,16 @@ import {
   type ThemePreference,
   toast,
 } from "@codesh/ui";
+import { useNavigate } from "@tanstack/react-router";
 import { Minus, Plus } from "lucide-react";
 import { useId, useState } from "react";
-import { forgetShare, signOut } from "../../lib/device";
+import {
+  chooseOfflineCopy,
+  forgetShare,
+  hasUnsentEdits,
+  isForgotten,
+  signOut,
+} from "../../lib/device";
 import { useLocale, useT } from "../../lib/i18n";
 import { promptInstall, useCanInstall } from "../../lib/install";
 import { LICENSES_URL } from "../../lib/licenses";
@@ -90,12 +99,15 @@ function Row({ label, children, id }: { label: string; children: React.ReactNode
 function SettingsBody() {
   const t = useT();
   const ctx = useEditor();
+  const navigate = useNavigate();
   // Signing out only exists for a verified identity: an anonymous session cannot be signed back in.
   const identity = useSession().data?.identity;
   const [locale, setLocale] = useLocale();
   const prefs = usePrefs();
   const canInstall = useCanInstall();
   const [uiTheme, setUiTheme] = useState<ThemePreference>(getStoredTheme);
+  // Forget or sign out was asked for while edits had not reached the server yet.
+  const [confirming, setConfirming] = useState<"forget" | "signOut" | null>(null);
   const labelIds = { size: useId(), indent: useId() };
 
   const chooseUiTheme = (value: string) => {
@@ -104,8 +116,19 @@ function SettingsBody() {
     setTheme(next);
   };
 
+  const shareId = ctx.session.shareId;
+  // Off when this share was forgotten here, even if copies are kept for others.
+  const keepsCopy = prefs.offlineCopy === "yes" && !isForgotten(shareId);
+
+  const chooseCopy = async (on: boolean) => {
+    const ok = await chooseOfflineCopy(on ? "yes" : "no", shareId);
+    if (!ok) toast({ title: t("toast.forgetFailed"), tone: "warning" });
+  };
+
+  // Leaving the share here: the editor closes and the start page shows how it went.
   const forget = async () => {
-    const ok = await forgetShare(ctx.session.shareId);
+    const ok = await forgetShare(shareId);
+    void navigate({ to: "/", replace: true });
     toast(
       ok
         ? { title: t("toast.forgotten"), tone: "success", duration: 3000 }
@@ -116,7 +139,21 @@ function SettingsBody() {
   const leave = async () => {
     const ok = await signOut();
     if (ok) window.location.assign("/");
-    else toast({ title: t("toast.forgetFailed"), tone: "warning" });
+    else {
+      void navigate({ to: "/", replace: true });
+      toast({ title: t("toast.forgetFailed"), tone: "warning" });
+    }
+  };
+
+  // Both throw away edits the server has not confirmed (in any tab): ask first.
+  const askFirst = async (action: "forget" | "signOut") => {
+    if (await hasUnsentEdits(action === "forget" ? shareId : undefined)) setConfirming(action);
+    else void (action === "forget" ? forget() : leave());
+  };
+  const confirmLeave = () => {
+    const action = confirming;
+    setConfirming(null);
+    void (action === "forget" ? forget() : leave());
   };
 
   const toggleNotifications = async (on: boolean) => {
@@ -278,24 +315,48 @@ function SettingsBody() {
         <Switch
           label={t("settings.offlineCopy.label")}
           description={t("settings.offlineCopy.hint")}
-          checked={prefs.offlineCopy}
-          onCheckedChange={(offlineCopy) => setPrefs({ offlineCopy })}
+          checked={keepsCopy}
+          onCheckedChange={(on) => void chooseCopy(on)}
           data-testid="switch-offline-copy"
         />
         <div className="flex flex-col gap-1.5">
-          <Button className="self-start" onClick={() => void forget()} data-testid="forget-device">
+          <Button
+            className="self-start"
+            onClick={() => void askFirst("forget")}
+            data-testid="forget-device"
+          >
             {t("settings.forget.action")}
           </Button>
           <p className="text-caption text-fg-3">{t("settings.forget.hint")}</p>
         </div>
         {identity ? (
           <div className="flex flex-col gap-1.5">
-            <Button className="self-start" onClick={() => void leave()} data-testid="sign-out">
+            <Button
+              className="self-start"
+              onClick={() => void askFirst("signOut")}
+              data-testid="sign-out"
+            >
               {t("settings.signOut.action")}
             </Button>
             <p className="text-caption text-fg-3">{t("settings.signOut.hint")}</p>
           </div>
         ) : null}
+        <Dialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
+          <DialogContent
+            size="sm"
+            title={t("settings.unsent.title")}
+            description={t("settings.unsent.body")}
+            closeLabel={t("common.close")}
+            footer={
+              <>
+                <Button onClick={() => setConfirming(null)}>{t("common.cancel")}</Button>
+                <Button variant="danger" onClick={confirmLeave} data-testid="unsent-leave">
+                  {t("settings.unsent.leaveAction")}
+                </Button>
+              </>
+            }
+          />
+        </Dialog>
       </Section>
 
       <Section title={t("settings.section.misc")}>

@@ -1,6 +1,6 @@
 import type { AwarenessState, Comment, UserRef } from "@codesh/shared";
 import { YDOC } from "@codesh/shared";
-import { useCallback, useRef, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { type DocMetaView, type FileEntry, readComments, readFiles, readMeta } from "./model";
@@ -10,39 +10,53 @@ export function useSessionState(session: DocSession): SessionState {
   return useSyncExternalStore(session.subscribe, session.getState, session.getState);
 }
 
-/** Re-reads `read(doc)` whenever one of the observed shared types changes. */
-function useYDerived<T>(
+type Observed = (Y.Map<unknown> | Y.Array<unknown>)[];
+
+/**
+ * `read(doc)` as a store for useSyncExternalStore: re-read whenever one of the observed shared
+ * types changes. A change between the render and the subscription (an offline copy that finished
+ * loading) fires no event the store would see, so subscribing reads again and reports a difference.
+ */
+export function derivedStore<T>(
   doc: Y.Doc,
   read: (doc: Y.Doc) => T,
-  targets: (doc: Y.Doc) => (Y.Map<unknown> | Y.Array<unknown>)[],
-): T {
-  const cache = useRef<{ doc: Y.Doc; value: T } | null>(null);
+  targets: (doc: Y.Doc) => Observed,
+): { subscribe: (onChange: () => void) => () => void; getSnapshot: () => T } {
+  let cache: { value: T } | null = null;
+  const getSnapshot = () => {
+    if (!cache) cache = { value: read(doc) };
+    return cache.value;
+  };
+  const subscribe = (onChange: () => void) => {
+    const types = targets(doc);
+    const handler = () => {
+      cache = { value: read(doc) };
+      onChange();
+    };
+    for (const type of types) type.observeDeep(handler);
+    if (cache && JSON.stringify(read(doc)) !== JSON.stringify(cache.value)) handler();
+    return () => {
+      for (const type of types) type.unobserveDeep(handler);
+    };
+  };
+  return { subscribe, getSnapshot };
+}
+
+function useYDerived<T>(doc: Y.Doc, read: (doc: Y.Doc) => T, targets: (doc: Y.Doc) => Observed): T {
   const readRef = useRef(read);
   readRef.current = read;
   const targetsRef = useRef(targets);
   targetsRef.current = targets;
-
-  const subscribe = useCallback(
-    (onChange: () => void) => {
-      const types = targetsRef.current(doc);
-      const handler = () => {
-        cache.current = { doc, value: readRef.current(doc) };
-        onChange();
-      };
-      for (const type of types) type.observeDeep(handler);
-      return () => {
-        for (const type of types) type.unobserveDeep(handler);
-      };
-    },
+  const store = useMemo(
+    () =>
+      derivedStore(
+        doc,
+        (d) => readRef.current(d),
+        (d) => targetsRef.current(d),
+      ),
     [doc],
   );
-  const getSnapshot = useCallback(() => {
-    if (!cache.current || cache.current.doc !== doc) {
-      cache.current = { doc, value: readRef.current(doc) };
-    }
-    return cache.current.value;
-  }, [doc]);
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 }
 
 export function useFiles(doc: Y.Doc): FileEntry[] {

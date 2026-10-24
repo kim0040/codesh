@@ -226,6 +226,7 @@ export const ko: KoDictionary = {
 
   // ── Editor: body ──
   "editor.loading": "공유를 여는 중…",
+  "editor.unsentLost": "서버에 전달되지 않은 변경 내용은 보관하지 못했어요.",
   "editor.readOnly": "보기만 할 수 있는 공유예요",
   "editor.locked": "소유자가 편집을 잠갔어요. 코드는 계속 볼 수 있어요.",
   "editor.preview.title": "Markdown 미리보기",
@@ -399,13 +400,21 @@ export const ko: KoDictionary = {
     "연결이 끊겨 있는 동안에도 편집 내용을 이 브라우저에 보관해요. 여러 사람이 쓰는 기기에서는 꺼 두세요. PIN이 있거나 승인이 필요한 공유는 다시 입장한 뒤에만 사본을 불러와요.",
   "settings.forget.action": "이 기기에서 지우기",
   "settings.forget.hint":
-    "이 공유의 오프라인 사본과 저장된 편집 키를 모든 탭에서 지워요. 서버에 있는 공유는 그대로예요.",
+    "이 브라우저의 모든 탭에서 이 공유를 닫고, 오프라인 사본과 저장된 편집 키를 지워요. 다시 켜기 전까지는 이 공유의 사본을 저장하지 않아요. 서버에 있는 공유는 그대로예요.",
   "settings.signOut.action": "로그아웃하고 모두 지우기",
   "settings.signOut.hint":
     "로그인을 끊고 이 브라우저의 오프라인 사본과 편집 키를 모두 지워요. 열려 있는 다른 탭도 함께 정리돼요.",
+  "editor.deviceCopy.title": "이 기기에 오프라인 사본을 저장할까요?",
+  "editor.deviceCopy.body":
+    "사본이 있으면 연결이 끊겨도 편집 내용을 지킬 수 있어요. 여러 사람이 쓰는 기기라면 저장하지 마세요. 설정에서 언제든 바꿀 수 있어요.",
+  "editor.deviceCopy.keepAction": "이 기기에 저장",
+  "editor.deviceCopy.skipAction": "이 기기에는 저장 안 함",
   "toast.forgotten": "이 기기에서 지웠어요",
   "toast.forgetFailed":
-    "일부를 지우지 못했어요. 브라우저의 사이트 데이터 설정에서 직접 지워 주세요.",
+    "이 기기에 오프라인 사본이 남아 있을 수 있어요. 지우려면 브라우저 설정에서 이 사이트의 데이터를 삭제해 주세요.",
+  "settings.unsent.title": "서버에 전달되지 않은 변경 내용이 있어요",
+  "settings.unsent.body": "이 변경 내용은 아직 서버에 전달되지 않았고, 계속하면 사라져요.",
+  "settings.unsent.leaveAction": "그래도 나가기",
 
   // ── Status bar and connection ──
   "status.connected": "연결됨",
@@ -431,8 +440,12 @@ export const ko: KoDictionary = {
   "status.language.changed": "언어를 바꿨어요: {language}",
   "conn.reconnecting.title": "다시 연결하는 중…",
   "conn.reconnecting.body": "변경 내용은 이 기기에 보관되고, 연결되면 바로 동기화돼요.",
+  "conn.reconnecting.bodyMemory":
+    "변경 내용은 이 탭에만 있고, 연결되면 바로 동기화돼요. 탭을 닫지 마세요.",
   "conn.offline.title": "오프라인이에요",
   "conn.offline.body": "변경 내용은 이 기기에 보관되고, 다시 연결되면 합쳐져요.",
+  "conn.offline.bodyMemory":
+    "다시 연결될 때까지 변경 내용은 이 탭에만 있어요. 탭을 닫거나 새로고침하면 사라져요.",
   "conn.synced": "다시 연결됐어요. 변경 내용을 합쳤어요.",
   "conn.disconnected.title": "연결이 끊겼어요",
   "conn.disconnected.body": "서버에 연결할 수 없어요. 자동으로 다시 시도하고 있어요.",
