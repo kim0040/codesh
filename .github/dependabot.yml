@@ -1,0 +1,42 @@
+# Weekly, grouped dependency updates (free on GitHub). Versions stay exact; the licence check in
+# `pnpm check` still decides whether a new version may come in.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories: ["/", "/deploy/mdns"]
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+      npm-major:
+        update-types: [major]
+
+  - package-ecosystem: docker
+    directories: ["/apps/api", "/apps/collab", "/deploy/caddy", "/deploy/mdns"]
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      docker-images:
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directories: ["/deploy"]
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      compose-images:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
