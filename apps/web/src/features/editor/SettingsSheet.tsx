@@ -15,6 +15,7 @@ import { Minus, Plus } from "lucide-react";
 import { useId, useState } from "react";
 import { useLocale, useT } from "../../lib/i18n";
 import { promptInstall, useCanInstall } from "../../lib/install";
+import { LICENSES_URL } from "../../lib/licenses";
 import { notificationPermission, requestNotificationPermission } from "../../lib/notify";
 import {
   FONT_SIZE_MAX,
@@ -259,6 +260,15 @@ function SettingsBody() {
             {t("settings.install.action")}
           </Button>
         ) : null}
+        <a
+          href={LICENSES_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-6 items-center self-start text-body-sm text-accent-text underline underline-offset-2"
+        >
+          {t("settings.licenses.link")}
+          <span className="sr-only">{t("a11y.opensInNewTab")}</span>
+        </a>
       </Section>
     </div>
   );

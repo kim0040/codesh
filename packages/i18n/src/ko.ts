@@ -188,6 +188,7 @@ export const ko: KoDictionary = {
   "intro.footer.version": "버전 {version}",
   "intro.footer.contact": "문의: {contact}",
   "intro.footer.noTracking": "광고, 추적, 외부 스크립트가 없어요. 모두 이 서버에서 불러와요.",
+  "intro.footer.licenses": "오픈소스 라이선스",
 
   // ── Share basics (kept from the first dictionary) ──
   "share.new": "새 공유",
@@ -386,6 +387,7 @@ export const ko: KoDictionary = {
     "이 사이트의 알림이 막혀 있어요. 브라우저의 사이트 설정과 시스템 알림 설정에서 허용하고, 집중 모드나 방해 금지를 꺼 주세요.",
   "settings.notifications.unsupported":
     "이 브라우저는 시스템 알림을 지원하지 않아요. iPhone과 iPad에서는 먼저 홈 화면에 codesh를 추가해 주세요.",
+  "settings.licenses.link": "오픈소스 라이선스",
   "settings.install.action": "앱 설치",
   "settings.resetAction": "기본값으로 되돌리기",
 
@@ -1012,6 +1014,7 @@ export const ko: KoDictionary = {
   // ── Accessibility ──
   "a11y.skipToContent": "본문으로 건너뛰기",
   "a11y.mainNavigation": "주 메뉴",
+  "a11y.opensInNewTab": "(새 탭에서 열려요)",
   "a11y.switchLanguage": "화면 언어",
   "a11y.switchTheme": "앱 테마",
   "a11y.editor": "코드 에디터",

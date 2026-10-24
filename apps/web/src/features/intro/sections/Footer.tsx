@@ -1,4 +1,5 @@
 import { useT } from "../../../lib/i18n";
+import { LICENSES_URL } from "../../../lib/licenses";
 import { NameCells } from "../art";
 import { ArrowRightIcon } from "../icons";
 import { reveal } from "../reveal";
@@ -35,6 +36,12 @@ export function Footer({ version, contact }: FooterProps) {
             <div className="ix-footer-notes">
               <p>{t("intro.footer.noTracking")}</p>
               {contact ? <p>{t("intro.footer.contact", { contact })}</p> : null}
+              <p>
+                <a href={LICENSES_URL} target="_blank" rel="noopener noreferrer">
+                  {t("intro.footer.licenses")}
+                  <span className="ix-sr">{t("a11y.opensInNewTab")}</span>
+                </a>
+              </p>
             </div>
           </div>
           <nav className="ix-footer-links" aria-label={t("a11y.mainNavigation")}>

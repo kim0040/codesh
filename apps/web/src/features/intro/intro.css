@@ -1592,6 +1592,15 @@ button.ix-ed-tab:hover {
   color: var(--fg-2);
   font-size: var(--ix-small);
 }
+.ix-footer-notes a {
+  display: inline-block;
+  padding-block: 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ix-footer-notes a:hover {
+  color: var(--fg);
+}
 .ix-footer-bar {
   display: flex;
   flex-wrap: wrap;
