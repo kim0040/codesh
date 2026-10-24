@@ -13,16 +13,6 @@ curl http://localhost/healthz
 
 `.env.example` documents every variable. Secrets are random hex written by `generate-secrets.sh`; it never overwrites a value that is set. `MONGO_PASSWORD` only seeds a new volume: change it later with `mongosh`, not by editing `.env`.
 
-### Windows host
-
-Docker Desktop with its WSL2 backend and Docker Compose v2 can run the same stack. PowerShell
-operators can use `generate-secrets.ps1`; for offline bundles use `install.ps1`, `backup.ps1`,
-`restore.ps1` and `upgrade.ps1`. Create or keep `tls/` beside `docker-compose.yml`; the Compose
-bind mount resolves it from the Compose file location, and Windows file ACLs replace the Unix
-`chmod 600` step. Leave the optional `mdns` profile disabled on Docker Desktop because its
-host-network sidecar is not supported there. See [Windows에서 운영하기](../docs/OPERATIONS.md#13-windows에서-운영하기)
-for setup, firewall and phone access details.
-
 ## Edge (Caddy)
 
 - `/` and unknown paths serve `index.html` (SPA fallback, `no-cache`); `/assets/*` is hashed build output (`immutable`, one year).
@@ -63,9 +53,6 @@ PUBLIC_URL=http://codesh.corp ./install.sh      # loads images, writes .env with
 ```
 
 Valkey holds join codes, presence and caches only; it is not part of the backup.
-
-On Windows, extract with `tar.exe -xzf codesh-<version>.tar.gz`, open PowerShell in the extracted
-folder, then run `./install.ps1`. The PowerShell scripts are included in each bundle.
 
 ## Load test
 

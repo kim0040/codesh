@@ -45,8 +45,7 @@ awk '
   { skip = 0; print }
 ' docker-compose.yml >"$STAGE/docker-compose.yml"
 sed "s/^CODESH_VERSION=.*/CODESH_VERSION=$VERSION/" .env.example >"$STAGE/.env.example"
-cp lib.sh lib.ps1 generate-secrets.sh generate-secrets.ps1 install.sh install.ps1 \
-  upgrade.sh upgrade.ps1 backup.sh backup.ps1 restore.sh restore.ps1 "$STAGE/"
+cp lib.sh generate-secrets.sh install.sh upgrade.sh backup.sh restore.sh "$STAGE/"
 cp tls/README.md "$STAGE/tls/"
 [ -f README.md ] && cp README.md "$STAGE/"
 printf '%s\n' "$VERSION" >"$STAGE/VERSION"

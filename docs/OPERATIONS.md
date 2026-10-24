@@ -6,7 +6,7 @@
 
 ## 1. 시스템 요구사항
 
-- **운영체제**: Linux Docker Compose 환경 또는 Windows 10/11 Docker Desktop (WSL2 backend)
+- **운영체제**: Linux (Docker Compose 지원 환경 권장)
 - **런타임 의존성**: Docker Engine 및 Docker Compose 플러그인(`docker compose`)
 - **하드웨어 권장 사양**:
   - 최소: 2 vCPU, 4GB RAM
@@ -288,54 +288,9 @@ codesh pull 123456 -o .\received
 
 ---
 
-## 13. Windows에서 운영하기
+## 13. 로그 및 문제 해결
 
-### 13.1 요구사항과 첫 실행
-
-- Windows 10/11에서 Docker Desktop을 설치하고 WSL2 backend와 Linux containers를 사용합니다.
-- Docker Compose v2가 포함된 Docker Desktop을 사용합니다. 설치 상태는 PowerShell에서 `docker compose version`으로 확인합니다.
-- 저장소에서 직접 운영할 때는 `deploy` 폴더에서 다음과 같이 준비합니다.
-  ```powershell
-  Copy-Item .env.example .env
-  .\generate-secrets.ps1
-  docker compose up -d --build
-  ```
-- TLS 파일을 사용할 경우 `deploy\tls`에 인증서, 키, Caddy 설정을 둡니다. Compose는 이 경로를 읽기 전용으로 컨테이너에 연결합니다. Windows에는 Unix `chmod 600`이 없으므로 PowerShell 시크릿 스크립트가 `.env`의 ACL을 현재 사용자로 제한합니다.
-- `.gitattributes`는 Linux 이미지로 복사되는 텍스트 파일을 LF로 체크아웃하므로 Windows Git의 `core.autocrlf=true` 설정에서도 shell script, Dockerfile, Caddyfile, Compose 설정이 Linux 줄바꿈을 유지합니다.
-
-### 13.2 오프라인 번들
-
-번들을 Windows PC로 복사하고 PowerShell에서 압축을 풉니다. `tar.exe`는 Windows 10/11에 포함되어 있습니다.
-```powershell
-tar.exe -xzf .\codesh-<버전>.tar.gz
-Set-Location .\codesh-<버전>
-$env:PUBLIC_URL = "http://192.168.1.20"
-./install.ps1
-./backup.ps1
-./restore.ps1 .\backups\codesh-<시각>.archive.gz
-./upgrade.ps1 ..\codesh-<새버전>.tar.gz
-```
-설치 스크립트는 이미지를 `docker load`로 읽고 `.env`를 준비한 다음 Compose 스택을 시작하고 `/healthz` 응답을 기다립니다. 기존 `.env`가 있으면 설치 시 그대로 유지합니다. 복원은 현재 데이터베이스를 대체하며, 기본 동작은 확인을 요청합니다. 확인을 생략하려면 `./restore.ps1 <백업파일> --yes`를 사용하십시오.
-
-### 13.3 같은 Wi-Fi에서 휴대전화로 접속
-
-Windows PC와 휴대전화를 같은 Wi-Fi에 연결하고, 공유기에서 무선 단말 간 통신 차단(client isolation)이 켜져 있지 않은지 확인합니다. Windows에서 `ipconfig`를 실행해 Wi-Fi 어댑터의 IPv4 주소를 확인한 뒤 `http://<PC의-IPv4-주소>:<HTTP_PORT>`로 접속합니다. 기본 HTTP 포트는 `80`이며, 다른 포트를 설정했다면 해당 값을 사용합니다.
-
-Windows Defender 방화벽에서 해당 TCP 포트를 **Private 네트워크 프로필**에 허용합니다. 관리자 PowerShell에서 기본 포트를 열려면 다음 명령을 실행합니다.
-```powershell
-New-NetFirewallRule -DisplayName "codesh HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -Profile Private
-```
-`HTTP_PORT`를 변경했다면 `-LocalPort`에도 같은 포트를 지정합니다. HTTPS를 사용하는 경우 `HTTPS_PORT`도 별도 규칙으로 허용합니다. 이 예시는 로컬 네트워크에서 PC 주소로 직접 접속하므로 `localhost`를 휴대전화 주소에 입력하지 않습니다.
-
-### 13.4 지원 범위
-
-Docker Desktop에서는 `mdns` sidecar의 `network_mode: host`가 동작하지 않으므로 `COMPOSE_PROFILES=mdns`를 설정하지 마십시오. 이 환경에서는 위의 PC IPv4 주소를 사용하거나 네트워크에서 제공하는 DNS 이름을 사용하십시오. mDNS sidecar는 Linux Docker host에서만 사용할 수 있습니다.
-
----
-
-## 14. 로그 및 문제 해결
-
-### 14.1 로그 위치 및 로테이션
+### 13.1 로그 위치 및 로테이션
 모든 서비스는 Docker `json-file` 로깅 드라이버를 사용하며, 컨테이너당 **최대 10MB x 3개 파일(총 30MB)**로 제한되어 디스크 풀림을 방지합니다.
 ```sh
 docker compose logs -f api       # API 서버 로그
@@ -345,7 +300,7 @@ docker compose logs -f mongo     # 데이터베이스 로그
 docker compose logs -f valkey    # 캐시/메시징 로그
 ```
 
-### 14.2 주요 장애 유형과 대응 방법
+### 13.2 주요 장애 유형과 대응 방법
 
 - **503 `unavailable` (실시간 편집 서버 응답 없음)**:
   - API 서버가 Collab 서버와의 통신(`cmd:<shareId>`) 응답을 5초 이내에 수신하지 못한 경우 발생합니다.
