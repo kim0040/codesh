@@ -35,6 +35,8 @@ export async function findShare(ctx: Ctx, id: string): Promise<ShareRecord> {
 
 export interface Access {
   owner: boolean;
+  /** Role before a temporary lock is applied. */
+  tokenRole: Role;
   /** The teacher of the lab this share belongs to: edits any student share, even when locked. */
   teacher: boolean;
   /** Passed PIN and approval (or does not need to). */
@@ -73,6 +75,7 @@ export async function accessOf(
     (candidate) => !!candidate && safeEqual(candidate, share.access.editKey),
   );
   let role: Role = owner ? "owner" : teacher ? "edit" : keyOk ? "edit" : share.access.default;
+  const tokenRole = role;
   // A locked share is read-only for everyone but the controller: the teacher in a lab, else the
   // owner. In a lab the student owns the share but must not be able to undo the teacher's lock.
   // The lab decides for its shares: a copy created while the teacher locks the lab may lag behind.
@@ -84,6 +87,7 @@ export async function accessOf(
   const needsApproval = share.access.requireApproval && !granted;
   return {
     owner,
+    tokenRole,
     teacher,
     granted,
     needsPin,
@@ -197,7 +201,7 @@ export function mintToken(
   ctx: Ctx,
   share: ShareRecord,
   session: Session,
-  role: Role,
+  access: Access,
 ): Promise<string> {
   return signCollabToken(
     {
@@ -205,7 +209,9 @@ export function mintToken(
       clientId: session.clientId,
       name: displayName(session),
       color: session.color,
-      role,
+      role: access.tokenRole,
+      controller: share.labId ? access.teacher : access.owner,
+      generation: share.access.generation ?? "",
       exp: Math.floor(Date.now() / 1000) + COLLAB_TOKEN_TTL_SECONDS,
     },
     ctx.config.collabSecret,

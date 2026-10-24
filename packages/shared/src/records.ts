@@ -12,6 +12,8 @@ const binarySchema = z.instanceof(Uint8Array);
 export const accessSchema = z.object({
   default: z.enum(ACCESS_LEVELS),
   editKey: z.string(),
+  /** Persistent collab-token generation; absent on shares created before permission revocation. */
+  generation: z.string().optional(),
   pinHash: z.string().nullable(),
   requireApproval: z.boolean(),
   nearby: z.boolean(),

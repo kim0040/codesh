@@ -9,6 +9,7 @@ import {
   shareParamsSchema,
 } from "@codesh/shared";
 import { findShare, requireOwner } from "../access.js";
+import { randomKey } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
 import { invalid, notFound } from "../errors.js";
 import { syncExpiry } from "../shares.js";
@@ -31,6 +32,8 @@ export function moderationRoutes(app: App, ctx: Ctx): void {
       requireOwner(share, request.session);
       if (clientId === share.ownerId) throw invalid("The owner cannot be removed");
 
+      // Persist before publishing: old tokens stay revoked after reconnects and Valkey restarts.
+      await ctx.stores.shares.update(share.id, { access: { generation: randomKey() } });
       // Without the grant the client has to pass PIN and approval again to come back.
       await ctx.valkey.hdel(apiKeys.grants(share.id), clientId);
       await ctx.valkey.hdel(keys.pending(share.id), clientId);

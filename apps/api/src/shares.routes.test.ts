@@ -511,6 +511,8 @@ describe.skipIf(!integration)("collab tokens", () => {
       name: "Guest One",
       color: "#445566",
       role: "edit",
+      controller: false,
+      generation: "",
       exp: expect.any(Number),
     });
     expect((payload?.exp ?? 0) - before).toBeGreaterThanOrEqual(599);

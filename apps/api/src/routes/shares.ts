@@ -183,7 +183,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       if (role === null) throw forbidden("Not admitted");
       await noteActivity(ctx, share);
       await ctx.audit(request, "share.join", share.id);
-      return { token: await mintToken(ctx, share, session, role), role };
+      return { token: await mintToken(ctx, share, session, access), role };
     },
   );
 
@@ -227,7 +227,13 @@ export function shareRoutes(app: App, ctx: Ctx): void {
             askRejoin = true;
           }
         }
-        if (wanted.requireApproval !== undefined) next.requireApproval = wanted.requireApproval;
+        if (wanted.requireApproval !== undefined) {
+          next.requireApproval = wanted.requireApproval;
+          if (wanted.requireApproval && !share.access.requireApproval) {
+            clearGrants = true;
+            askRejoin = true;
+          }
+        }
         if (wanted.nearby !== undefined) next.nearby = wanted.nearby;
         if (wanted.rotateEditKey) {
           next.editKey = randomKey();
@@ -237,6 +243,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
         const pinHash = next.pinHash === undefined ? share.access.pinHash : next.pinHash;
         const approval = next.requireApproval ?? share.access.requireApproval;
         if (pinHash !== null || approval) next.nearby = false;
+        if (askRejoin) next.generation = randomKey();
         patch.access = next;
       }
       if (body.locked !== undefined && body.locked !== share.locked) patch.locked = body.locked;
@@ -244,6 +251,8 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       // Title and language live in the document too; collab writes them (§6.11), so a refusal or
       // an unreachable collab leaves the share untouched.
       if (body.title !== undefined || body.language !== undefined) {
+        if (share.labId && (await accessOf(ctx, share, session)).role === "view")
+          throw forbidden("A locked lab share is read-only");
         await sendCommand(ctx, share.id, {
           kind: "meta",
           ...(body.title !== undefined ? { title: body.title } : {}),

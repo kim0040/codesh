@@ -38,6 +38,78 @@ describe.runIf(available)("content changes through a real collab server", () => 
     return collab.connect(url, id, { token });
   };
 
+  it("H1: a lab lock immediately stops a connected student but lets the teacher edit", async () => {
+    const server = await collab.startServer();
+    const teacher = api.client();
+    const student = api.client();
+    const labResponse = await teacher.post("/api/labs", { title: "Security lab" });
+    expect(labResponse.statusCode).toBe(200);
+    const labId = labResponse.json<{ id: string }>().id;
+    const studentResponse = await student.post(`/api/labs/${labId}/join`, { name: "Student" });
+    expect(studentResponse.statusCode).toBe(200);
+    const id = studentResponse.json<{ shareId: string }>().shareId;
+    const studentEditor = await joined(student, id, server.webSocketURL);
+    const teacherEditor = await joined(teacher, id, server.webSocketURL);
+    await Promise.all([studentEditor.synced, teacherEditor.synced]);
+    expect((await teacher.patch(`/api/labs/${labId}`, { locked: true })).statusCode).toBe(200);
+    await waitFor(
+      () => studentEditor.stateless.length > 0 && teacherEditor.stateless.length > 0,
+      "lock delivered",
+    );
+    expect(studentEditor.stateless.at(-1)).toMatchObject({ type: "locked", readOnly: true });
+    expect(teacherEditor.stateless.at(-1)).toMatchObject({ type: "locked", readOnly: false });
+    studentEditor.text.insert(0, "forbidden student text");
+    teacherEditor.text.insert(0, "teacher text");
+    await waitFor(
+      () => server.collab.docs.get(id)?.document.getText("file:main").toString() === "teacher text",
+      "teacher edit accepted, student update rejected",
+    );
+    await waitFor(
+      async () => (await storedText(collab.stores, id)) === "teacher text",
+      "teacher edit persisted",
+    );
+  });
+
+  it.each(["kick", "ban", "view", "key", "pin"])(
+    "M1: rejects an old collab token after %s through the API",
+    async (change) => {
+      const server = await collab.startServer();
+      const owner = api.client();
+      const guest = api.client();
+      const { id } = await createShare(owner);
+      if (change === "key") await owner.patch(`/api/shares/${id}`, { access: { default: "view" } });
+      const share = await api.stores.shares.get(id);
+      const token = (
+        await guest.post(
+          `/api/shares/${id}/join`,
+          change === "key" ? { editKey: share?.access.editKey } : {},
+        )
+      ).json<{ token: string }>().token;
+      const connected = await collab.connect(server.webSocketURL, id, { token });
+      await connected.synced;
+      const response =
+        change === "kick" || change === "ban"
+          ? await owner.post(`/api/shares/${id}/kick`, {
+              clientId: await guest.clientId(),
+              ban: change === "ban",
+            })
+          : await owner.patch(`/api/shares/${id}`, {
+              access:
+                change === "view"
+                  ? { default: "view" }
+                  : change === "key"
+                    ? { rotateEditKey: true }
+                    : { pin: "654321" },
+            });
+      expect(response.statusCode).toBe(200);
+      await waitFor(() => connected.closes.length > 0, "existing connection revoked");
+      const replay = await collab.connect(server.webSocketURL, id, { token });
+      expect(await Promise.race([replay.denied, replay.synced.then(() => "accepted")])).toBe(
+        change === "ban" ? "banned" : "unauthorized",
+      );
+    },
+  );
+
   it("restore through the API changes the text of a connected client", async () => {
     const server = await collab.startServer();
     const owner = api.client();

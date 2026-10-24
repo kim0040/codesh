@@ -10,6 +10,8 @@ export const collabTokenPayloadSchema = z.object({
   name: z.string(),
   color: colorSchema,
   role: roleSchema,
+  controller: z.boolean().optional(),
+  generation: z.string().optional(),
   exp: z.number().int(),
 });
 export type CollabTokenPayload = z.infer<typeof collabTokenPayloadSchema>;
