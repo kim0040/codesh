@@ -129,6 +129,42 @@ describe.runIf(available)("collab permissions", () => {
     ]);
   });
 
+  it("L4: accepts the localized guest name and resolving another author's comment", async () => {
+    const {
+      share,
+      clients: [owner, guest],
+    } = await room(["owner", "edit"]);
+    if (!owner || !guest) throw new Error("clients missing");
+    // The web client shows unnamed guests as "손님 1234"; the token carries "Guest-abcd".
+    const comment = {
+      id: "guest-comment",
+      fileId: "main",
+      anchor: {},
+      head: {},
+      author: { clientId: guest.clientId, name: "손님 1234", color: "#336699" },
+      body: "question",
+      createdAt: Date.now(),
+      resolved: false,
+    };
+    guest.doc.getArray("comments").push([comment]);
+    await waitFor(() => owner.doc.getArray("comments").length === 1, "guest comment received");
+    owner.doc.transact(() => {
+      owner.doc.getArray("comments").delete(0);
+      owner.doc.getArray("comments").push([{ ...comment, resolved: true }]);
+    });
+    await waitFor(
+      () =>
+        (guest.doc.getArray("comments").get(0) as { resolved?: boolean } | undefined)?.resolved ===
+        true,
+      "resolve received",
+    );
+    expect(guest.closes).toEqual([]);
+    expect(owner.closes).toEqual([]);
+    expect(server.collab.docs.get(share.id)?.document.getArray("comments").toJSON()).toEqual([
+      { ...comment, resolved: true },
+    ]);
+  });
+
   it("rejects updates from viewers", async () => {
     const {
       share,
