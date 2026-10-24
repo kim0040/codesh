@@ -6,9 +6,9 @@
  *                                   licence (language colours) and Prettier's bundled notices
  *   dist/licenses/OFL-*.txt         the SIL Open Font Licence texts of the two fonts
  *
- * The closure is walked from apps/web/package.json (dependencies and optionalDependencies, through
- * the workspace packages), because `pnpm licenses --filter` does not follow workspace links. The
- * output has no dates or absolute paths, so the same lockfile gives the same bytes. The build fails
+ * The closure is walked from apps/web/package.json (dependencies, optionalDependencies and installed
+ * peerDependencies, through the workspace packages), because `pnpm licenses --filter` does not
+ * follow workspace links. The output has no dates or absolute paths, so the same lockfile gives the same bytes. The build fails
  * for a package without licence text unless NO_LICENSE_FILE names it.
  */
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -66,6 +66,7 @@ interface PackageJson {
   repository?: string | { url?: string };
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 }
 
 function readJson(path: string): PackageJson {
@@ -80,9 +81,13 @@ function isFile(path: string): boolean {
   }
 }
 
-/** Node's resolution on real paths: the pnpm store keeps a package's dependencies as siblings. */
+/**
+ * Node's resolution on real paths: the pnpm store keeps a package's dependencies as siblings. It
+ * stops at the store itself, whose hoisted copy (.pnpm/node_modules) holds dev packages too.
+ */
 function resolvePackage(name: string, fromDir: string): string | undefined {
   for (let dir = fromDir; ; dir = dirname(dir)) {
+    if (basename(dir) === ".pnpm") return undefined;
     if (basename(dir) !== "node_modules") {
       const candidate = join(dir, "node_modules", name);
       if (isFile(join(candidate, "package.json"))) return realpathSync(candidate);
@@ -129,9 +134,9 @@ function licenseFiles(name: string, dir: string): LicenseFile[] {
 }
 
 /**
- * Every package a production install of `entryDir` puts on disk: its dependencies and optional
- * dependencies, transitively, through workspace packages (which are not listed themselves).
- * Optional dependencies that are not installed on this platform are skipped.
+ * Every package a production install of `entryDir` puts on disk: its dependencies, optional
+ * dependencies and installed peer dependencies, transitively, through workspace packages (which
+ * are not listed themselves). Optional and peer dependencies that are not installed are skipped.
  */
 export function collectClosure(entryDir: string): ClosurePackage[] {
   const root = realpathSync(entryDir);
@@ -163,6 +168,8 @@ export function collectClosure(entryDir: string): ClosurePackage[] {
     for (const [group, deps] of [
       ["dependencies", pkg.dependencies],
       ["optionalDependencies", pkg.optionalDependencies],
+      // pnpm installs peers next to the package (auto-install-peers), so they are on disk too.
+      ["peerDependencies", pkg.peerDependencies],
     ] as const) {
       for (const name of Object.keys(deps ?? {}).sort()) {
         const next = resolvePackage(name, dir);

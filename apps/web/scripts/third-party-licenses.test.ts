@@ -59,6 +59,14 @@ describe("collectClosure", () => {
     expect(() => collectClosure(join(root, "app"))).toThrow(/gone .* is not installed/);
   });
 
+  it("includes peer dependencies that are installed", () => {
+    write("app/package.json", '{"name":"app","dependencies":{"p":"1"}}');
+    const p = store("p", "1.0.0", { peerDependencies: { q: "1", absent: "1" } });
+    symlinkSync(store("q", "1.0.0"), join(dirname(p), "q"));
+    link(join(root, "app"), "p", p);
+    expect(collectClosure(join(root, "app")).map((x) => x.name)).toEqual(["p", "q"]);
+  });
+
   it("reads licence and notice files, normalised", () => {
     write("app/package.json", '{"name":"app","dependencies":{"c":"1"}}');
     link(
