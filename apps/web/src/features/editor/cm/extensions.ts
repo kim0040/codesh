@@ -22,6 +22,7 @@ import {
 import { getEditorTheme, type ThemeId } from "@codesh/highlight";
 import type { EditorPrefs, Keymap } from "../../../lib/prefs";
 import { baseKeymap, sublimeKeymap, undoKeymap } from "./keymaps";
+import { smoothCaret } from "./smooth-caret";
 
 /** Pure builders for the editor's reconfigurable parts; EditorPane puts each in a Compartment. */
 
@@ -38,12 +39,13 @@ export function fontExtension(size: number): Extension {
 }
 
 export function editingExtension(
-  prefs: Pick<EditorPrefs, "tabSize" | "indentWithTabs" | "wrap">,
+  prefs: Pick<EditorPrefs, "tabSize" | "indentWithTabs" | "wrap" | "smoothTyping">,
 ): Extension {
   return [
     EditorState.tabSize.of(prefs.tabSize),
     indentUnit.of(prefs.indentWithTabs ? "\t" : " ".repeat(prefs.tabSize)),
     prefs.wrap ? EditorView.lineWrapping : [],
+    prefs.smoothTyping ? smoothCaret() : [],
   ];
 }
 

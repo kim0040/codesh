@@ -348,6 +348,9 @@ export const en = {
   "settings.indent.tabs": "Tabs",
   "settings.wrap.label": "Wrap long lines",
   "settings.lineNumbers.label": "Show line numbers",
+  "settings.smoothTyping.label": "Smooth typing",
+  "settings.smoothTyping.hint":
+    "The cursor glides as you type. Off when your device is set to reduce motion.",
   "settings.keymap.label": "Key bindings",
   "settings.keymap.default": "Default",
   "settings.keymap.vim": "Vim",

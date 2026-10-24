@@ -229,6 +229,13 @@ function SettingsBody() {
           checked={prefs.lineNumbers}
           onCheckedChange={(lineNumbers) => setPrefs({ lineNumbers })}
         />
+        <Switch
+          label={t("settings.smoothTyping.label")}
+          description={t("settings.smoothTyping.hint")}
+          checked={prefs.smoothTyping}
+          onCheckedChange={(smoothTyping) => setPrefs({ smoothTyping })}
+          data-testid="switch-smooth-typing"
+        />
       </Section>
 
       <Section title={t("settings.section.keys")}>

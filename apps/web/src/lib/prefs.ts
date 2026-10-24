@@ -15,6 +15,8 @@ export interface EditorPrefs {
   wrap: boolean;
   lineNumbers: boolean;
   keymap: Keymap;
+  /** The cursor glides as you type (none under `prefers-reduced-motion`). */
+  smoothTyping: boolean;
   /** Show invites as system notifications while the tab is in the background. */
   notifications: boolean;
 }
@@ -31,6 +33,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
   wrap: true,
   lineNumbers: true,
   keymap: "default",
+  smoothTyping: true,
   notifications: false,
 };
 
@@ -60,6 +63,7 @@ export function sanitizePrefs(input: unknown): EditorPrefs {
     wrap: bool("wrap", d.wrap),
     lineNumbers: bool("lineNumbers", d.lineNumbers),
     keymap: KEYMAPS.find((k) => k === keymap) ?? d.keymap,
+    smoothTyping: bool("smoothTyping", d.smoothTyping),
     notifications: bool("notifications", d.notifications),
   };
 }
