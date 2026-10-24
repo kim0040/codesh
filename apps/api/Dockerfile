@@ -36,6 +36,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=tsx /opt/tsx /opt/tsx
 COPY --from=build --chown=root:root /out ./
+COPY --chown=root:root LICENSE THIRD_PARTY_NOTICES.md /usr/share/doc/codesh/
 # The package tsconfig extends the repo's base file, which is not part of the image.
 RUN printf '%s\n' '{"compilerOptions":{"target":"ES2023","module":"ESNext","moduleResolution":"Bundler","verbatimModuleSyntax":true,"strict":true}}' > tsconfig.json
 USER node

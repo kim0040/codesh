@@ -77,6 +77,7 @@ touch "$STAGE/state/.gitkeep"
 cp tls/README.md tls/*.example "$STAGE/tls/"
 cp ../docs/OPERATIONS.md ../docs/ARCHITECTURE.md ../CHANGELOG.md "$STAGE/docs/"
 [ -f README.md ] && cp README.md "$STAGE/"
+cp ../LICENSE ../THIRD_PARTY_NOTICES.md "$STAGE/"
 printf '%s\n' "$VERSION" >"$STAGE/VERSION"
 
 # Pulled images have registry digests: update.sh checks that it pulls exactly these, also from a

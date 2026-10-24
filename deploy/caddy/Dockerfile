@@ -30,6 +30,7 @@ LABEL org.opencontainers.image.title="codesh-web" \
       org.opencontainers.image.version="${CODESH_VERSION}"
 COPY --from=web /repo/Caddyfile.production /etc/caddy/Caddyfile
 COPY --from=web /repo/apps/web/dist /srv
+COPY --from=web /repo/LICENSE /repo/THIRD_PARTY_NOTICES.md /usr/share/doc/codesh/
 RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 EXPOSE 80 443
 # The admin endpoint listens on localhost only; a 200 means the config is loaded.

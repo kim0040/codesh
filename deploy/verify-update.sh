@@ -70,10 +70,10 @@ mkdir -p "$TMPDIR" "$INSTALL" "$SRV/api/repos/kim0040/codesh" "$WORK/registry"
 DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
 [ "$(free_gib "$DOCKER_ROOT")" -ge 3 ] || fail "less than 3 GiB free in $DOCKER_ROOT: a full disk breaks every stack on this host"
 [ "$(free_gib "$WORK")" -ge 2 ] || fail "less than 2 GiB free in $WORK"
-# bundle.sh reads ../package.json, ../docs and ../CHANGELOG.md; a snapshot keeps the run stable.
+# bundle.sh reads ../package.json, ../docs, ../CHANGELOG.md, ../LICENSE and ../THIRD_PARTY_NOTICES.md; a snapshot keeps the run stable.
 cp -r "$ROOT/deploy" "$WORK/deploy"
 rm -rf "$WORK/deploy/dist" "$WORK/deploy/state"/* "$WORK/deploy/.env"
-mkdir -p "$WORK/docs" && cp "$ROOT/package.json" "$ROOT/CHANGELOG.md" "$WORK/" && cp "$ROOT"/docs/*.md "$WORK/docs/"
+mkdir -p "$WORK/docs" && cp "$ROOT/package.json" "$ROOT/CHANGELOG.md" "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$WORK/" && cp "$ROOT"/docs/*.md "$WORK/docs/"
 
 step "local registry and images 1.0.0, 1.0.1, 1.0.2 (api of 1.0.2 exits at once)"
 docker run -d --name codesh-verify-registry -p "127.0.0.1:$REG_PORT:5000" -v "$WORK/registry:/var/lib/registry" \
