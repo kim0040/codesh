@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isApiError } from "../../lib/api";
 import { useFiles, useMeta, useParticipants, useSessionState } from "../../lib/collab/hooks";
 import { DocSession, type JoinCredentials } from "../../lib/collab/session";
-import { isDenial, leaveShare } from "../../lib/device";
+import { isDenial, isRestarting, leaveAfterDenial } from "../../lib/device";
 import { errorText } from "../../lib/errors";
 import { useSseEvent } from "../../lib/events";
 import { useT } from "../../lib/i18n";
@@ -34,9 +34,9 @@ export interface EditorPageProps {
   sensitive?: boolean;
   /**
    * The document left the share (forget, denial, logout). `rejoin`: the server asks for a PIN or an
-   * approval again, so the join starts over.
+   * approval again, so the join starts over. `lost`: edits the server had not confirmed went too.
    */
-  onLeft?: (rejoin: boolean) => void;
+  onLeft?: (rejoin: boolean, lost: boolean) => void;
   me: UserRef;
 }
 
@@ -84,7 +84,7 @@ export function EditorPage({ shareId, role, credentials, sensitive, onLeft, me }
   // The share is gone or this client is refused: the copy and the key from earlier go too.
   const denied = isDenial(shareQuery.error);
   useEffect(() => {
-    if (denied) void leaveShare(shareId);
+    if (denied) void leaveAfterDenial(shareId);
   }, [denied, shareId]);
 
   // A change of name or colour reaches the others through awareness.
@@ -124,7 +124,7 @@ interface ConnectedProps {
   share: GetShareResponse;
   refetchShare: () => void;
   me: UserRef;
-  onLeft?: (rejoin: boolean) => void;
+  onLeft?: (rejoin: boolean, lost: boolean) => void;
 }
 
 function Connected({ session, share, refetchShare, me, onLeft }: ConnectedProps) {
@@ -200,18 +200,24 @@ function Connected({ session, share, refetchShare, me, onLeft }: ConnectedProps)
   // Once the session has left, the gate above forgets its credentials too.
   const left = state.closed !== null;
   const rejoin = state.denied === "pin_required" || state.denied === "pending_approval";
+  const lost = state.lostEdits;
   useEffect(() => {
-    if (left) onLeft?.(rejoin);
-  }, [left, rejoin, onLeft]);
+    if (left) onLeft?.(rejoin, lost);
+  }, [left, rejoin, lost, onLeft]);
 
-  if (state.closed === "kicked") return <KickedScreen banned={bannedByEvent === true} />;
-  if (state.closed === "deleted") return <NotFoundShare />;
-  if (state.denied === "banned") return <KickedScreen banned />;
-  if (state.denied === "not_found") return <NotFoundShare />;
-  if (state.denied === "unauthorized") return <DeniedScreen />;
+  if (state.closed === "kicked") {
+    return <KickedScreen banned={bannedByEvent === true} lostEdits={lost} />;
+  }
+  if (state.closed === "deleted") return <NotFoundShare lostEdits={lost} />;
+  if (state.denied === "banned") return <KickedScreen banned lostEdits={lost} />;
+  if (state.denied === "not_found") return <NotFoundShare lostEdits={lost} />;
+  if (state.denied === "unauthorized") return <DeniedScreen lostEdits={lost} />;
   if (rejoin) return <LoadingScreen />;
-  // Forgotten on this device (here or in another tab), or signed out.
-  if (state.closed === "left") return <Navigate to="/" replace />;
+  // Forgotten on this device (here or in another tab), or signed out. Another account: the tab
+  // reloads where it is.
+  if (state.closed === "left") {
+    return isRestarting() ? <LoadingScreen /> : <Navigate to="/" replace />;
+  }
   if (!activeFile) return <LoadingScreen />;
 
   const value: EditorCtx = {

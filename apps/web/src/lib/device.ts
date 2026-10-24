@@ -20,13 +20,25 @@ const CHANNEL = "codesh:device";
 const STORAGE_EVENT_KEY = "codesh.forget";
 /** The clientId of the session this device saw last; login and logout rotate it. */
 const SUBJECT_KEY = "codesh.device.subject";
-/** `{ complete, ids }`: shares whose database may exist. Not complete: copies from before it. */
-const REGISTRY_KEY = "codesh.device.copies";
-/** Share ids "Forget on this device" was used on: no copy until the user turns copies on again. */
-const FORGOTTEN_KEY = "codesh.device.forgotten";
-/** `{ all, ids }`: deletions that are not confirmed yet. No copy is written meanwhile. */
-const ERASE_KEY = "codesh.device.erase";
+/**
+ * One localStorage key per share, so tabs that write at the same time never drop each other's
+ * entries: its database may exist (listed before it is created), its deletion is not confirmed
+ * yet, "Forget on this device" was used on it.
+ */
+const COPY = "codesh.device.copy:";
+const ERASE = "codesh.device.erase:";
+const FORGOTTEN = "codesh.device.forgotten:";
+/** Every copy has to go (logout, another account); kept until a deletion of all of them worked. */
+const ERASE_ALL_KEY = "codesh.device.erase-all";
+/**
+ * `indexedDB.databases()` worked once, so every copy since is in the registry. Nothing else sets
+ * it: without it a copy from before the registry may be missing from every list.
+ */
+const COMPLETE_KEY = "codesh.device.complete";
 const DELETE_TIMEOUT_MS = 4000;
+/** Closing a document (its IndexedDB connection included) is not waited for longer than this. */
+export const CLOSE_TIMEOUT_MS = 4000;
+const ASK_TIMEOUT_MS = 300;
 
 /** An open document that holds a local copy and can let go of it. */
 export interface LocalHolder {
@@ -35,6 +47,8 @@ export interface LocalHolder {
   releaseLocal(): Promise<void>;
   /** Leave the share: provider, document, credentials and the copy's connection all go. */
   leave(): Promise<void>;
+  /** Local edits the server has not confirmed yet. */
+  unsent(): number;
 }
 
 const holders = new Set<LocalHolder>();
@@ -44,122 +58,149 @@ export function registerHolder(holder: LocalHolder): () => void {
   return () => holders.delete(holder);
 }
 
-// stored lists
-
-interface Registry {
-  complete: boolean;
-  ids: string[];
+/** Waits for `promise`, but at most `ms`; whatever it does later is ignored. */
+export function within(promise: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    void promise
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+  });
 }
 
-interface Erase {
-  all: boolean;
-  ids: string[];
-}
+// stored marks
 
-const strings = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+/** This tab's own record of deletions that are due, for when storage refused to keep it. */
+const due = { all: false, ids: new Set<string>() };
 
-/** Reads a JSON value; throws when storage is blocked, so callers can fail closed. */
-function read(key: string): Record<string, unknown> | unknown[] | null {
-  const text = localStorage.getItem(key);
-  if (text === null) return null;
+/** False when the browser refused the write (blocked storage, quota). */
+function store(key: string, value: string): boolean {
   try {
-    return JSON.parse(text) as Record<string, unknown> | unknown[];
-  } catch {
-    return null;
-  }
-}
-
-function write(key: string, value: unknown): boolean {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
+    localStorage.setItem(key, value);
     return true;
   } catch {
     return false;
   }
 }
 
-function readRegistry(): Registry | null {
+const mark = (key: string) => store(key, "1");
+
+function unmark(key: string): void {
   try {
-    const stored = read(REGISTRY_KEY) as Partial<Registry> | null;
-    if (stored === null) {
-      // No registry yet: an install from before it may hold copies nobody listed.
-      const legacy =
-        localStorage.getItem("codesh.prefs") !== null || localStorage.getItem(SUBJECT_KEY) !== null;
-      return { complete: !legacy, ids: [] };
-    }
-    return { complete: stored.complete === true, ids: strings(stored.ids) };
+    localStorage.removeItem(key);
   } catch {
-    return null;
+    // Blocked storage: nothing was stored either.
   }
 }
 
-function readErase(): Erase | null {
+/** Ids stored under a prefix; throws when storage is blocked. */
+function storedIds(prefix: string): string[] {
+  const ids: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(prefix)) ids.push(key.slice(prefix.length));
+  }
+  return ids;
+}
+
+function eraseAllDue(): boolean {
   try {
-    const stored = read(ERASE_KEY) as Partial<Erase> | null;
-    return { all: stored?.all === true, ids: strings(stored?.ids) };
+    return due.all || localStorage.getItem(ERASE_ALL_KEY) !== null;
   } catch {
-    return null;
+    return true;
   }
 }
 
-function updateErase(change: (erase: Erase) => Erase): void {
-  const erase = readErase();
-  if (erase) write(ERASE_KEY, change(erase));
-}
-
-function forgottenIds(): string[] | null {
-  try {
-    return strings(read(FORGOTTEN_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function setForgotten(shareId: string, forgotten: boolean): void {
-  const ids = (forgottenIds() ?? []).filter((id) => id !== shareId);
-  write(FORGOTTEN_KEY, forgotten ? [...ids, shareId] : ids);
+function markEraseAll(): void {
+  due.all = true;
+  mark(ERASE_ALL_KEY);
 }
 
 export function isForgotten(shareId: string): boolean {
-  return forgottenIds()?.includes(shareId) ?? true;
+  try {
+    return localStorage.getItem(FORGOTTEN + shareId) !== null;
+  } catch {
+    return true;
+  }
 }
 
 /**
- * A copy of this share may be written: the device choice is yes, the share was not forgotten, no
- * deletion is pending and the registry can list it. Anything unreadable counts as no.
+ * A copy of this share may be written: the device choice is yes, the share was not forgotten and
+ * no deletion is due. Anything unreadable counts as no.
  */
 export function mayKeepCopy(shareId: string): boolean {
-  if (getPrefs().offlineCopy !== "yes") return false;
-  const erase = readErase();
-  if (!erase || erase.all || erase.ids.includes(shareId)) return false;
-  return !isForgotten(shareId);
+  if (getPrefs().offlineCopy !== "yes" || due.ids.has(shareId) || eraseAllDue()) return false;
+  try {
+    return localStorage.getItem(ERASE + shareId) === null && !isForgotten(shareId);
+  } catch {
+    return false;
+  }
 }
 
 /** Lists the share's database before it is created. False when it may not be created. */
 export function noteCopy(shareId: string): boolean {
-  if (!mayKeepCopy(shareId)) return false;
-  const registry = readRegistry();
-  if (!registry) return false;
-  if (registry.ids.includes(shareId)) return true;
-  return write(REGISTRY_KEY, { ...registry, ids: [...registry.ids, shareId] });
+  return mayKeepCopy(shareId) && mark(COPY + shareId);
 }
 
-function unlist(shareIds: string[]): void {
-  if (shareIds.length === 0) return;
-  const registry = readRegistry();
-  if (registry) {
-    write(REGISTRY_KEY, { ...registry, ids: registry.ids.filter((id) => !shareIds.includes(id)) });
+/** A copy of this share may be on this device: listed, being deleted, or from before the list. */
+function mayHoldCopy(shareId: string): boolean {
+  try {
+    return (
+      localStorage.getItem(COPY + shareId) !== null ||
+      localStorage.getItem(ERASE + shareId) !== null ||
+      localStorage.getItem(COMPLETE_KEY) === null
+    );
+  } catch {
+    return true;
   }
-  updateErase((erase) => ({ ...erase, ids: erase.ids.filter((id) => !shareIds.includes(id)) }));
+}
+
+// copies that may remain
+
+let leftovers = false;
+let told = false;
+const leftoverListeners = new Set<() => void>();
+
+/** A cleanup nobody asked for in this tab (start, another account, a denial) left copies behind. */
+function reportLeftovers(): void {
+  leftovers = true;
+  tell();
+}
+
+function tell(): void {
+  if (!leftovers || told || leftoverListeners.size === 0) return;
+  told = true;
+  for (const listener of leftoverListeners) listener();
+}
+
+/** Called once per page load when offline copies may have stayed on this device. */
+export function onLeftovers(listener: () => void): () => void {
+  leftoverListeners.add(listener);
+  tell();
+  return () => leftoverListeners.delete(listener);
 }
 
 // tabs
 
-type Message = { type: "share"; shareId: string } | { type: "all" };
+type Message =
+  | { type: "share"; shareId: string }
+  | { type: "all" }
+  | { type: "identity" }
+  | { type: "unsent?"; ask: string; shareId?: string }
+  | { type: "unsent"; ask: string };
 
 const tabId = Math.random().toString(36).slice(2);
 let channel: BroadcastChannel | null | undefined;
+const answers = new Map<string, () => void>();
+let restarting = false;
+
+/** This tab closed its documents for another account and reloads where it was. */
+export function isRestarting(): boolean {
+  return restarting;
+}
 
 function getChannel(): BroadcastChannel | null {
   if (channel !== undefined) return channel;
@@ -179,13 +220,39 @@ function broadcast(message: Message): void {
     return;
   }
   // No BroadcastChannel: a storage event reaches the other tabs of this origin.
-  write(STORAGE_EVENT_KEY, { tab: tabId, at: Date.now(), message });
+  try {
+    localStorage.setItem(
+      STORAGE_EVENT_KEY,
+      JSON.stringify({ tab: tabId, at: Date.now(), message }),
+    );
+  } catch {
+    // Blocked storage: no copy was written in other tabs either.
+  }
 }
 
 function receive(message: Message | undefined): void {
-  if (message?.type === "share") void leaveShare(message.shareId, { broadcast: false });
-  else if (message?.type === "all") {
-    void forgetAll({ broadcast: false }).then(() => window.location.replace("/"));
+  switch (message?.type) {
+    case "share":
+      void leaveShare(message.shareId, { broadcast: false });
+      break;
+    case "all":
+      void forgetAll({ broadcast: false }).then(() => window.location.replace("/"));
+      break;
+    case "identity": {
+      // Another account in another tab: that tab deletes; this one only lets go and starts over
+      // where it was. The editor waits meanwhile instead of going to the start page (isRestarting).
+      if (restarting) break;
+      restarting = true;
+      const here = `${window.location.pathname}${window.location.search}`;
+      void closeDocuments().then(() => window.location.replace(here));
+      break;
+    }
+    case "unsent?":
+      if (unsentHere(message.shareId) > 0) broadcast({ type: "unsent", ask: message.ask });
+      break;
+    case "unsent":
+      answers.get(message.ask)?.();
+      break;
   }
 }
 
@@ -204,9 +271,42 @@ export function listenForForgetting(): void {
       // Not ours.
     }
   });
-  const registry = readRegistry();
-  if (registry) write(REGISTRY_KEY, registry);
   void sweep();
+}
+
+/** Leaves the open documents of this tab (of one share, or all of them). */
+async function closeDocuments(shareId?: string): Promise<void> {
+  const leaving = [...holders].filter((holder) => !shareId || holder.shareId === shareId);
+  await Promise.all(leaving.map((holder) => within(holder.leave(), CLOSE_TIMEOUT_MS)));
+}
+
+function unsentHere(shareId?: string): number {
+  let count = 0;
+  for (const holder of holders) {
+    if (!shareId || holder.shareId === shareId) count += holder.unsent();
+  }
+  return count;
+}
+
+/**
+ * Edits the server has not confirmed yet, in an open document of this share (or of any share)
+ * in this tab or another one. Other tabs answer within a moment; a slow one is not waited for.
+ */
+export function hasUnsentEdits(shareId?: string): Promise<boolean> {
+  if (unsentHere(shareId) > 0) return Promise.resolve(true);
+  const ask = Math.random().toString(36).slice(2);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      answers.delete(ask);
+      resolve(false);
+    }, ASK_TIMEOUT_MS);
+    answers.set(ask, () => {
+      clearTimeout(timer);
+      answers.delete(ask);
+      resolve(true);
+    });
+    broadcast({ type: "unsent?", ask, shareId });
+  });
 }
 
 // deleting
@@ -238,63 +338,81 @@ async function deleteWithRetry(name: string): Promise<boolean> {
   return (await deleteDatabase(name)) || (await deleteDatabase(name));
 }
 
-/** Deletes these databases and unlists the ones that went. True when all of them went. */
-async function deleteCopies(names: string[]): Promise<boolean> {
-  const results = await Promise.all(names.map(deleteWithRetry));
-  unlist(names.filter((_, i) => results[i]).map((name) => name.slice(IDB_PREFIX.length)));
+/** Deletes the copies of these shares and unlists the ones that went. True when all of them went. */
+async function deleteCopies(ids: string[]): Promise<boolean> {
+  const results = await Promise.all(ids.map((id) => deleteWithRetry(idbName(id))));
+  ids.forEach((id, i) => {
+    if (!results[i]) return;
+    // Allowed again meanwhile (yes in another tab): it may be there anew, so it stays listed.
+    if (!mayKeepCopy(id)) unmark(COPY + id);
+    unmark(ERASE + id);
+    due.ids.delete(id);
+  });
   return results.every(Boolean);
 }
 
 /**
- * Every database name this browser may hold: the registry, open documents and, where it works,
- * `indexedDB.databases()`. `complete` is false when a copy could be missing from the list.
+ * Every share whose database may exist: `indexedDB.databases()` where it works, the registry,
+ * deletions still due and open documents. `complete` is false when a copy from before the
+ * registry could be missing: only a successful `databases()`, here or once before, rules that out.
  */
-async function knownCopies(): Promise<{ names: string[]; complete: boolean }> {
-  const registry = readRegistry();
-  const ids = new Set([...(registry?.ids ?? []), ...[...holders].map((holder) => holder.shareId)]);
-  let listed = false;
+async function knownCopies(): Promise<{ ids: string[]; complete: boolean }> {
+  const ids = new Set<string>();
+  let enumerated = false;
   try {
     if (typeof indexedDB !== "undefined" && typeof indexedDB.databases === "function") {
       for (const info of await indexedDB.databases()) {
         if (info.name?.startsWith(IDB_PREFIX)) ids.add(info.name.slice(IDB_PREFIX.length));
       }
-      listed = true;
+      enumerated = true;
     }
   } catch {
-    // `databases()` refused: only the registry is known.
+    // `databases()` refused: only the lists below are known.
   }
-  if (listed && registry && !registry.complete) {
-    write(REGISTRY_KEY, { complete: true, ids: [...ids] });
+  let complete = enumerated;
+  // Read after the wait, so a copy listed meanwhile (here or in another tab) is in too.
+  for (const id of [...due.ids, ...[...holders].map((holder) => holder.shareId)]) ids.add(id);
+  try {
+    for (const id of [...storedIds(COPY), ...storedIds(ERASE)]) ids.add(id);
+    if (enumerated) mark(COMPLETE_KEY);
+    else complete = localStorage.getItem(COMPLETE_KEY) !== null;
+  } catch {
+    // Blocked storage: no copy could be listed, nor created (noteCopy).
   }
-  return { names: [...ids].map(idbName), complete: listed || registry?.complete === true };
+  return { ids: [...ids], complete };
 }
 
 /**
- * Deletes every copy. The erase marker stays while a deletion failed, so the next start retries.
- * An incomplete list is reported as a failure once; nothing more can be found later either, and
- * every copy created from now on is listed.
+ * Deletes every copy that may not be kept: all of them while the device choice is not yes or
+ * every copy has to go, forgotten shares, deletions not confirmed yet. The erase-all mark stays
+ * until a deletion of every known copy worked, so the next start tries again.
  */
-async function eraseAll(): Promise<boolean> {
-  const { names, complete } = await knownCopies();
-  const deleted = await deleteCopies(names);
-  if (deleted) {
-    updateErase(() => ({ all: false, ids: [] }));
-    if (!complete) write(REGISTRY_KEY, { complete: true, ids: [] });
+async function cleanup(): Promise<{ deleted: boolean; complete: boolean }> {
+  const all = eraseAllDue();
+  const { ids, complete } = await knownCopies();
+  const deleted = await deleteCopies(ids.filter((id) => !mayKeepCopy(id)));
+  if (deleted && all) {
+    due.all = false;
+    unmark(ERASE_ALL_KEY);
   }
+  return { deleted, complete };
+}
+
+/** Deletes every copy. True only when the list was complete and every copy on it went. */
+async function eraseAll(): Promise<boolean> {
+  markEraseAll();
+  const { deleted, complete } = await cleanup();
   return deleted && complete;
 }
 
-/** Deletes every copy that may not be kept (any, while the device choice is not yes). */
+/**
+ * Deletes what is due at start. A copy that could not be deleted is reported; one that may be
+ * missing from an incomplete list is not, it is reported by the cleanups that promise all copies.
+ */
 export async function sweep(): Promise<boolean> {
-  if (readErase()?.all) return eraseAll();
-  const { names, complete } = await knownCopies();
-  const doomed = names.filter((name) => !mayKeepCopy(name.slice(IDB_PREFIX.length)));
-  const deleted = await deleteCopies(doomed);
-  // A copy missing from an incomplete list only matters when copies are not wanted at all; it is
-  // reported once, as in eraseAll.
-  if (complete || getPrefs().offlineCopy === "yes") return deleted;
-  if (deleted) write(REGISTRY_KEY, { complete: true, ids: [] });
-  return false;
+  const { deleted } = await cleanup();
+  if (!deleted) reportLeftovers();
+  return deleted;
 }
 
 // leaving
@@ -315,43 +433,68 @@ export async function leaveShare(
   shareId: string,
   options: { broadcast?: boolean } = {},
 ): Promise<boolean> {
-  updateErase((erase) => ({
-    ...erase,
-    ids: erase.ids.includes(shareId) ? erase.ids : [...erase.ids, shareId],
-  }));
+  // No copy of it is written meanwhile, here or in another tab.
+  due.ids.add(shareId);
+  mark(ERASE + shareId);
   if (options.broadcast !== false) broadcast({ type: "share", shareId });
-  await Promise.all([...holders].filter((h) => h.shareId === shareId).map((h) => h.leave()));
+  await closeDocuments(shareId);
   dropKey(shareId);
-  return deleteCopies([idbName(shareId)]);
+  return deleteCopies([shareId]);
 }
 
-/** "Forget on this device": leave the share, and keep no copy of it until the user asks again. */
+/** The server's refusal: leave the share; a copy that stayed is reported. */
+export function leaveAfterDenial(shareId: string): Promise<boolean> {
+  return leaveShare(shareId).then((ok) => {
+    if (!ok) reportLeftovers();
+    return ok;
+  });
+}
+
+/**
+ * A PIN or approval asked for at the door of a share this device may hold a copy of: the copy
+ * goes before the gate shows, the same as when it is asked for while the share is open.
+ */
+export function leaveBeforeChallenge(shareId: string, keyRemembered: boolean): Promise<boolean> {
+  if (!keyRemembered && !mayHoldCopy(shareId)) return Promise.resolve(true);
+  return leaveAfterDenial(shareId);
+}
+
+/**
+ * "Forget on this device": leave the share, and keep no copy of it until the user asks again.
+ * When that cannot be stored, no share keeps a copy on this device, and it reports a failure.
+ */
 export async function forgetShare(shareId: string): Promise<boolean> {
-  setForgotten(shareId, true);
-  return leaveShare(shareId);
+  let recorded = mark(FORGOTTEN + shareId);
+  const left = await leaveShare(shareId);
+  // The deletions may have made room for it.
+  recorded ||= mark(FORGOTTEN + shareId);
+  if (recorded) return left;
+  await chooseOfflineCopy("no");
+  return false;
 }
 
 /**
  * The device choice. Yes also takes back "Forget" for the share in view; no deletes every copy,
- * including those of shares no tab has open.
+ * including those of shares no tab has open. False when copies may have stayed.
  */
 export async function chooseOfflineCopy(choice: "yes" | "no", shareId?: string): Promise<boolean> {
   if (choice === "yes") {
-    if (shareId) setForgotten(shareId, false);
+    if (shareId) unmark(FORGOTTEN + shareId);
     setPrefs({ offlineCopy: "yes" });
     return true;
   }
   // Open documents close their copies on the change (here and, by the storage event, elsewhere).
-  setPrefs({ offlineCopy: "no" });
-  await Promise.all([...holders].map((holder) => holder.releaseLocal()));
-  return sweep();
+  const stored = setPrefs({ offlineCopy: "no" });
+  await Promise.all([...holders].map((holder) => within(holder.releaseLocal(), CLOSE_TIMEOUT_MS)));
+  const { deleted, complete } = await cleanup();
+  return stored && deleted && complete;
 }
 
 /** Forgets every share of this browser: open documents, offline copies and remembered keys. */
 export async function forgetAll(options: { broadcast?: boolean } = {}): Promise<boolean> {
-  updateErase((erase) => ({ ...erase, all: true }));
+  markEraseAll();
   if (options.broadcast !== false) broadcast({ type: "all" });
-  await Promise.all([...holders].map((holder) => holder.leave()));
+  await closeDocuments();
   dropAllKeys();
   return eraseAll();
 }
@@ -361,9 +504,9 @@ export async function forgetAll(options: { broadcast?: boolean } = {}): Promise<
  * a new session, then this browser deletes the rest.
  */
 export async function signOut(): Promise<boolean> {
-  updateErase((erase) => ({ ...erase, all: true }));
+  markEraseAll();
   broadcast({ type: "all" });
-  await Promise.all([...holders].map((holder) => holder.leave()));
+  await closeDocuments();
   dropAllKeys();
   let loggedOut = true;
   try {
@@ -372,11 +515,7 @@ export async function signOut(): Promise<boolean> {
     loggedOut = false;
   }
   const forgotten = await eraseAll();
-  try {
-    localStorage.removeItem(SUBJECT_KEY);
-  } catch {
-    // Nothing stored.
-  }
+  unmark(SUBJECT_KEY);
   queryClient.clear();
   return loggedOut && forgotten;
 }
@@ -392,10 +531,12 @@ export function hasSeenSession(): boolean {
 
 /**
  * Account switching: login and logout rotate the session's clientId, and an anonymous session
- * that was replaced has a new one too. When it differs from the one this device saw last, every
- * tab leaves its documents and all copies are deleted before the session is handed out, so no
- * join of the new session starts before that. Not finished: the erase marker blocks every copy
- * until a later start completes it.
+ * that was replaced has a new one too. The tab that sees a clientId other than the one this device
+ * saw last marks every copy for deletion, stores the new one, tells the other tabs (they close
+ * their documents and reload) and deletes every copy before the session is handed out. When that
+ * fails, the mark stays: no copy is written until a later cleanup succeeds, the new session works
+ * from memory only, and the user is told once. Tabs do not acknowledge: a tab that is slow to
+ * close keeps the database open, which makes the deletion fail and so keeps the mark.
  */
 export async function noteSessionIdentity(session: SessionResponse): Promise<void> {
   let previous: string | null;
@@ -405,11 +546,15 @@ export async function noteSessionIdentity(session: SessionResponse): Promise<voi
     // Blocked storage: no copy is ever written (noteCopy), so there is nothing to protect.
     return;
   }
-  if (previous !== null && previous !== session.clientId) await forgetAll();
-  else if (readErase()?.all) await eraseAll();
-  try {
-    localStorage.setItem(SUBJECT_KEY, session.clientId);
-  } catch {
-    // As above.
+  const changed = previous !== null && previous !== session.clientId;
+  if (changed) markEraseAll();
+  // Before the other tabs hear of it, so one that reloads finds this identity and does not start
+  // over. Not stored: the next start sees the change again and repeats the cleanup.
+  if (previous !== session.clientId) store(SUBJECT_KEY, session.clientId);
+  if (changed) {
+    broadcast({ type: "identity" });
+    await closeDocuments();
+    dropAllKeys();
   }
+  if (eraseAllDue() && !(await eraseAll())) reportLeftovers();
 }

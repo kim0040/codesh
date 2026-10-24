@@ -10,7 +10,15 @@ import { IndexeddbPersistence } from "y-indexeddb";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { ApiError, api } from "../api";
-import { idbName, leaveShare, mayKeepCopy, noteCopy, registerHolder } from "../device";
+import {
+  CLOSE_TIMEOUT_MS,
+  idbName,
+  leaveAfterDenial,
+  mayKeepCopy,
+  noteCopy,
+  registerHolder,
+  within,
+} from "../device";
 import { subscribePrefs } from "../prefs";
 import { acquireSocket } from "./socket";
 
@@ -51,6 +59,8 @@ export interface SessionState {
   tooLarge: number | null;
   /** An offline copy is open in this browser: unconfirmed edits survive a closed tab. */
   copyKept: boolean;
+  /** The session ended (denial, removal) while the server had not confirmed every local edit. */
+  lostEdits: boolean;
 }
 
 export interface SessionOptions {
@@ -88,11 +98,17 @@ const AWARENESS_MIN_GAP_MS = Math.ceil(1000 / 30);
 const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 30_000;
 
-/** No usable answer: network, a server error or a rate limit. Not a decision about access. */
-function isOutage(error: ApiError | null): boolean {
+/**
+ * No usable answer: no response at all (network, aborted), a server error, a rate limit, or a
+ * reply that is not the API's (a proxy page). Not a decision about access.
+ */
+export function isOutage(error: ApiError | null): boolean {
   return (
     error === null ||
+    error.status === 0 ||
     error.status >= 500 ||
+    error.code === "network" ||
+    error.code === "unknown" ||
     error.code === "rate_limited" ||
     error.code === "unavailable"
   );
@@ -134,6 +150,9 @@ export class DocSession {
   private authorized = false;
   /** This device left the share: provider, document and credentials are gone for good. */
   private left = false;
+  /** Bumped by every resync, leave and destroy: a resync that was overtaken stops. */
+  private epoch = 0;
+  private readonly closedProviders = new WeakSet<HocuspocusProvider>();
   private readonly unregisterHolder: () => void;
   private readonly unsubscribePrefs: () => void;
   private readonly socket: HocuspocusProviderWebsocket;
@@ -151,6 +170,11 @@ export class DocSession {
   private everConnected = false;
   private editedWhileAway = false;
   private lastLocalEditAt = 0;
+  /**
+   * Edits typed here that the server has not confirmed. The provider's own count is also above
+   * zero while any sync is under way, edits or not.
+   */
+  private editsUnconfirmed = false;
   private state: SessionState;
   private readonly options: SessionOptions;
   private docListener: ((update: Uint8Array, origin: unknown) => void) | null = null;
@@ -180,6 +204,7 @@ export class DocSession {
       closed: null,
       tooLarge: null,
       copyKept: false,
+      lostEdits: false,
     };
     this.doc = new Y.Doc();
     this.provider = this.createProvider(this.doc);
@@ -187,6 +212,7 @@ export class DocSession {
       shareId: this.shareId,
       releaseLocal: () => this.releaseLocal(),
       leave: () => this.leave(),
+      unsent: () => this.unsent(),
     });
     this.unsubscribePrefs = subscribePrefs(() => this.onPrefs());
     this.attachPersistence();
@@ -246,7 +272,10 @@ export class DocSession {
           this.options.onMerged?.();
         }
       },
-      onUnsyncedChanges: ({ number }) => this.patch({ unsynced: number }),
+      onUnsyncedChanges: ({ number }) => {
+        if (number === 0 && provider === this.provider) this.editsUnconfirmed = false;
+        this.patch({ unsynced: number });
+      },
       onClose: ({ event }) => {
         const reason = event.reason;
         const rejoin = reason === "provider_initiated" || reason === COLLAB_CLOSE_REASONS.reauth;
@@ -259,7 +288,7 @@ export class DocSession {
           return;
         }
         if (reason === "kicked" || reason === "deleted") {
-          this.patch({ closed: reason });
+          this.patch({ closed: reason, lostEdits: this.unsent() > 0 });
           // Leave the document, but keep the shared socket for other documents of this tab.
           this.forgetAfterDenial();
         }
@@ -286,6 +315,7 @@ export class DocSession {
     this.docListener = (_update, origin) => {
       if (origin === this.provider || origin instanceof IndexeddbPersistence) return;
       this.lastLocalEditAt = Date.now();
+      this.editsUnconfirmed = true;
       if (this.state.status !== "connected") this.editedWhileAway = true;
     };
     doc.on("update", this.docListener);
@@ -327,7 +357,20 @@ export class DocSession {
     if (!persistence) return;
     this.persistence = null;
     this.patch({ copyKept: false });
-    await persistence.destroy().catch(() => undefined);
+    await within(persistence.destroy(), CLOSE_TIMEOUT_MS);
+  }
+
+  /** Local edits the server has not confirmed yet (0 once this device left the share). */
+  unsent(): number {
+    if (this.left || this.destroyed || !this.editsUnconfirmed) return 0;
+    return Math.max(1, this.provider.unsyncedChanges);
+  }
+
+  /** Destroys a provider once; a later call for the same one does nothing. */
+  private closeProvider(provider: HocuspocusProvider) {
+    if (this.closedProviders.has(provider)) return;
+    this.closedProviders.add(provider);
+    provider.destroy();
   }
 
   /**
@@ -337,15 +380,16 @@ export class DocSession {
   async leave(): Promise<void> {
     if (this.left || this.destroyed) return;
     this.left = true;
+    this.epoch++;
     this.credentials = {};
     this.clearRetry();
     if (this.docListener) this.doc.off("update", this.docListener);
     this.docListener = null;
-    this.provider.destroy();
+    this.closeProvider(this.provider);
     const persistence = this.persistence;
     this.persistence = null;
     this.patch({ closed: this.state.closed ?? "left", copyKept: false });
-    await persistence?.destroy().catch(() => undefined);
+    if (persistence) await within(persistence.destroy(), CLOSE_TIMEOUT_MS);
     this.doc.destroy();
   }
 
@@ -354,7 +398,7 @@ export class DocSession {
    * the session ends, the offline copy and the remembered edit key go (in every tab).
    */
   private forgetAfterDenial() {
-    void leaveShare(this.shareId);
+    void leaveAfterDenial(this.shareId);
   }
 
   /** Fresh collab token on every (re)connect; a failure becomes a rejected token, not a hang. */
@@ -406,7 +450,7 @@ export class DocSession {
     ) {
       denied = "not_found";
     }
-    this.patch({ denied });
+    this.patch({ denied, lostEdits: this.unsent() > 0 });
     this.forgetAfterDenial();
   }
 
@@ -483,23 +527,25 @@ export class DocSession {
   /** Drop the Y.Doc, its local copy and the provider, then start over from the server state. */
   async resync(): Promise<void> {
     if (this.destroyed || this.left) return;
+    const epoch = ++this.epoch;
     const old = this.provider;
     const oldDoc = this.doc;
     const oldPersistence = this.persistence;
     if (this.docListener) oldDoc.off("update", this.docListener);
     this.docListener = null;
     this.pendingAwareness = {};
-    old.destroy();
+    this.closeProvider(old);
     this.persistence = null;
-    try {
-      await oldPersistence?.clearData();
-    } catch {
-      // The copy may already be gone.
+    if (oldPersistence) {
+      // `clearData` closes the connection, then deletes the database.
+      await within(oldPersistence.clearData(), CLOSE_TIMEOUT_MS);
     }
-    oldPersistence?.destroy().catch(() => undefined);
     oldDoc.destroy();
+    // Left, unmounted or resynced again meanwhile: whoever did that owns what comes next.
+    if (epoch !== this.epoch || this.destroyed || this.left) return;
     this.doc = new Y.Doc();
     this.editedWhileAway = false;
+    this.editsUnconfirmed = false;
     this.provider = this.createProvider(this.doc);
     this.attachPersistence();
     this.patch({
@@ -535,6 +581,7 @@ export class DocSession {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.epoch++;
     sessions.delete(this);
     window.removeEventListener("online", this.onlineListener);
     window.removeEventListener("offline", this.onlineListener);
@@ -543,7 +590,7 @@ export class DocSession {
     this.clearRetry();
     this.unregisterHolder();
     this.unsubscribePrefs();
-    if (!this.left) this.provider.destroy();
+    this.closeProvider(this.provider);
     this.persistence?.destroy().catch(() => undefined);
     this.releaseSocket();
     this.listeners.clear();

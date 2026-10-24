@@ -106,14 +106,17 @@ function emit() {
   for (const listener of listeners) listener();
 }
 
-export function setPrefs(patch: Partial<EditorPrefs>): void {
+/** False when the change could not be stored: it still applies until the tab closes. */
+export function setPrefs(patch: Partial<EditorPrefs>): boolean {
   current = sanitizePrefs({ ...getPrefs(), ...patch });
+  let stored = true;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
   } catch {
-    // Blocked storage: the change still applies until the tab closes.
+    stored = false;
   }
   emit();
+  return stored;
 }
 
 /** Back to the defaults; the device choice about offline copies is not an editor preference and stays. */

@@ -11,6 +11,12 @@ const homeLink = (label: string, variant: "primary" | "secondary" = "primary") =
   </Button>
 );
 
+/** A session that ended this way took the edits the server had not confirmed with it. */
+function useWithLost(lostEdits: boolean | undefined) {
+  const t = useT();
+  return (text: string) => (lostEdits ? `${text} ${t("editor.unsentLost")}` : text);
+}
+
 export function LoadingScreen({ label }: { label?: string }) {
   const t = useT();
   return (
@@ -42,26 +48,34 @@ export function ExpiredScreen() {
   );
 }
 
-export function NotFoundShare({ onRetry }: { onRetry?: () => void }) {
+export function NotFoundShare({
+  onRetry,
+  lostEdits,
+}: {
+  onRetry?: () => void;
+  lostEdits?: boolean;
+}) {
   const t = useT();
+  const withLost = useWithLost(lostEdits);
   return (
     <StatusScreen
       icon={<DoorClosed />}
       title={t("error.not_found")}
-      description={t("error.not_found.hint")}
+      description={withLost(t("error.not_found.hint"))}
       action={homeLink(t("error.page.homeAction"))}
       secondaryAction={onRetry ? <Button onClick={onRetry}>{t("common.retry")}</Button> : undefined}
     />
   );
 }
 
-export function KickedScreen({ banned }: { banned: boolean }) {
+export function KickedScreen({ banned, lostEdits }: { banned: boolean; lostEdits?: boolean }) {
   const t = useT();
+  const withLost = useWithLost(lostEdits);
   return (
     <StatusScreen
       icon={banned ? <Ban /> : <UserX />}
       title={banned ? t("conn.banned.title") : t("conn.kicked.title")}
-      description={banned ? t("conn.banned.body") : t("conn.kicked.body")}
+      description={withLost(banned ? t("conn.banned.body") : t("conn.kicked.body"))}
       action={homeLink(t("error.page.homeAction"))}
     />
   );
@@ -92,25 +106,33 @@ export function LoadFailedScreen({
   );
 }
 
-export function DeniedScreen() {
+export function DeniedScreen({ lostEdits }: { lostEdits?: boolean }) {
   const t = useT();
+  const withLost = useWithLost(lostEdits);
   return (
     <StatusScreen
       icon={<Lock />}
       title={t("wait.denied.title")}
-      description={t("wait.denied.body")}
+      description={withLost(t("wait.denied.body"))}
       action={homeLink(t("wait.deniedAction"))}
     />
   );
 }
 
-export function WaitingRoom({ onCancel }: { onCancel: () => void }) {
+export function WaitingRoom({
+  onCancel,
+  lostEdits,
+}: {
+  onCancel: () => void;
+  lostEdits?: boolean;
+}) {
   const t = useT();
+  const withLost = useWithLost(lostEdits);
   return (
     <StatusScreen
       icon={<Hourglass />}
       title={t("wait.title")}
-      description={t("wait.body")}
+      description={withLost(t("wait.body"))}
       action={
         <Button onClick={onCancel} leading={<Spinner size="sm" label={t("a11y.loading")} />}>
           {t("wait.cancelAction")}
@@ -124,14 +146,17 @@ export function PinGate({
   invalid,
   busy,
   rateLimited,
+  lostEdits,
   onSubmit,
 }: {
   invalid: boolean;
   busy: boolean;
   rateLimited: boolean;
+  lostEdits?: boolean;
   onSubmit: (pin: string) => void;
 }) {
   const t = useT();
+  const withLost = useWithLost(lostEdits);
   const [pin, setPin] = useState("");
   const [shown, setShown] = useState(false);
   const [empty, setEmpty] = useState(false);
@@ -154,7 +179,7 @@ export function PinGate({
             <Lock aria-hidden="true" className="size-5 text-fg-3" />
             {t("pin.title")}
           </h1>
-          <p className="text-body-sm text-fg-2">{t("pin.body")}</p>
+          <p className="text-body-sm text-fg-2">{withLost(t("pin.body"))}</p>
         </div>
         <Field
           label={t("pin.label")}

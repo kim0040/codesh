@@ -1,5 +1,6 @@
-import { Toaster } from "@codesh/ui";
+import { Toaster, toast } from "@codesh/ui";
 import { type ReactNode, useEffect } from "react";
+import { onLeftovers } from "../../lib/device";
 import { retainEvents } from "../../lib/events";
 import { useT } from "../../lib/i18n";
 import { openPalette, openShortcuts } from "../../lib/overlays";
@@ -26,6 +27,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const t = useT();
 
   useEffect(() => retainEvents(), []);
+  // A cleanup that ran on its own (start, another account, a denial) may have left copies behind.
+  useEffect(
+    () => onLeftovers(() => toast({ title: t("toast.forgetFailed"), tone: "warning" })),
+    [t],
+  );
 
   useWindowShortcuts(["palette", "shortcuts"], (id, event) => {
     if (id === "palette") {

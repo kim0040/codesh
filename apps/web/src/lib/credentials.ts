@@ -11,6 +11,8 @@ import { useSyncExternalStore } from "react";
 const KEY_PARAM = "key";
 
 const keys = new Map<string, string>();
+/** Shares whose key already let this tab in: remembered from before, not just brought by a link. */
+const admitted = new Set<string>();
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -86,6 +88,7 @@ export function captureKeyFromUrl(
   const id = shareIdOfPath(window.location.pathname);
   if (key && id) {
     keys.set(id, key);
+    admitted.delete(id);
     emit();
   }
 }
@@ -100,13 +103,25 @@ export function getKey(shareId: string): string | undefined {
 }
 
 export function dropKey(shareId: string): void {
+  admitted.delete(shareId);
   if (keys.delete(shareId)) emit();
 }
 
 export function dropAllKeys(): void {
+  admitted.clear();
   if (keys.size === 0) return;
   keys.clear();
   emit();
+}
+
+/** The share's key let this tab in. */
+export function noteKeyAdmitted(shareId: string): void {
+  if (keys.has(shareId)) admitted.add(shareId);
+}
+
+/** A key from an earlier visit of this tab, not one the link just brought. */
+export function isKeyRemembered(shareId: string): boolean {
+  return keys.has(shareId) && admitted.has(shareId);
 }
 
 function subscribe(listener: () => void): () => void {
