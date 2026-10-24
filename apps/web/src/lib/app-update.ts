@@ -1,5 +1,6 @@
 import { registerSW } from "virtual:pwa-register";
 import { useSyncExternalStore } from "react";
+import { flushPendingSessions } from "./collab/session";
 
 /**
  * Picking up a new build after the server was updated. The service worker no longer swaps itself
@@ -28,6 +29,7 @@ let updateServiceWorker: ((reload?: boolean) => Promise<void>) | null = null;
 let registration: ServiceWorkerRegistration | undefined;
 let lastCheck = 0;
 let started = false;
+let reloadApproved = false;
 
 function publish(next: AppUpdateState) {
   state = next;
@@ -48,6 +50,10 @@ export function startAppUpdates(): void {
     updateServiceWorker = registerSW({
       immediate: true,
       onNeedRefresh: () => markAvailable(null),
+      // Workbox broadcasts controlling to every tab. Approval belongs to this JS context only.
+      onNeedReload: () => {
+        if (reloadApproved) void reloadWhenSynced();
+      },
       onRegisteredSW: (_url, value) => {
         registration = value;
       },
@@ -82,16 +88,33 @@ export function onCollabConnected(): void {
   void checkServerVersion(5000);
 }
 
-/** Reloads into the new build; only ever called from the prompt's button. */
-export async function applyAppUpdate(): Promise<void> {
+async function reloadWhenSynced(): Promise<boolean> {
+  if (!(await flushPendingSessions())) {
+    reloadApproved = false;
+    return false;
+  }
+  // No await between the last pending check and reload: typing cannot slip into that gap.
+  window.location.reload();
+  return true;
+}
+
+/** Reloads only this tab after its user agrees and all its document edits are acknowledged. */
+export async function applyAppUpdate(): Promise<boolean> {
   if (registration && updateServiceWorker) {
     await registration.update().catch(() => undefined);
+    if (!(await flushPendingSessions())) return false;
+    reloadApproved = true;
     if (registration.waiting) {
-      await updateServiceWorker(true);
-      return;
+      try {
+        await updateServiceWorker();
+        return true;
+      } catch {
+        reloadApproved = false;
+        return false;
+      }
     }
   }
-  window.location.reload();
+  return reloadWhenSynced();
 }
 
 /** "Later": hidden until another version shows up. */

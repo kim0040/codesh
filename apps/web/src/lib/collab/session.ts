@@ -63,6 +63,20 @@ export interface SessionOptions {
   onRole?: (role: Role, readOnly: boolean) => void;
 }
 
+const sessions = new Set<DocSession>();
+
+/** Document updates are sent immediately; wait for every open document's server acknowledgement.
+ * Without an acknowledgement we keep the tab alive, even if IndexedDB happens to be available.
+ */
+export async function flushPendingSessions(timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while ([...sessions].some((session) => session.provider.unsyncedChanges > 0)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return true;
+}
+
 const AWARENESS_MIN_GAP_MS = Math.ceil(1000 / 30);
 
 export function parseStateless(payload: string): CollabStateless | null {
@@ -151,6 +165,7 @@ export class DocSession {
     });
     this.unsubscribePrefs = subscribePrefs(() => this.onPrefs());
     this.attachPersistence();
+    sessions.add(this);
     window.addEventListener("online", this.onlineListener);
     window.addEventListener("offline", this.onlineListener);
   }
@@ -448,6 +463,7 @@ export class DocSession {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    sessions.delete(this);
     window.removeEventListener("online", this.onlineListener);
     window.removeEventListener("offline", this.onlineListener);
     if (this.docListener) this.doc.off("update", this.docListener);

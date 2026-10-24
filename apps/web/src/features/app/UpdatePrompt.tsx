@@ -40,7 +40,7 @@ export function UpdatePrompt() {
           loadingLabel={t("common.loading")}
           onClick={() => {
             setBusy(true);
-            void applyAppUpdate();
+            void applyAppUpdate().finally(() => setBusy(false));
           }}
         >
           {t("app.update.reloadAction")}
