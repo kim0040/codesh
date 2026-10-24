@@ -17,9 +17,10 @@ export function groupCode(code: string): string {
   return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
 }
 
+/** The edit key goes in the fragment: browsers do not send it to servers or proxies. */
 export function shareUrl(id: string, editKey?: string): string {
   const base = `${window.location.origin}/${id}`;
-  return editKey ? `${base}?key=${encodeURIComponent(editKey)}` : base;
+  return editKey ? `${base}#key=${encodeURIComponent(editKey)}` : base;
 }
 
 export function utf8Length(text: string): number {
