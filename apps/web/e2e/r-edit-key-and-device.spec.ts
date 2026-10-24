@@ -23,7 +23,8 @@ async function copies(page: Page): Promise<string[]> {
           .filter((name) => name.startsWith("codesh:doc:")),
       );
     } catch (error) {
-      if (attempt >= 4 || !String(error).includes("context was destroyed")) throw error;
+      const navigating = /context was destroyed|SecurityError/.test(String(error));
+      if (attempt >= 4 || !navigating) throw error;
       await page.waitForLoadState("load");
     }
   }
@@ -41,26 +42,31 @@ async function keepCopies(page: Page): Promise<void> {
   await expect(page.getByTestId("device-choice")).toBeHidden();
 }
 
-/** Records every IndexedDB open and delete of the page, from before the app starts. */
+/**
+ * Records every IndexedDB open and delete of the page, from before the app starts. The log is in
+ * sessionStorage, so it survives the page reloading itself (sign-out, dev server).
+ */
 async function logIndexedDb(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const log: string[] = [];
-    (window as unknown as { __idb: string[] }).__idb = log;
+    const push = (entry: string) => {
+      const log = JSON.parse(sessionStorage.getItem("idb-log") ?? "[]") as string[];
+      sessionStorage.setItem("idb-log", JSON.stringify([...log, entry]));
+    };
     const open = indexedDB.open.bind(indexedDB);
     const remove = indexedDB.deleteDatabase.bind(indexedDB);
     indexedDB.open = (name: string, version?: number) => {
-      log.push(`open ${name}`);
+      push(`open ${name}`);
       return open(name, version);
     };
     indexedDB.deleteDatabase = (name: string) => {
-      log.push(`delete ${name}`);
+      push(`delete ${name}`);
       return remove(name);
     };
   });
 }
 
 async function idbLog(page: Page): Promise<string[]> {
-  return page.evaluate(() => (window as unknown as { __idb: string[] }).__idb);
+  return page.evaluate(() => JSON.parse(sessionStorage.getItem("idb-log") ?? "[]") as string[]);
 }
 
 async function setPin(owner: User, id: string, pin: string): Promise<void> {
