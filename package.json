@@ -13,7 +13,8 @@
     "check": "biome check . && turbo run typecheck && vitest run && pnpm run licenses",
     "test": "vitest run",
     "test:e2e": "echo 'e2e: Playwright is added with the first end-to-end test'",
-    "load": "echo 'load: scripts/load is added with the collab load test'",
+    "load": "pnpm --filter @codesh/load start",
+    "bundle": "bash deploy/bundle.sh",
     "services:up": "docker compose -f deploy/docker-compose.dev.yml up -d --wait",
     "services:down": "docker compose -f deploy/docker-compose.dev.yml down",
     "licenses": "node scripts/check-licenses.mjs"

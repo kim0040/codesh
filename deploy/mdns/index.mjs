@@ -34,7 +34,9 @@ if (ip) {
   ];
 }
 
-service.on("up", () => console.log(`mdns: advertising ${host} (port ${port}${ip ? `, ${ip}` : ""})`));
+service.on("up", () =>
+  console.log(`mdns: advertising ${host} (port ${port}${ip ? `, ${ip}` : ""})`),
+);
 service.on("error", (error) => console.error("mdns:", error));
 
 let stopping = false;
