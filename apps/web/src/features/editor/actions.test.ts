@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { looksLikeSecret } from "./actions";
+import { looksLikeSecret, zipEntryNames } from "./actions";
 
 describe("looksLikeSecret", () => {
   it("flags private keys and well-known token shapes", () => {
@@ -19,5 +19,26 @@ describe("looksLikeSecret", () => {
     expect(looksLikeSecret("password = input()")).toBe(false);
     expect(looksLikeSecret("AKIA")).toBe(false);
     expect(looksLikeSecret(`password = "${"x".repeat(200_001)}"`)).toBe(false);
+  });
+});
+
+describe("zipEntryNames", () => {
+  it("keeps ordinary paths and makes Windows-unsafe ones safe", () => {
+    expect(zipEntryNames(["src/a.ts", "README.md"])).toEqual(["src/a.ts", "README.md"]);
+    expect(zipEntryNames(["src\\win.ts", "con.txt", "a?.ts", "notes. "])).toEqual([
+      "src/win.ts",
+      "_con.txt",
+      "a_.ts",
+      "notes",
+    ]);
+  });
+
+  it("numbers paths that Windows would store as one file", () => {
+    expect(zipEntryNames(["A.ts", "a.ts", "a?.ts", "a_.ts"])).toEqual([
+      "A.ts",
+      "a (2).ts",
+      "a_.ts",
+      "a_ (2).ts",
+    ]);
   });
 });

@@ -76,6 +76,29 @@ export function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1) || path;
 }
 
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/i;
+
+/**
+ * A file name every desktop can save: Windows refuses <>:"/\|?* and control characters, names
+ * that end in a dot or a space, and device names such as CON or NUL (with any extension).
+ */
+export function safeFileName(name: string, fallback = "file.txt"): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it removes
+  let safe = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
+  if (!safe.trim()) return fallback;
+  if (WINDOWS_RESERVED.test(safe)) safe = `_${safe}`;
+  return safe;
+}
+
+/** `safeFileName` for each folder and the file of a path inside an archive. */
+export function safeFilePath(path: string, fallback = "file.txt"): string {
+  const parts = path
+    .split(/[\\/]+/)
+    .filter((part) => part && part !== "." && part !== "..")
+    .map((part) => safeFileName(part, "_"));
+  return parts.join("/") || fallback;
+}
+
 export function parentDir(path: string): string {
   const index = path.lastIndexOf("/");
   return index < 0 ? "" : path.slice(0, index);

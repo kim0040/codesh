@@ -1,6 +1,6 @@
 import { languageForFilename, PLAIN_TEXT_ID } from "@codesh/highlight";
 import { MAX_FILES_PER_SHARE } from "@codesh/shared";
-import { strFromU8, unzipSync } from "fflate";
+import { unzipSync } from "fflate";
 import type * as Y from "yjs";
 import { relativePathOf } from "../../lib/api";
 import {
@@ -36,15 +36,38 @@ function looksBinary(bytes: Uint8Array): boolean {
   return false;
 }
 
+/**
+ * Text of a file as saved on any desktop: UTF-16 with a byte order mark (Windows "Unicode"),
+ * UTF-8, or else the legacy Korean Windows code page. Line endings become "\n" and a leading BOM
+ * goes: the editor counts "\r\n" as one character where the shared text counts two, so CRLF would
+ * put everyone's edits in the wrong place.
+ */
+export function decodeText(bytes: Uint8Array): string | null {
+  let text: string;
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) text = new TextDecoder("utf-16le").decode(bytes);
+  else if (bytes[0] === 0xfe && bytes[1] === 0xff) text = new TextDecoder("utf-16be").decode(bytes);
+  else if (looksBinary(bytes)) return null;
+  else {
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      text = new TextDecoder("euc-kr").decode(bytes);
+    }
+  }
+  return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+}
+
 async function expand(files: readonly File[]): Promise<{ items: Incoming[]; skipped: number }> {
   const items: Incoming[] = [];
   let skipped = 0;
   const take = (path: string, bytes: Uint8Array) => {
-    if (bytes.length > MAX_FILE_BYTES || looksBinary(bytes)) {
+    const content = bytes.length > MAX_FILE_BYTES ? null : decodeText(bytes);
+    if (content === null) {
       skipped++;
       return;
     }
-    items.push({ path: path.replace(/^\/+/, ""), content: strFromU8(bytes) });
+    // Archives made on Windows may separate folders with backslashes.
+    items.push({ path: path.replace(/\\/g, "/").replace(/^\/+/, ""), content });
   };
   for (const file of files) {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -52,7 +75,7 @@ async function expand(files: readonly File[]): Promise<{ items: Incoming[]; skip
       try {
         const entries = unzipSync(bytes);
         for (const [path, data] of Object.entries(entries)) {
-          if (path.endsWith("/") || path.startsWith("__MACOSX/")) continue;
+          if (/[/\\]$/.test(path) || path.startsWith("__MACOSX/")) continue;
           take(path, data);
         }
         continue;

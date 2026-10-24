@@ -102,6 +102,27 @@ export function deleteFile(doc: Y.Doc, fileId: string): void {
   });
 }
 
+/**
+ * Turns "\r\n" and "\r" into "\n" in place. The editor counts a CRLF as one character while the
+ * shared text counts two, so a file that arrived with Windows line endings would shift every
+ * position after its first line. Only the "\r" characters are deleted, so two people doing this
+ * at once delete the same characters and end up with the same text. Returns whether it changed.
+ */
+export function normalizeLineEndings(text: Y.Text, origin?: unknown): boolean {
+  const value = text.toString();
+  if (!value.includes("\r")) return false;
+  const apply = () => {
+    for (let index = value.length - 1; index >= 0; index--) {
+      if (value[index] !== "\r") continue;
+      text.delete(index, 1);
+      if (value[index + 1] !== "\n") text.insert(index, "\n");
+    }
+  };
+  if (text.doc) text.doc.transact(apply, origin);
+  else apply();
+  return true;
+}
+
 export function deleteFolder(doc: Y.Doc, folder: string): void {
   doc.transact(() => {
     for (const file of readFiles(doc)) {

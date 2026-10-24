@@ -6,6 +6,8 @@ import {
   formatBytes,
   groupCode,
   parentDir,
+  safeFileName,
+  safeFilePath,
   utf8Length,
 } from "./format";
 
@@ -51,5 +53,34 @@ describe("text helpers", () => {
     expect(clampIndex(-3, 5)).toBe(0);
     expect(clampIndex(9, 5)).toBe(4);
     expect(clampIndex(2, 5)).toBe(2);
+  });
+});
+
+describe("safeFileName", () => {
+  it("leaves ordinary names alone", () => {
+    expect(safeFileName("main.ts")).toBe("main.ts");
+    expect(safeFileName("메모 1.md")).toBe("메모 1.md");
+  });
+
+  it("replaces what Windows cannot store and drops trailing dots and spaces", () => {
+    expect(safeFileName('a<b>:c"d|e?f*.ts')).toBe("a_b__c_d_e_f_.ts");
+    expect(safeFileName("draft. . ")).toBe("draft");
+    expect(safeFileName("...")).toBe("file.txt");
+    expect(safeFileName("", "codesh")).toBe("codesh");
+  });
+
+  it("renames device names, with or without an extension", () => {
+    expect(safeFileName("CON")).toBe("_CON");
+    expect(safeFileName("nul.txt")).toBe("_nul.txt");
+    expect(safeFileName("com1.log")).toBe("_com1.log");
+    expect(safeFileName("console.ts")).toBe("console.ts");
+  });
+});
+
+describe("safeFilePath", () => {
+  it("splits on both slashes and drops dot segments", () => {
+    expect(safeFilePath("src\\lib/./../a.ts")).toBe("src/lib/a.ts");
+    expect(safeFilePath("aux/x.ts")).toBe("_aux/x.ts");
+    expect(safeFilePath("")).toBe("file.txt");
   });
 });

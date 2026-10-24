@@ -3,10 +3,15 @@ import { type ReactNode, useEffect } from "react";
 import { retainEvents } from "../../lib/events";
 import { useT } from "../../lib/i18n";
 import { openPalette, openShortcuts } from "../../lib/overlays";
+import { PLATFORM } from "../../lib/platform";
 import { TemplatePicker } from "../start/TemplatePicker";
 import { CommandPalette } from "./CommandPalette";
 import { EventToasts } from "./EventToasts";
 import { ShortcutSheet } from "./ShortcutSheet";
+import "./app.css";
+
+// Set before the first paint: app.css styles scrollbars by platform.
+document.documentElement.dataset.platform = PLATFORM;
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -22,7 +27,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+      // `code` as well as `key`: with a Korean input method active the key can arrive as "ㅏ".
+      const k = event.key.toLowerCase() === "k" || event.code === "KeyK";
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && k) {
         event.preventDefault();
         openPalette();
         return;
