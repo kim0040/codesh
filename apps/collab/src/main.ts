@@ -13,6 +13,10 @@ const server = createCollabServer({
   valkeyUrl: config.valkeyUrl,
   secret: config.collabSecret,
   instanceId: config.instanceId,
+  timings:
+    config.broadcastWindowMs === undefined
+      ? undefined
+      : { broadcastWindowMs: config.broadcastWindowMs },
 });
 
 /** Below the usual 30 s grace period of a container stop, so the log line still gets out. */

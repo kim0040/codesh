@@ -12,6 +12,8 @@ const envSchema = z.object({
   COLLAB_SECRET: z.string().default(DEV_SECRET),
   /** Must stay the same across restarts of one instance and differ between instances. */
   COLLAB_INSTANCE_ID: z.string().max(200).optional(),
+  /** Tuning only (docs/OPERATIONS.md §11): broadcast window of a busy document, 0 turns it off. */
+  COLLAB_BROADCAST_WINDOW_MS: z.coerce.number().int().min(0).max(200).optional(),
 });
 
 export interface Config {
@@ -22,6 +24,7 @@ export interface Config {
   valkeyUrl: string;
   collabSecret: string;
   instanceId: string;
+  broadcastWindowMs: number | undefined;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -38,5 +41,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     valkeyUrl: parsed.VALKEY_URL,
     collabSecret: parsed.COLLAB_SECRET,
     instanceId: parsed.COLLAB_INSTANCE_ID ?? `${hostname()}:${parsed.PORT}`,
+    broadcastWindowMs: parsed.COLLAB_BROADCAST_WINDOW_MS,
   };
 }

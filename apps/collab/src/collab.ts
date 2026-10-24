@@ -1,6 +1,8 @@
 import {
   AWARENESS_MAX_STATE_BYTES,
   AWARENESS_MAX_UPDATES_PER_SECOND,
+  COLLAB_BROADCAST_WINDOW_FROM,
+  COLLAB_BROADCAST_WINDOW_MS,
   COLLAB_CLOSE_REASONS,
   COLLAB_COMMAND_ERRORS,
   COLLAB_DENY_REASONS,
@@ -90,6 +92,9 @@ export interface CollabTimings {
   reconcileMs: number;
   slowClientBytes: number;
   metaMirrorMs: number;
+  /** Broadcast window of a busy document (0: every event loop turn) and the connections it needs. */
+  broadcastWindowMs: number;
+  broadcastWindowFrom: number;
 }
 
 export const DEFAULT_TIMINGS: CollabTimings = {
@@ -106,6 +111,8 @@ export const DEFAULT_TIMINGS: CollabTimings = {
   reconcileMs: 15_000,
   slowClientBytes: SLOW_CLIENT_BUFFER_BYTES,
   metaMirrorMs: META_MIRROR_THROTTLE_MS,
+  broadcastWindowMs: COLLAB_BROADCAST_WINDOW_MS,
+  broadcastWindowFrom: COLLAB_BROADCAST_WINDOW_FROM,
 };
 
 export interface CollabDeps {
@@ -396,11 +403,19 @@ export class Collab implements Extension<CollabContext> {
   }
 
   async connected({ connection, documentName }: connectedPayload<CollabContext>) {
-    guardSlowClient(connection.webSocket, this.timings.slowClientBytes, () =>
-      this.deps.metrics.slowClients.inc(),
+    const { metrics } = this.deps;
+    guardSlowClient(
+      connection.webSocket,
+      this.timings.slowClientBytes,
+      () => metrics.slowClients.inc(),
+      (bytes) => {
+        metrics.messagesSent.inc();
+        metrics.bytesSent.inc(bytes);
+      },
     );
     const state = this.docs.get(documentName);
     if (!state) return;
+    this.setBroadcastWindow(state.document);
     state.idleSince = null;
     if (state.unloadTimer) clearTimeout(state.unloadTimer);
     state.unloadTimer = null;
@@ -447,9 +462,23 @@ export class Collab implements Extension<CollabContext> {
 
   async onDisconnect({ document, documentName }: onDisconnectPayload) {
     const state = this.docs.get(documentName);
-    if (state?.document === document && document.getConnectionsCount() === 0) {
-      state.idleSince = Date.now();
-    }
+    if (state?.document !== document) return;
+    this.setBroadcastWindow(document);
+    if (document.getConnectionsCount() === 0) state.idleSince = Date.now();
+  }
+
+  /**
+   * A small group gets every change at once. A busy document still sends every edit at once, with
+   * the cursors that waited for it, but cursor-only changes wait up to `broadcastWindowMs`: one
+   * message per window instead of one per cursor move bounds what each client receives per second.
+   */
+  private setBroadcastWindow(document: Document) {
+    if (document.isDestroyed) return;
+    const busy = document.getConnectionsCount() >= this.timings.broadcastWindowFrom;
+    const { configuration } = this.instance;
+    document.flushDelay = busy ? this.timings.broadcastWindowMs : configuration.flushDelay;
+    // A buffered edit of at least this many bytes flushes the window at once.
+    document.flushMaxBytes = busy ? 0 : configuration.flushMaxBytes;
   }
 
   async beforeUnloadDocument({ document, documentName }: beforeUnloadDocumentPayload) {
@@ -591,6 +620,7 @@ export class Collab implements Extension<CollabContext> {
     // Updates from other instances (extension-redis) were checked there.
     if (!connection) return;
     if (!this.takeAwarenessToken(connection)) {
+      this.deps.metrics.awarenessDropped.inc();
       states.clear();
       removedClients.clear();
       return;

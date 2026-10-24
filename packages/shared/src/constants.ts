@@ -38,6 +38,13 @@ export const META_MIRROR_THROTTLE_MS = 2000;
  * (snapshot or log entry), which BSON limits to 16 MiB.
  */
 export const MAX_DOC_BYTES_LIMIT = 12 * 1024 * 1024;
+/**
+ * A document with at least `COLLAB_BROADCAST_WINDOW_FROM` connections sends what arrived within
+ * this window to every connection as one message: cursors fan out to everyone (O(n²) messages),
+ * and one merged message per window costs each client far less than one per change.
+ */
+export const COLLAB_BROADCAST_WINDOW_MS = 30;
+export const COLLAB_BROADCAST_WINDOW_FROM = 8;
 /** Largest WebSocket frame the collab server accepts: a full state of the largest document. */
 export const COLLAB_MAX_PAYLOAD_BYTES = MAX_DOC_BYTES_LIMIT + 64 * 1024;
 /** History snapshots kept per share (oldest are dropped first), within `historyRetentionDays`. */
