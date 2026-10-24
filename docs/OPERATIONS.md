@@ -59,7 +59,7 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 | `PUBLIC_URL` | 비어 있음 | 사용자가 브라우저 주소창에 입력하는 기준 URL(예: `https://codesh.corp`, 끝 슬래시 제외)입니다. 세션 쿠키의 Secure 플래그, OIDC 콜백 주소, CSRF 원본 검증에 사용됩니다. 일반 HTTP IP 접근 시 비워둘 수 있습니다. |
 | `NETWORK_SUBNET` | `172.29.88.0/24` | Compose 내부 브리지 네트워크 서브넷입니다. 호스트 내부 사설망과 대역이 충돌하는 경우에만 변경합니다. |
 | `TRUST_PROXY` | `NETWORK_SUBNET`과 동일 | API 앞단에 위치한 리버스 프록시(Caddy)의 CIDR 대역입니다. Caddy가 실행되는 네트워크 대역을 신뢰하여 `X-Forwarded-For` 헤더로부터 실제 클라이언트 IP를 추출합니다. 비워두면 모든 사용자가 동일 IP로 인식되어 레이트 리밋을 공유하게 됩니다. |
-| `CADDY_TRUSTED_PROXIES` | `127.0.0.1/32` | Caddy 앞단에 별도의 사내 로드밸런서가 있을 때, 해당 프록시의 `X-Forwarded-For` 헤더를 신뢰하기 위한 CIDR 대역입니다. |
+| `CADDY_TRUSTED_PROXIES` | `127.0.0.1/32` | Caddy 앞단에 별도의 로드밸런서가 있을 때, 해당 프록시의 `X-Forwarded-For` 헤더를 신뢰하기 위한 CIDR 대역입니다. |
 | `SESSION_SECRET` | 자동 생성 | `codesh_sid` 쿠키 서명에 사용하는 최소 32자의 비밀키입니다. |
 | `COLLAB_SECRET` | 자동 생성 | API 서버와 Collab 서버가 협업 세션 토큰(HMAC-SHA256)을 검증할 때 공유하는 최소 32자의 비밀키입니다. |
 | `ADMIN_TOKEN` | 비어 있음 | `/api/admin/*` 및 관리 콘솔 접근에 사용하는 Bearer 토큰입니다. 비워두면 관리자 기능이 비활성화됩니다. |
@@ -72,8 +72,8 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 | `RATE_LIMIT_CODE_PER_MIN` | `30` | 클라이언트 IP당 분당 허용되는 참여 코드 확인 요청 횟수입니다. |
 | `RATE_LIMIT_CREATE_PER_MIN` | `60` | 클라이언트 IP당 분당 허용되는 공유 생성 요청 횟수입니다. |
 | `RATE_LIMIT_LOGIN_PER_MIN` | `10` | 클라이언트 IP당 분당 허용되는 인증/로그인 시도 횟수입니다. |
-| `COMPOSE_PROFILES` | 주석 처리됨 | `mdns`로 지정하면 사내 LAN용 mDNS 사이드카 컨테이너가 함께 실행됩니다. |
-| `MDNS_HOSTNAME` | `codesh.local` | mDNS를 통해 사내망에 알릴 도메인 이름입니다. |
+| `COMPOSE_PROFILES` | 주석 처리됨 | `mdns`로 지정하면 LAN용 mDNS 사이드카 컨테이너가 함께 실행됩니다. |
+| `MDNS_HOSTNAME` | `codesh.local` | mDNS를 통해 로컬 네트워크에 알릴 도메인 이름입니다. |
 | `MDNS_IP` | 비어 있음 | 호스트에 여러 네트워크 카드가 있을 때 mDNS로 응답할 특정 IP 주소입니다. 비워두면 비루프백 IPv4 전체를 공지합니다. |
 
 ---
@@ -83,7 +83,7 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 도메인 기반 HTTPS를 구성하려면 `SITE_ADDRESS`를 도메인으로 설정하고 `deploy/tls/` 디렉터리에 `.caddy` 파일을 추가합니다.
 
 ### 4.1 자체 인증서 적용
-사내 인증기관(CA)에서 발급받은 인증서와 키를 사용하는 경우:
+인증기관(CA)에서 발급받은 인증서와 키를 사용하는 경우:
 1. 인증서 파일(`codesh.crt`)과 비밀키(`codesh.key`)를 `deploy/tls/`에 배치합니다.
 2. `deploy/tls/tls.caddy` 파일을 생성하고 다음 내용을 작성합니다.
    ```caddy
@@ -92,7 +92,7 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 3. `.env` 파일에서 `SITE_ADDRESS=codesh.corp` 및 `PUBLIC_URL=https://codesh.corp`로 변경 후 컨테이너를 재시작합니다.
 
 ### 4.2 Caddy 내장 로컬 CA 사용
-테스트 또는 소규모 환경에서 Caddy 내장 CA를 사용하는 경우:
+인터넷 없이 HTTPS를 제공하려면 Caddy 내장 CA를 사용할 수 있습니다. `cp tls/internal.caddy.example tls/local.caddy`로 설정을 복사한 뒤 `SITE_ADDRESS=codesh.local`, `PUBLIC_URL=https://codesh.local`을 지정하고 Caddy와 API를 재시작합니다. 모든 클라이언트에서 루트 인증서를 신뢰해야 하며, 인증서 추출·지문 확인·운영체제별 등록 절차는 [TLS 안내](../deploy/tls/README.md)에 있습니다.
 1. `deploy/tls/tls.caddy` 파일에 다음 내용을 작성합니다.
    ```caddy
    tls internal
@@ -167,7 +167,7 @@ docker compose up -d --scale collab=3
 - **감사 로그 기록 (`audit.enabled`, 기본값: false)**: 공유 생성, 열람, 다운로드, 삭제 활동을 기록할지 여부입니다.
 - **감사 로그 보관 기간 (`audit.retentionDays`, 기본값: 90)**: 감사 로그 보관 일수입니다.
 - **비밀 정보 경고 (`secretWarning`, 기본값: true)**: API 키나 비밀번호 패턴의 텍스트가 입력될 때 경고 표시 여부입니다.
-- **OIDC / LDAP 로그인 (`auth.oidc`, `auth.ldap`, 기본값: null)**: 사내 인증 제공자 연동 설정입니다.
+- **OIDC / LDAP 로그인 (`auth.oidc`, `auth.ldap`, 기본값: null)**: 인증 제공자 연동 설정입니다.
 - **바닥글 연락처 (`contact`, 기본값: "")**: 소개 페이지 하단에 노출될 IT 지원 부서 이메일 또는 연락처입니다.
 - **코드 템플릿 (`templates`, 기본값: `[]`)**: 새 공유를 만들 때 고를 수 있는 조직 전용 시작 파일입니다. 관리 콘솔 **설정** 탭의 **코드 템플릿**에서 추가·수정·삭제하며(삭제 전 확인), 저장하면 바로 템플릿 선택 창에 **우리 조직** 그룹으로 나타납니다.
   - 최대 50개, 템플릿마다 `{id, name(60자), language, description(200자), files}`. `id`는 서로 달라야 하고 `builtin-`으로 시작할 수 없습니다(기본 제공 템플릿과 충돌 방지). 관리 콘솔은 새 템플릿에 `org-…` id를 부여합니다.
@@ -214,7 +214,7 @@ docker compose up -d --scale collab=3
 - `GET /readyz`: Collab 서버의 의존성 준비 완료 상태 확인 (MongoDB 및 Valkey 연결 검증). Caddy를 거치지 않으므로 collab 컨테이너의 3002 포트에서 확인합니다(Compose 헬스체크가 사용).
 
 ### 10.2 프로메테우스 메트릭 수집
-Caddy는 보안을 위해 사내 비공개 IP 대역(`private_ranges`)의 요청에 대해서만 메트릭 경로를 개방합니다.
+Caddy는 보안을 위해 루프백과 전용 Compose 서브넷의 요청에 대해서만 메트릭 경로를 개방합니다.
 - `GET /metrics/api`: API 서버의 HTTP 요청 처리량, 지연 시간, Fastify 및 프로세스 상태.
 - `GET /metrics/collab`: Collab 서버의 Hocuspocus 활성 연결 수(`hocuspocus_connections_count`), 활성 문서 수(`hocuspocus_documents_count`), 이벤트 루프 상태.
 - Collab 인스턴스가 여러 개인 경우 Caddy를 통한 `/metrics/collab`은 복제본 중 하나로부터 응답하므로, 인스턴스별 메트릭이 필요한 경우 컨테이너 포트(3002)로 직접 스크랩하십시오.
@@ -303,3 +303,53 @@ docker compose logs -f valkey    # 캐시/메시징 로그
   - 네트워크 지연 등으로 특정 클라이언트의 수신 버퍼가 4MB를 초과하면 서버가 4408 코드로 연결을 강제 종료합니다. 클라이언트는 자동으로 재연결을 시도하여 상태를 다시 동기화합니다.
 - **403 `forbidden` (CSRF / Origin 불일치)**:
   - API 상태 변경 요청에 `X-Codesh: 1` 헤더가 누락되었거나 허용되지 않은 출처에서 전송된 경우 차단됩니다. API 연동 스크립트 작성 시 해당 헤더를 추가하십시오.
+
+
+## 14. 운영자 보안 점검표
+
+- [ ] **HTTPS**: 실제 접속 origin을 `PUBLIC_URL=https://...`로 지정해 `Secure` 쿠키를 사용합니다. 로컬 CA 옵션과 신뢰 등록은 [TLS 안내](../deploy/tls/README.md)를 따릅니다. 기본 `SITE_ADDRESS=:80` HTTP도 사용할 수 있지만, 트래픽을 관찰·변조할 수 있는 사람에게 문서, 세션 쿠키, 관리자 토큰, PIN, 편집 키와 협업 토큰이 노출됩니다. 서명 쿠키와 private 주소는 암호화를 제공하지 않습니다.
+- [ ] **관리자 토큰**: `ADMIN_TOKEN`을 생성하고 접근 가능한 사람을 제한합니다. 빈 값이면 관리 API가 비활성화됩니다. 토큰을 URL·스크린샷·로그에 넣지 말고, 유출 시 즉시 교체하고 API를 재시작합니다.
+- [ ] **백업**: 정기 백업과 별도 호스트의 복원 연습을 수행합니다. `backup.sh`는 `umask 077`, 파일 `0600`, 디렉터리 `0700`을 적용합니다. 백업에는 PIN 해시, 편집 키, 인증 설정과 감사 기록이 포함되므로 암호화된 별도 보관소에 저장합니다. `caddy-data`의 CA 비밀키도 보호하고 백업합니다. Valkey에는 차단, 승인과 일회성 코드 상태가 있으므로 실행 중 임의로 flush하지 않습니다.
+- [ ] **메트릭**: Caddy의 `/metrics/api`, `/metrics/collab`은 루프백과 `NETWORK_SUBNET`에서만 접근됩니다. 일반 클라이언트 LAN은 허용하지 않습니다. 외부 수집기는 전용 네트워크 또는 인증된 프록시를 사용하고 Mongo/Valkey/API/Collab 포트를 공개하지 않습니다. 개발 Compose 포트도 기본적으로 `127.0.0.1`에만 바인딩됩니다.
+- [ ] **할당량과 디스크**: 아래 설정을 사용 인원에 맞게 조정하고, 429/503 증가·Mongo 볼륨 여유 공간·Valkey 사용량을 감시합니다. 같은 IPv4/NAT 또는 IPv6 /64는 IP 한도를 공유합니다. 할당량은 첫 예약부터 시작하는 고정 창이며 실패한 업로드의 입장/수신량도 환급하지 않습니다. 공유로 변환하는 업로드는 수신량과 저장 문서량을 모두 계산합니다. 영구 저장 문서·편집 이력·DB 인덱스에는 별도 호스트 디스크 한도가 필요합니다.
+- [ ] **공개 범위**: 기본값은 누구나 편집 가능하고 주변 목록에 표시됩니다. 주변 목록은 네트워크 그룹 전체에 제목과 앞 8줄을 공개합니다. 민감한 내용은 관리 설정 `nearbyDefault=false` 또는 해당 공유의 `access.nearby=false`를 먼저 설정하고, 필요하면 PIN/승인을 사용합니다. 짧은 PIN은 강한 비밀번호가 아닙니다.
+- [ ] **공용 기기**: 현재 웹 앱은 방문한 문서를 IndexedDB에 보관합니다. 로그아웃만으로 이 사본이 삭제되지 않으므로 개인 브라우저 프로필을 사용하거나 기기 이용 후 사이트 데이터를 지웁니다. URL의 편집 키도 브라우저 기록과 화면에 남을 수 있습니다. 웹 변경 추적은 [아키텍처의 남은 항목](ARCHITECTURE.md#pending-web-owned-changes)을 참고합니다.
+- [ ] **오프라인 번들**: 아카이브와 `.sha256`을 신뢰할 수 있는 경로로 함께 전달합니다. `install.sh`는 추출된 `SHA256SUMS`를 검사하고, `upgrade.sh`는 압축 해제 전 아카이브 체크섬과 로드 전 내용 목록을 검사합니다. 체크섬은 서명이 아니므로 배포자 신원까지 보증하지는 않습니다.
+
+| 환경 변수 | 기본값 | 의미 |
+|---|---:|---|
+| `QUOTA_WINDOW_SECONDS` | 86400 | 저장 입장/바이트 한도 창, 초 |
+| `QUOTA_SHARES_PER_CLIENT` / `QUOTA_SHARES_PER_IP` | 200 / 1000 | 창 안의 공유 생성 수, 포크·실습 사본 포함 |
+| `QUOTA_UPLOADS_PER_CLIENT` / `QUOTA_UPLOADS_PER_IP` | 200 / 1000 | 창 안의 업로드 요청 수 |
+| `QUOTA_BYTES_PER_CLIENT` / `QUOTA_BYTES_PER_IP` | 536870912 / 2147483648 | 창 안의 수신/저장 문서 바이트 |
+| `UPLOAD_STORAGE_MAX_BYTES` | 10737418240 | 전체 GridFS 콘텐츠 상한, 동시 업로드 포함 |
+| `SSE_MAX_PER_CLIENT` / `SSE_MAX_PER_IP` | 5 / 100 | 동시 SSE 스트림 수 |
+| `PRESENCE_MAX_PER_NET` | 500 | 네트워크 그룹의 접속자 수 |
+| `PENDING_MAX_PER_SHARE` | 100 | 공유별 승인 대기 수 |
+| `BROADCASTS_PER_MIN` | 5 | IPv4/IPv6 /64 및 네트워크 그룹별 분당 전체 알림 수 |
+| `BROADCAST_FANOUT_MAX` | 500 | 전체 알림 대상 접속자 상한 |
+| `MONGO_APP_USER` / `MONGO_APP_AUTH_DB` | 새 설치: `codesh_app` / `codesh` | 앱 DB 전용 사용자와 인증 DB |
+| `MONGO_APP_PASSWORD` | 생성됨 | 앱 DB 사용자 비밀번호; 기존 설치는 명시적 전환 전 root 경로 유지 |
+
+Valkey는 `noeviction`으로 참여 코드, 문서 잠금, 승인과 PIN/속도 제한 카운터를 보존합니다. `maxmemory`의 90%부터 새 저장·프로필·SSE 입장을 503으로 거절하며, OOM 시 필수 쓰기는 실패 처리합니다. 읽기 경로의 전역 속도 제한은 크기가 제한된 보수적 프로세스 내 카운터로 전환하고 `/healthz`도 유지합니다. 기존 협업의 잠금 갱신과 잠깐의 캐시 지연을 위한 여유 공간이 필요하므로 사용량 경고는 90%보다 먼저 설정하십시오. TTL이 있는 코드나 보안 카운터를 임의 축출하는 정책으로 바꾸지 마십시오.
+
+GridFS 전역 바이트 예약은 Mongo의 `storage_quotas`에 보관됩니다. 기존 볼륨에서는 `uploads.files.length` 합계로 처음 초기화합니다. 업로더가 중단되거나 청크 정리가 실패하면 보수적으로 공간이 예약된 채 남을 수 있습니다. 정리하려면 백업 후 API·Collab 쓰기를 모두 중지하고 고아 청크를 점검·정리한 뒤 이 원장을 실제 파일 합계로 재작성하십시오. 실행 중 원장을 초기화하면 진행 중 업로드 예약을 잃으므로 금지합니다. 콘텐츠 한도는 WiredTiger, 인덱스 및 파일시스템 오버헤드를 포함하지 않습니다.
+
+### 14.1 기존 Mongo 볼륨의 최소 권한 사용자 전환
+
+새 볼륨은 초기화 스크립트로 `codesh_app`에 `codesh` DB의 `readWrite` 역할만 부여합니다. `MONGO_PASSWORD`는 관리/백업 전용 root 자격이며 앱에 사용하지 않습니다. 기존 설치의 업그레이드는 기존 root 접속 설정을 유지하므로 볼륨을 재생성하지 않고 다음 순서로 전환합니다.
+
+1. `./backup.sh`로 백업하고 `.env`를 별도 보관합니다.
+2. `.env`에 `MONGO_APP_USER=codesh_app`, `MONGO_APP_AUTH_DB=codesh`, `MONGO_APP_PASSWORD=`를 지정하고 `./generate-secrets.sh`로 비밀번호를 채웁니다.
+3. `docker compose up -d mongo`로 새 환경/스크립트를 적용합니다. 기존 볼륨에서는 init 스크립트가 자동 실행되지 않습니다.
+4. 다음 명령으로 컨테이너 환경의 root 비밀번호로 인증한 후 앱 사용자를 생성합니다. 비밀번호를 명령행 인자로 전달하지 않습니다.
+
+   ```sh
+   docker compose exec -T mongo mongosh --quiet --eval '
+     db.getSiblingDB("admin").auth("codesh", process.env.MONGO_INITDB_ROOT_PASSWORD);
+     load("/opt/codesh/init-app-user.js");
+   '
+   docker compose up -d api collab
+   ```
+
+5. 헬스와 공유 생성·참여·편집·업로드를 확인합니다. 실패 시 보관한 `.env`의 기존 사용자/인증 DB로 되돌리고 API·Collab을 재시작합니다. 기존 root 사용자는 백업/복원을 위해 유지합니다. DB가 이미 존재하는 사용자라면 이 스크립트는 비밀번호를 덮어쓰지 않으므로 별도 인증 후 명시적으로 변경하십시오.

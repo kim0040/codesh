@@ -5,9 +5,11 @@
 #   tar xzf codesh-<version>.tar.gz && cd codesh-<version> && ./install.sh
 #   PUBLIC_URL=http://codesh.corp HTTP_PORT=8080 ./install.sh     # optional settings for a new .env
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")"
 . ./lib.sh
 need_docker
+verify_bundle .
 
 [ -f images.tar ] || die "images.tar is missing: run this from the extracted bundle"
 VERSION="$(cat VERSION)"

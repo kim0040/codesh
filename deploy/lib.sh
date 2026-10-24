@@ -41,3 +41,26 @@ wait_healthy() {
   docker compose logs --tail 20 >&2 || true
   return 1
 }
+
+# SHA-256 detects corruption and mismatch; obtain the checksum via a trusted delivery channel.
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1;
+  else shasum -a 256 "$1" | cut -d ' ' -f 1; fi
+}
+
+verify_archive() {
+  [ -f "$1.sha256" ] || die "missing checksum: $1.sha256"
+  local expected
+  expected="$(awk 'NR == 1 {print $1}' "$1.sha256")"
+  [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || die "invalid archive checksum"
+  [ "$(sha256_file "$1")" = "$expected" ] || die "bundle checksum mismatch"
+}
+
+verify_bundle() {
+  local dir="$1"
+  [ -f "$dir/SHA256SUMS" ] || die "bundle SHA256SUMS is missing"
+  (cd "$dir" && {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum --strict -c SHA256SUMS;
+    else shasum -a 256 -c SHA256SUMS; fi
+  }) || die "bundle content checksum mismatch"
+}

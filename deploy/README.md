@@ -18,8 +18,8 @@ curl http://localhost/healthz
 - `/` and unknown paths serve `index.html` (SPA fallback, `no-cache`); `/assets/*` is hashed build output (`immutable`, one year).
 - `/api/*` is proxied with `flush_interval -1`, so SSE events leave immediately.
 - `/collab` is proxied to every `collab` replica (`dynamic a` over the compose service name) with `lb_policy query doc`: one document normally lives on one instance. Replicas that fail `/healthz` are skipped.
-- `/metrics/api` and `/metrics/collab` expose Prometheus metrics to private address ranges only. With several collab replicas `/metrics/collab` answers from one of them; scrape the containers directly for per-instance numbers.
-- HTTPS: set `SITE_ADDRESS=codesh.corp` and add a `tls` directive in `deploy/tls/*.caddy` (see `tls/README.md`).
+- `/metrics/api` and `/metrics/collab` expose Prometheus metrics to loopback and the dedicated compose subnet only. With several collab replicas `/metrics/collab` answers from one of them; scrape the containers directly for per-instance numbers.
+- HTTPS: set `SITE_ADDRESS=codesh.local`, `PUBLIC_URL=https://codesh.local` and copy `tls/internal.caddy.example` to `tls/local.caddy` (see `tls/README.md`).
 - Clients behind Caddy: the API trusts `X-Forwarded-For` only from `TRUST_PROXY` (default: the compose network), so rate limits, PIN counters and the nearby network group use the real client address.
 
 ## More collab instances
@@ -42,7 +42,7 @@ On a machine with internet and docker (for example `scripts/box deploy/bundle.sh
 deploy/bundle.sh [version]        # -> deploy/dist/codesh-<version>.tar.gz (+ .sha256)
 ```
 
-The archive holds all images (`docker save`), `docker-compose.yml` without build sections, `.env.example` and the scripts. On the target host (docker + compose plugin, no internet):
+The archive includes a verified content checksum manifest and holds all images (`docker save`), `docker-compose.yml` without build sections, `.env.example` and the scripts. On the target host (docker + compose plugin, no internet):
 
 ```sh
 tar xzf codesh-<version>.tar.gz && cd codesh-<version>
@@ -52,7 +52,7 @@ PUBLIC_URL=http://codesh.corp ./install.sh      # loads images, writes .env with
 ./upgrade.sh ../codesh-<newer>.tar.gz           # backup, load images, keep .env, up -d, wait for /healthz
 ```
 
-Valkey holds join codes, presence and caches only; it is not part of the backup.
+Valkey holds join codes, presence, grants, network bans and quota counters; it is not part of the Mongo backup. Keep its volume and do not flush it in production. See the operator security checklist in `docs/OPERATIONS.md`.
 
 ## Load test
 
@@ -63,3 +63,5 @@ Valkey holds join codes, presence and caches only; it is not part of the backup.
 - `apps/api` and `apps/collab` have no build step; the images run the TypeScript sources with `tsx` (installed beside the app). `NODE_ENV=production` makes both refuse to start with weak secrets.
 - Containers run as non-root where the image allows it (api, collab, Valkey, MongoDB drop privileges), with a read-only root filesystem for api and collab.
 - Logs are capped at 3 x 10 MB per container.
+
+Plain HTTP exposes document content and session/admin/PIN/edit/collab credentials to traffic observers. HTTPS setup and client CA trust instructions are in [tls/README.md](tls/README.md). Keep backups private and retain both the Mongo backup and protected Caddy CA volume.

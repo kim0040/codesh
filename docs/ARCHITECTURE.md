@@ -15,7 +15,7 @@ dev: Vite (:5173) proxies /api → :3001 and /collab → :3002 (ws)
 ```
 
 - One Valkey and one MongoDB. `apps/collab` can run N instances; `@hocuspocus/extension-redis` (ioredis, Valkey-compatible) keeps them in sync, and Caddy routes by `doc` query so one doc normally lives on one instance.
-- No runtime request leaves the intranet. No CDN, font, analytics or external API.
+- No runtime request requires the public internet. No CDN, font, analytics or external API.
 
 ## 2. Packages
 
@@ -77,7 +77,7 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 4. Load: latest snapshot + updates after it.
 5. Unload: 30 s after the last connection leaves, flush, compact, release lock.
 6. Shutdown (SIGTERM): stop accepting, flush all buffers, compact, exit. Target data loss on crash ≤ 1 s.
-7. Permissions: on connect the client sends a token (§8). The collab server verifies it, sets `connection.readOnly` for viewers and rejects updates from read-only connections. Permission changes arrive on Valkey channel `perm:<shareId>` with `{version, kind: 'role'|'kick'|'lock'|'delete', clientId?, role?}`; affected connections are closed or switched within 100 ms. `kick`, `lock` and `delete` apply whatever their `version`; only a per-client `role` older than one already applied is ignored. Pub/sub can lose messages, so collab also re-reads the share of every doc with connections every 15 s and after its subscriber reconnects (lock, bans, existence), and replays messages that arrived while a connection was authenticating. Database errors during authentication or load are refused with reason `unavailable` (retry with backoff), not as an access decision.
+7. Permissions: on connect the client sends a token (§8). The collab server verifies it, sets `connection.readOnly` for viewers and rejects updates from read-only connections. Permission changes arrive on Valkey channel `perm:<shareId>` with `{version, kind: 'role'|'kick'|'lock'|'delete', clientId?, role?}`; affected connections are closed or switched within 100 ms under normal pub/sub delivery. The API signs `controller` (teacher in a lab, owner otherwise), so a student owning a copy is still read-only under the lab lock. Student metadata and history-restore HTTP writes also check the authoritative lab lock. `access.generation` is stored with the Mongo share and rotated on kick/ban and default role, edit-key, PIN or approval tightening. Non-controller tokens must match it on authentication and connected reconciliation; a kick conservatively invalidates all non-controller tokens for that share. Older tokens without a generation match only unmigrated shares. Revoked reconnects return the existing `unauthorized` denial; connected clients close with the existing `reauth` reason. `kick`, `lock` and `delete` apply whatever their `version`; only a per-client `role` older than one already applied is ignored. Pub/sub can lose messages, so collab also re-reads the share and lab lock of every doc with connections every 15 s and after its subscriber reconnects (lock, bans, token generation, existence), and replays messages that arrived while a connection was authenticating. Database errors during authentication or load are refused with reason `unavailable` (retry with backoff), not as an access decision.
 8. Slow clients: if a connection's buffered amount exceeds 4 MB, close it with code 4408; the client reconnects and resyncs.
 9. Nearby previews: on change (throttled to 2 s), publish `{id, title, language, participants, preview: first 8 lines of main file}` into Valkey hash `nearby:item:<id>` (EX 60) when `access.nearby` is true.
 10. `lastActiveAt` is written at most once per minute per doc.
@@ -98,8 +98,12 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 | `user:<clientId>` channel | SSE events for one user |
 | `net:<net>` channel | SSE events for a network group (broadcast) |
 | `cmd:<shareId>` channel, `cmd-reply:<requestId>` channel | content commands to collab (§6.11): `restore`, `replace`, `meta` |
+| `cmd:receipt:<shareId>:<requestId>` | 30-second command receipt prevents duplicate execution/replies after releasing an unloaded doc lock |
 | `doclock:<id>`, `lock:sweeper` | instance ownership (SET NX PX + renew) |
-| `rl:<ip>:<bucket>` | rate limiting |
+| `rl:<IPv4-or-IPv6-/64>:<bucket>` | rate limiting |
+| `quota:<shares/uploads/bytes>:<c/i>:<key>` | fixed-window ingress reservations, with TTL |
+| `sse:<c/i>:<key>` | ZSET stream leases, 90 s with refresh and disconnect release |
+| `admitted-net:<shareId>`, `banned-net:<shareId>` | admitted client to network key mapping and share network bans |
 
 Every pub/sub channel is prefixed with the optional env `CODESH_NS` (keys are isolated by Valkey database index instead, but pub/sub ignores it). Tests give each file its own namespace via `scripts/vitest-namespace.ts`; production leaves it empty or sets one per deployment sharing a Valkey.
 
@@ -107,9 +111,9 @@ Network group `net`: the room name when the client IP falls in a configured room
 
 ## 8. Sessions and tokens
 
-- `codesh_sid` cookie: signed (`@fastify/cookie`, `SESSION_SECRET`), httpOnly, SameSite=Lax, value = clientId. Display name/color are stored in `presence:user:*` and localStorage.
-- Collab token: `base64url(JSON{shareId, clientId, name, color, role:'owner'|'edit'|'view', exp}) + '.' + HMAC-SHA256(COLLAB_SECRET)`, exp 10 min; the provider fetches a fresh token on reconnect via `POST /api/shares/:id/join`.
-- PIN: bcrypt-free — `scrypt` (node:crypto) hash. 5 wrong attempts per client per 10 min → 429.
+- `codesh_sid` cookie: `Secure` when `PUBLIC_URL` starts with `https://`; signed (`@fastify/cookie`, `SESSION_SECRET`), httpOnly, SameSite=Lax, value = clientId. Display name/color are stored in `presence:user:*` and localStorage.
+- Collab token: `base64url(JSON{shareId, clientId, name, color, role:'owner'|'edit'|'view', controller, generation, exp}) + '.' + HMAC-SHA256(COLLAB_SECRET)`, exp 10 min; the provider fetches a fresh token on reconnect via `POST /api/shares/:id/join`.
+- PIN: bcrypt-free — `scrypt` (node:crypto) hash. 5 wrong attempts per client, 30 per IPv4 address / IPv6 /64 and 200 per share per 10 min → 429. Slots are reserved atomically before scrypt; successful attempts release their slots. Comparison uses `timingSafeEqual`. PIN length defaults remain unchanged; a short PIN is an admission aid, not a strong password.
 - Optional OIDC/LDAP login (settings) only maps a verified identity onto the clientId; anonymous use keeps working unless `settings.guestAllowed` is false.
 
 ## 9. HTTP API (apps/api)
@@ -150,7 +154,7 @@ All bodies and responses are zod schemas in `packages/shared`. Errors: `{error: 
 ### 9.1 SSE events (`GET /api/events`)
 
 `event: <type>` + JSON `data`. Heartbeat comment every 15 s. Types: `presence` (full list for my net), `nearby` (full list), `invite` `{from, shareId, title, language, note?, uploadId?}`, `broadcast` `{from, shareId, title}`, `approval-request` `{shareId, clientId, name}`, `approval-result` `{shareId, approved}`, `kicked` `{shareId, banned}`, `lab` `{labId, kind}`.
-While a client has an open SSE stream the API refreshes its presence every 20 s.
+While a client has an open SSE stream the API refreshes its presence every 20 s. Admission reserves distributed client/network stream slots before subscribing, and network presence admission is atomic. Presence change notifications on internal pub/sub carry an empty list as an invalidation; only the API consumes these, computes a shared cached list and sends the unchanged full-list SSE protocol to browsers. Presence notifications are coalesced for 100 ms, so a burst does not rebuild and publish a full list per joining stream. Each snapshot is serialized once; each recipient omits its own card using a constant number of shared Buffer views. Per-entry hashes permit constant-work change detection excluding the recipient. Lookup/encoding work is linear in cards plus streams rather than rebuilding a list per stream. The unchanged full-snapshot protocol still sends the encoded size per recipient; cardinality and stream caps bound that unavoidable bandwidth.
 
 ## 10. Settings (`settings` doc, admin-editable, env provides defaults)
 
@@ -163,7 +167,7 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 - Editor: CodeMirror 6 + `y-codemirror.next` (`yCollab`), keymaps via `@replit/codemirror-vim`, `@replit/codemirror-emacs`, sublime-style bindings from `@codemirror/commands`.
 - Smoothness: local edits render immediately; remote cursors animate position with CSS transforms; route transitions via the View Transitions API with a reduced-motion fallback; skeletons instead of spinners; optimistic UI for title/language/settings.
 - Offline: `y-indexeddb` copy per doc; banner shows "offline – changes kept" and merges on reconnect.
-- PWA: `vite-plugin-pwa`; notifications use the Notification API while the app is open (no external push service exists on an intranet).
+- PWA: `vite-plugin-pwa`; notifications use the Notification API while the app is open (no external push service exists on a private network).
 
 ## 12. Commands
 
@@ -179,3 +183,20 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 ## 13. Dependency policy
 
 Allowed licenses: MIT, Apache-2.0, BSD-2/3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC0-1.0, Unlicense, OFL-1.1 (fonts), Python-2.0 (tooling only), CC-BY-4.0 (data only). MPL-2.0 is allowed for dev-only build tools used unmodified (lightningcss via Tailwind/Vite) and must never appear in the production dependency set. `pnpm check` fails on anything else. Valkey (BSD) instead of Redis ≥7.4. MongoDB Community Server (SSPL) is used only as the internal database of this app and is not redistributed in the repo; drivers are Apache-2.0. No k6 (AGPL): load tests are a Node script.
+
+## 14. Security and resource boundaries
+
+- API sessions and signed collab tokens are authoritative for awareness and comment attribution. The collab server checks new comment authors against the verified token and preserves the author of an existing comment before applying or broadcasting an update; forged updates close with `reauth`. Plain text edits keep the fast path. Display names are chosen by users and are not verified real-world identities.
+- Ban checks include the admitted network key (IPv4 address or IPv6 /64), so dropping cookies from the same address does not bypass a ban. This may also affect other guests behind the same NAT; the owner is exempt. Changing network remains possible for an anonymous guest. Network-ban state is in protected, persistent Valkey; do not flush production Valkey.
+- Storage ingress quotas cover all share creation paths (including forks and lab copies), upload requests and bytes, per client and per network key. Fixed windows begin at the first accepted reservation. Denied or failed requests do not refund admission; `asShare` charges uploaded bytes and stored document bytes. Saving does not bypass creation quotas. These are ingress limits, not a lifetime limit for saved documents.
+- GridFS uses a persistent Mongo `storage_quotas` ledger initialized from existing file lengths. Every streamed chunk reserves global bytes atomically before writing; deletion releases them. The default content ceiling is 10 GiB. Failed cleanup or a crashed uploader can leave conservative reservations; stop all writers, remove orphan chunks after a backup, and rebuild the ledger from `uploads.files` lengths when reclaiming them. This logical cap leaves filesystem/WiredTiger overhead and share history outside it; monitor host free space and provision a filesystem quota if a hard host disk boundary is required.
+- Valkey keeps `noeviction`: evicting join codes, locks, rate/PIN counters or grants could break correctness or weaken limits. New quota-controlled writes, profiles and streams stop at 90% of `maxmemory`; capacity checks are cached for at most one second. At OOM, mandatory writes fail closed with `503 unavailable`; the global request counter uses a bounded (10,000-entry), conservative process-local fallback so read-only routes and health remain usable. Presence entries expire naturally and are capped. Monitor and resize before the headroom is consumed; running collaborators can still consume protected lock/update resources.
+- Waiting rooms are capped and owner request notifications have per-network and per-share rate limits. Network broadcasts have their own rate and audience cap. Nearby discovery remains enabled by default and shares are editable by default: disable `nearbyDefault` globally or `access.nearby` per share before sharing private content. Nearby cards include title and the first eight lines; PIN/approval disables them.
+- Caddy applies a self-hosted CSP, Permissions-Policy, COOP, nosniff, frame denial and same-origin referrer policy. Inline styles are needed by CodeMirror/Radix; the Caddy image hashes the production entry point’s inline bootstrap scripts at build time; arbitrary inline scripts and eval are not permitted. Bundled inline font subsets require `font-src data:`. Shared Zod schemas initialize with `jitless: true` before construction, avoiding eval probes under CSP. `blob:` workers and `data:`/`blob:` images permit local formatting and QR workflows. HTTPS opt-in is in `deploy/tls/README.md`; HSTS belongs only to its TLS snippet.
+- Metrics through Caddy are limited to loopback and the configured compose subnet, including denial of bare `/metrics`. Application ports remain unpublished. New installations use a Mongo user with `readWrite` only on `codesh`; old volumes retain their existing credentials until the documented migration. Backups and temporary password configs are private (`0600`, `umask 077`), and passwords are not supplied in database-tool or Valkey-server argv; Valkey reads a generated private configuration file.
+- Offline bundles include a content manifest verified before image loading; upgrade also verifies the archive sidecar before extracting. Checksums detect corruption and mismatch, not publisher authenticity: distribute them through a trusted channel.
+
+### Pending web-owned changes
+
+1. L7: emit edit links with `#key=...` instead of `?key=...`; capture either form once into memory, immediately call `history.replaceState` to remove the credential without losing unrelated search/hash state, then pass it only in the join request body. Remove the key from router state and logs. Continue accepting legacy query links, scrub them immediately, and test clipboard links, QR, reload/rejoin and browser history.
+2. L8: add an explicit shared-device/remember-offline choice before constructing `IndexeddbPersistence` in `apps/web/src/lib/collab/session.ts`; sensitive shares must not automatically restore data before a successful current authorization. On logout, kick, ban, denied reauthorization and user-requested forgetting, disconnect/destroy providers and delete the matching `codesh:doc:<shareId>` IndexedDB databases (`IDB_PREFIX` is `codesh:doc:`); clear remembered edit keys and identity state, synchronize forgetting across tabs, and test logout, account switching, removed access, offline reload and failed deletion. The server cannot erase IndexedDB on a browser that never reconnects; operators should use a separate browser profile on shared devices until this change lands.

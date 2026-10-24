@@ -3,6 +3,7 @@
 #
 #   ./restore.sh <archive.gz> [--yes]
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")"
 . ./lib.sh
 need_docker
@@ -16,9 +17,7 @@ fi
 
 # api and collab write to the database; collab flushes open documents on stop.
 docker compose stop api collab
-docker compose exec -T mongo sh -c \
-  'mongorestore --quiet --uri "mongodb://codesh:$MONGO_INITDB_ROOT_PASSWORD@localhost:27017/?authSource=admin" --archive --gzip --drop --nsInclude "codesh.*"' \
-  <"$ARCHIVE"
+docker compose exec -T mongo sh /opt/codesh/transfer.sh restore <"$ARCHIVE"
 docker compose start api collab
 wait_healthy 120
 echo "restore: done"

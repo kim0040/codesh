@@ -4,6 +4,7 @@
 #   ./generate-secrets.sh            # creates .env from .env.example if missing, then fills it
 #   ./generate-secrets.sh path/.env  # fills that file
 set -euo pipefail
+umask 077
 
 cd "$(dirname "$0")"
 FILE="${1:-.env}"
@@ -12,6 +13,11 @@ SECRETS=(SESSION_SECRET COLLAB_SECRET ADMIN_TOKEN MONGO_PASSWORD VALKEY_PASSWORD
 if [ ! -f "$FILE" ]; then
   [ -f .env.example ] || { echo "generate-secrets: $FILE and .env.example are missing" >&2; exit 1; }
   cp .env.example "$FILE"
+fi
+
+# Existing root-based installations keep their credentials until the explicit migration.
+if grep -Eq '^MONGO_APP_USER=.+$' "$FILE" && ! grep -q '^MONGO_APP_USER=codesh$' "$FILE"; then
+  SECRETS+=(MONGO_APP_PASSWORD)
 fi
 
 random_hex() {

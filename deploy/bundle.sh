@@ -32,7 +32,7 @@ compose build
 compose pull mongo valkey
 
 rm -rf "$STAGE"
-mkdir -p "$STAGE/tls"
+mkdir -p "$STAGE/tls" "$STAGE/mongo" "$STAGE/valkey" "$STAGE/docs"
 IMAGES="$(compose config --images | sort -u)"
 echo "bundle: saving $(echo "$IMAGES" | tr '\n' ' ')"
 # shellcheck disable=SC2086
@@ -46,9 +46,14 @@ awk '
 ' docker-compose.yml >"$STAGE/docker-compose.yml"
 sed "s/^CODESH_VERSION=.*/CODESH_VERSION=$VERSION/" .env.example >"$STAGE/.env.example"
 cp lib.sh generate-secrets.sh install.sh upgrade.sh backup.sh restore.sh "$STAGE/"
-cp tls/README.md "$STAGE/tls/"
+cp tls/README.md tls/*.example "$STAGE/tls/"
+cp mongo/* "$STAGE/mongo/"
+cp valkey/* "$STAGE/valkey/"
+cp ../docs/OPERATIONS.md ../docs/ARCHITECTURE.md "$STAGE/docs/"
 [ -f README.md ] && cp README.md "$STAGE/"
 printf '%s\n' "$VERSION" >"$STAGE/VERSION"
+
+(cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
 
 OUT="dist/$NAME.tar.gz"
 tar czf "$OUT" -C dist "$NAME"
