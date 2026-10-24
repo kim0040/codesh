@@ -56,6 +56,7 @@ import type {
 } from "@hocuspocus/server";
 import type { Redis } from "ioredis";
 import * as Y from "yjs";
+import { validCommentAuthors } from "./comments.js";
 import { applyMeta, syncContent } from "./content.js";
 import { ValkeyLock } from "./lock.js";
 import type { CollabMetrics } from "./metrics.js";
@@ -549,6 +550,11 @@ export class Collab implements Extension<CollabContext> {
     if ((type !== 1 && type !== 2) || connection.readOnly) return;
     const state = this.docs.get(document.name);
     if (!state) return;
+    if (!validCommentAuthors(document, payload, context(connection))) {
+      connection.readOnly = true;
+      connection.close({ code: 4401, reason: COLLAB_CLOSE_REASONS.reauth });
+      return;
+    }
     const max = this.maxDocBytes();
     if (state.core.sizeEstimate + payload.byteLength <= max) return;
     if (onlyDeletes(payload)) return;
