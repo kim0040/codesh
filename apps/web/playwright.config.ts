@@ -9,6 +9,14 @@ import {
   WEB_PORT,
 } from "./e2e/env";
 
+/**
+ * Chromium runs every spec. Firefox and WebKit run the cross-OS spec only (shortcuts, labels, IME,
+ * OS-dependent features), so a Mac or Linux visitor's engine is covered too. They need
+ * `pnpm exec playwright install firefox webkit` once; `E2E_BROWSERS=chromium` skips them.
+ */
+const ENGINES = (process.env.E2E_BROWSERS ?? "chromium,firefox,webkit").split(",");
+const CROSS_OS = /o-cross-os\.spec\.ts$/;
+
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
 const shared = { MONGO_URL, VALKEY_URL, COLLAB_SECRET: secret, NODE_ENV: "development" };
 
@@ -25,7 +33,17 @@ export default defineConfig({
     locale: "en-US",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  projects: [
+    ...(ENGINES.includes("chromium")
+      ? [{ name: "chromium", use: { browserName: "chromium" as const } }]
+      : []),
+    ...(ENGINES.includes("firefox")
+      ? [{ name: "firefox", use: { browserName: "firefox" as const }, testMatch: CROSS_OS }]
+      : []),
+    ...(ENGINES.includes("webkit")
+      ? [{ name: "webkit", use: { browserName: "webkit" as const }, testMatch: CROSS_OS }]
+      : []),
+  ],
   webServer: [
     {
       command: "pnpm exec tsx src/main.ts",
