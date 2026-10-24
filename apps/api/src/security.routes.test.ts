@@ -53,5 +53,46 @@ describe.skipIf(!integration)("security resource boundaries", () => {
     ).toBe(429);
   });
 
+  it("M3: caps share creation by network key across fresh cookies", async () => {
+    const config = loadConfig({ QUOTA_SHARES_PER_IP: "2" });
+    h = await createHarness({ config: { limits: config.limits } });
+    const ip = "192.0.2.14";
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, () => h.client({ ip }).post("/api/shares")),
+    );
+    expect(responses.map((r) => r.statusCode).sort()).toEqual([200, 200, 429, 429]);
+  });
+
+  it("M3: caps upload bytes across requests, and rolls back a refused upload", async () => {
+    const config = loadConfig({ QUOTA_BYTES_PER_IP: "8" });
+    h = await createHarness({ config: { limits: config.limits } });
+    const client = h.client();
+    expect(
+      (await client.multipart("/api/uploads", [{ name: "a.txt", data: "12345" }])).statusCode,
+    ).toBe(200);
+    expect(
+      (await client.multipart("/api/uploads", [{ name: "b.txt", data: "6789" }])).statusCode,
+    ).toBe(429);
+  });
+
+  it("M3: enforces global upload capacity concurrently and releases deleted bytes", async () => {
+    const config = loadConfig({ UPLOAD_STORAGE_MAX_BYTES: "10" });
+    h = await createHarness({ config: { limits: config.limits } });
+    const client = h.client();
+    const responses = await Promise.all(
+      ["a.txt", "b.txt"].map((name) =>
+        client.multipart("/api/uploads", [{ name, data: "123456" }]),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 503]);
+    const accepted = responses.find((response) => response.statusCode === 200);
+    const uploadId = accepted?.json<{ uploadId: string }[]>()[0]?.uploadId;
+    if (!uploadId) throw new Error("upload missing");
+    await h.stores.files.delete(uploadId);
+    expect(
+      (await client.multipart("/api/uploads", [{ name: "c.txt", data: "123456" }])).statusCode,
+    ).toBe(200);
+  });
+
 
 });

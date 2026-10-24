@@ -124,6 +124,12 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
     if (hasZodFastifySchemaValidationErrors(error)) {
       return reply.code(400).send(errorResponse("validation", error.message));
     }
+    if (error instanceof Error && /OOM|command not allowed when used memory/i.test(error.message)) {
+      return reply
+        .code(503)
+        .header("Retry-After", "30")
+        .send(errorResponse("unavailable", "Server memory capacity reached; contact the operator"));
+    }
     const failure = error as { code?: string; message: string; statusCode?: number };
     const status = statusOf(failure);
     let code: ErrorCode | null = null;

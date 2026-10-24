@@ -11,7 +11,7 @@ import { Redis } from "ioredis";
 import * as Y from "yjs";
 import { buildApp } from "../app.js";
 import type { LdapAdapter, OidcAdapter } from "../auth/adapters.js";
-import type { Config } from "../config.js";
+import { type Config, loadConfig } from "../config.js";
 import { Hub } from "../hub.js";
 import { createMetrics } from "../metrics.js";
 
@@ -287,6 +287,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   const subscriber = new Redis(VALKEY_URL);
   const stores = options.stores ?? createMemoryStores();
   const config: Config = {
+    limits: loadConfig().limits,
     production: false,
     host: "127.0.0.1",
     port: 0,

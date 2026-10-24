@@ -3,6 +3,20 @@ import { z } from "zod";
 const DEV_SECRET = "dev-only-secret-change-me";
 
 const envSchema = z.object({
+  QUOTA_WINDOW_SECONDS: z.coerce.number().int().positive().default(86400),
+  QUOTA_SHARES_PER_CLIENT: z.coerce.number().int().positive().default(200),
+  QUOTA_SHARES_PER_IP: z.coerce.number().int().positive().default(1000),
+  QUOTA_UPLOADS_PER_CLIENT: z.coerce.number().int().positive().default(200),
+  QUOTA_UPLOADS_PER_IP: z.coerce.number().int().positive().default(1000),
+  QUOTA_BYTES_PER_CLIENT: z.coerce.number().int().positive().default(536870912),
+  QUOTA_BYTES_PER_IP: z.coerce.number().int().positive().default(2147483648),
+  UPLOAD_STORAGE_MAX_BYTES: z.coerce.number().int().positive().default(10737418240),
+  SSE_MAX_PER_CLIENT: z.coerce.number().int().positive().default(5),
+  SSE_MAX_PER_IP: z.coerce.number().int().positive().default(100),
+  PRESENCE_MAX_PER_NET: z.coerce.number().int().positive().default(500),
+  PENDING_MAX_PER_SHARE: z.coerce.number().int().positive().default(100),
+  BROADCASTS_PER_MIN: z.coerce.number().int().positive().default(5),
+  BROADCAST_FANOUT_MAX: z.coerce.number().int().positive().default(500),
   NODE_ENV: z.string().default("development"),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3001),
@@ -32,6 +46,23 @@ export interface RateLimits {
   loginPerMinute: number;
 }
 
+export interface SecurityLimits {
+  QUOTA_WINDOW_SECONDS: number;
+  QUOTA_SHARES_PER_CLIENT: number;
+  QUOTA_SHARES_PER_IP: number;
+  QUOTA_UPLOADS_PER_CLIENT: number;
+  QUOTA_UPLOADS_PER_IP: number;
+  QUOTA_BYTES_PER_CLIENT: number;
+  QUOTA_BYTES_PER_IP: number;
+  UPLOAD_STORAGE_MAX_BYTES: number;
+  SSE_MAX_PER_CLIENT: number;
+  SSE_MAX_PER_IP: number;
+  PRESENCE_MAX_PER_NET: number;
+  PENDING_MAX_PER_SHARE: number;
+  BROADCASTS_PER_MIN: number;
+  BROADCAST_FANOUT_MAX: number;
+}
+
 export interface Config {
   production: boolean;
   host: string;
@@ -45,6 +76,7 @@ export interface Config {
   trustProxy: string[];
   publicUrl: string;
   rateLimit: RateLimits;
+  limits: SecurityLimits;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -71,6 +103,22 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       .map((cidr) => cidr.trim())
       .filter(Boolean),
     publicUrl: parsed.PUBLIC_URL.replace(/\/+$/, ""),
+    limits: {
+      QUOTA_WINDOW_SECONDS: parsed.QUOTA_WINDOW_SECONDS,
+      QUOTA_SHARES_PER_CLIENT: parsed.QUOTA_SHARES_PER_CLIENT,
+      QUOTA_SHARES_PER_IP: parsed.QUOTA_SHARES_PER_IP,
+      QUOTA_UPLOADS_PER_CLIENT: parsed.QUOTA_UPLOADS_PER_CLIENT,
+      QUOTA_UPLOADS_PER_IP: parsed.QUOTA_UPLOADS_PER_IP,
+      QUOTA_BYTES_PER_CLIENT: parsed.QUOTA_BYTES_PER_CLIENT,
+      QUOTA_BYTES_PER_IP: parsed.QUOTA_BYTES_PER_IP,
+      UPLOAD_STORAGE_MAX_BYTES: parsed.UPLOAD_STORAGE_MAX_BYTES,
+      SSE_MAX_PER_CLIENT: parsed.SSE_MAX_PER_CLIENT,
+      SSE_MAX_PER_IP: parsed.SSE_MAX_PER_IP,
+      PRESENCE_MAX_PER_NET: parsed.PRESENCE_MAX_PER_NET,
+      PENDING_MAX_PER_SHARE: parsed.PENDING_MAX_PER_SHARE,
+      BROADCASTS_PER_MIN: parsed.BROADCASTS_PER_MIN,
+      BROADCAST_FANOUT_MAX: parsed.BROADCAST_FANOUT_MAX,
+    },
     rateLimit: {
       apiPerMinute: parsed.RATE_LIMIT_API_PER_MIN,
       codePerMinute: parsed.RATE_LIMIT_CODE_PER_MIN,

@@ -17,7 +17,28 @@ export async function rateLimit(
   windowSeconds = WINDOW_SECONDS,
 ): Promise<void> {
   const key = keys.rateLimit(networkKey(ip), bucket);
-  const result = await ctx.valkey.multi().incr(key).ttl(key).exec();
+  let result: [Error | null, unknown][] | null;
+  try {
+    result = await ctx.valkey.multi().incr(key).ttl(key).exec();
+    const error = result?.find(([error]) => error)?.[0];
+    if (error) throw error;
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !/OOM|command not allowed when used memory/i.test(error.message)
+    )
+      throw error;
+    // Keep reads and health usable while noeviction refuses new counters. Bounded, conservative
+    // local fallback; writes requiring a durable reservation still fail closed.
+    const now = Date.now();
+    for (const [key, entry] of ctx.fallbackRates)
+      if (entry.until <= now) ctx.fallbackRates.delete(key);
+    const entry = ctx.fallbackRates.get(key) ?? { count: 0, until: now + windowSeconds * 1000 };
+    if (ctx.fallbackRates.size >= 10000 || ++entry.count > Math.min(limit, 30))
+      throw new ApiError("rate_limited", "Too many requests", { "Retry-After": "60" });
+    ctx.fallbackRates.set(key, entry);
+    return;
+  }
   const count = Number(result?.[0]?.[1] ?? 0);
   let ttl = Number(result?.[1]?.[1] ?? -1);
   if (ttl < 0) {
@@ -26,7 +47,7 @@ export async function rateLimit(
     ttl = windowSeconds;
   }
   if (count > limit) {
-    ctx.metrics.rateLimited.inc({ bucket });
+    ctx.metrics.rateLimited.inc({ bucket: bucket.split(":")[0] ?? bucket });
     throw new ApiError("rate_limited", "Too many requests", { "Retry-After": String(ttl) });
   }
 }

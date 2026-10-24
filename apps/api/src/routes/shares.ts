@@ -78,6 +78,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       });
       const { response } = await createShare(ctx, {
         ownerId: session.clientId,
+        ip: session.ip,
         title: body.title ?? "",
         language: body.language,
         files,
@@ -355,6 +356,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       const content = readContent(await loadDoc(ctx, share.id));
       const { response } = await createShare(ctx, {
         ownerId: session.clientId,
+        ip: session.ip,
         title: content.title || share.title,
         language: content.language || share.language,
         files: content.files.map((file) => ({

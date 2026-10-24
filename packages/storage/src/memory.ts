@@ -27,6 +27,7 @@ import {
   type ShareStore,
   type ShareUpdate,
   type SnapshotStore,
+  StorageCapacityError,
   type Stores,
   type UpdateEntry,
   type UpdateLog,
@@ -247,6 +248,7 @@ class MemorySnapshotStore implements SnapshotStore {
 
 class MemoryFileStore implements FileStore {
   private readonly files = new Map<string, { meta: UploadRecord; data: Uint8Array }>();
+  private reserved = 0;
 
   async put(upload: NewUpload) {
     const { data, ...rest } = upload;
@@ -255,22 +257,30 @@ class MemoryFileStore implements FileStore {
     return copy(meta);
   }
 
-  async putStream(upload: NewUploadStream, maxBytes?: number) {
+  async putStream(upload: NewUploadStream, maxBytes?: number, maxTotalBytes?: number) {
     const { stream, ...rest } = upload;
     const chunks: Uint8Array[] = [];
     let size = 0;
-    for await (const chunk of stream) {
-      size += chunk.byteLength;
-      if (maxBytes !== undefined && size > maxBytes) throw new FileTooLargeError(maxBytes);
-      chunks.push(chunk.slice());
+    try {
+      for await (const chunk of stream) {
+        const used = [...this.files.values()].reduce((total, file) => total + file.meta.size, 0);
+        if (maxTotalBytes !== undefined && used + this.reserved + chunk.byteLength > maxTotalBytes)
+          throw new StorageCapacityError();
+        this.reserved += chunk.byteLength;
+        size += chunk.byteLength;
+        if (maxBytes !== undefined && size > maxBytes) throw new FileTooLargeError(maxBytes);
+        chunks.push(chunk.slice());
+      }
+      const data = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        data.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return this.put({ ...rest, data });
+    } finally {
+      this.reserved -= size;
     }
-    const data = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      data.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return this.put({ ...rest, data });
   }
 
   async get(id: string) {

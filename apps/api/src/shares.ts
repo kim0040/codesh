@@ -14,9 +14,11 @@ import { buildDoc, contentBytes, previewOf, readContent, storeInitialState } fro
 import { tooLarge } from "./errors.js";
 import { DEFAULT_LANGUAGE, languageForPath } from "./languages.js";
 import { announceShare, removeNearby } from "./presence.js";
+import { chargeQuota } from "./quotas.js";
 
 export interface CreateShareInput {
   ownerId: string;
+  ip?: string;
   title: string;
   language?: string;
   files: { path: string; language?: string; content: string }[];
@@ -49,6 +51,8 @@ export async function createShare(
     throw tooLarge(`A share holds at most ${settings.maxDocBytes} bytes of text`);
   }
 
+  await chargeQuota(ctx, input.ownerId, input.ip, "shares");
+  await chargeQuota(ctx, input.ownerId, input.ip, "bytes", sizeBytes);
   let id = generateShareId();
   while (await ctx.stores.shares.get(id)) id = generateShareId();
   const ttlSeconds = Math.round(settings.anonymousTtlHours * 3600);
@@ -115,7 +119,13 @@ export async function deleteShare(ctx: Ctx, share: ShareRecord): Promise<void> {
     releaseCode(ctx, "share", share.joinCode),
     removeNearby(ctx, share.id),
     ctx.valkey.zrem(apiKeys.sharesIndex, share.id),
-    ctx.valkey.del(apiKeys.grants(share.id), keys.pending(share.id), apiKeys.preview(share.id)),
+    ctx.valkey.del(
+      apiKeys.grants(share.id),
+      keys.pending(share.id),
+      apiKeys.preview(share.id),
+      apiKeys.admittedNetworks(share.id),
+      apiKeys.bannedNetworks(share.id),
+    ),
   ]);
 }
 

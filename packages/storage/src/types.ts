@@ -134,6 +134,14 @@ export class FileTooLargeError extends Error {
   }
 }
 
+/** Global upload capacity reached; the refused file is removed. */
+export class StorageCapacityError extends Error {
+  constructor() {
+    super("Upload storage capacity reached");
+    this.name = "StorageCapacityError";
+  }
+}
+
 /** GridFS bucket `uploads`. */
 export interface FileStore {
   put(upload: NewUpload): Promise<UploadRecord>;
@@ -141,7 +149,11 @@ export interface FileStore {
    * Stores `upload.stream` chunk by chunk. Throws `FileTooLargeError` as soon as more than
    * `maxBytes` arrived and leaves nothing behind (also when the stream itself fails).
    */
-  putStream(upload: NewUploadStream, maxBytes?: number): Promise<UploadRecord>;
+  putStream(
+    upload: NewUploadStream,
+    maxBytes?: number,
+    maxTotalBytes?: number,
+  ): Promise<UploadRecord>;
   get(id: string): Promise<{ meta: UploadRecord; data: Uint8Array } | null>;
   /** Metadata only: no content is read. */
   meta(id: string): Promise<UploadRecord | null>;

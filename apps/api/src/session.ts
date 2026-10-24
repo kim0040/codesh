@@ -10,6 +10,7 @@ import "@fastify/cookie";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Ctx } from "./ctx.js";
 import { resolveClientIp, resolveNet } from "./net.js";
+import { requireCapacity } from "./quotas.js";
 
 export interface Identity {
   provider: string;
@@ -122,6 +123,7 @@ export async function saveProfile(
   clientId: string,
   profile: { name?: string; color?: string },
 ): Promise<void> {
+  await requireCapacity(ctx);
   const fields = Object.entries(profile).filter(([, v]) => v !== undefined) as [string, string][];
   if (fields.length === 0) return;
   const key = apiKeys.profile(clientId);
