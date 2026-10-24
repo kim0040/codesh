@@ -178,8 +178,8 @@ export const api = {
     request<{ ok: true }>("POST", `/api/shares/${id}/pending/${clientId}`, { body: { approve } }),
   listHistory: (id: string) =>
     request<{ seq: number; at: string }[]>("GET", `/api/shares/${id}/history`),
-  async historyState(id: string, seq: number): Promise<Uint8Array> {
-    const response = await rawRequest("GET", `/api/shares/${id}/history/${seq}`);
+  async historyState(id: string, seq: number, signal?: AbortSignal): Promise<Uint8Array> {
+    const response = await rawRequest("GET", `/api/shares/${id}/history/${seq}`, { signal });
     return new Uint8Array(await response.arrayBuffer());
   },
   restore: (id: string, seq: number) =>

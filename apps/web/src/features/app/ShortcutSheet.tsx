@@ -2,10 +2,9 @@ import type { MessageKey } from "@codesh/i18n";
 import { Dialog, DialogContent, KbdGroup } from "@codesh/ui";
 import { useT } from "../../lib/i18n";
 import { setShortcutsOpen, useOverlays } from "../../lib/overlays";
+import { KEYS } from "../../lib/platform";
 
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
-export const MOD = isMac ? "⌘" : "Ctrl";
-const ALT = isMac ? "⌥" : "Alt";
+const { mod: MOD, alt: ALT, shift: SHIFT } = KEYS;
 
 interface Shortcut {
   label: MessageKey;
@@ -29,7 +28,7 @@ const GROUPS: { title: MessageKey; items: Shortcut[] }[] = [
     items: [
       { label: "shortcuts.item.find", keys: [MOD, "F"] },
       { label: "shortcuts.item.copyAll", keys: [MOD, ALT, "C"] },
-      { label: "shortcuts.item.format", keys: ["Shift", ALT, "F"] },
+      { label: "shortcuts.item.format", keys: [SHIFT, ALT, "F"] },
       { label: "shortcuts.item.undo", keys: [MOD, "Z"] },
       { label: "shortcuts.item.moveLine", keys: [ALT, "↑ / ↓"] },
       { label: "shortcuts.item.leaveEditor", keys: ["Esc", "Tab"] },

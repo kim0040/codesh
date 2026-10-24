@@ -25,6 +25,7 @@ import { setFileLanguage } from "../../lib/collab/model";
 import { type Command, registerCommands } from "../../lib/commands";
 import { useT } from "../../lib/i18n";
 import { openShortcuts } from "../../lib/overlays";
+import { isAltGraph, KEYS } from "../../lib/platform";
 import { getPrefs } from "../../lib/prefs";
 import { useStore } from "../../lib/store";
 import { copyAll, downloadFile, downloadZip, looksLikeSecret } from "./actions";
@@ -174,6 +175,8 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
   // ── keyboard shortcuts ───────────────────────────────────────────
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // AltGr (Ctrl+Alt on Windows) types characters; it is never one of these shortcuts.
+      if (isAltGraph(event)) return;
       const mod = event.metaKey || event.ctrlKey;
       if (mod && event.altKey && event.code === "KeyS") {
         event.preventDefault();
@@ -208,7 +211,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.shareAction"),
         group,
         icon: <Share2 />,
-        shortcut: ["⌘", "⌥", "S"],
+        shortcut: [KEYS.mod, KEYS.alt, "S"],
         run: () => ctx.openPanel("share"),
       },
       {
@@ -216,7 +219,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.settingsAction"),
         group,
         icon: <Settings />,
-        shortcut: ["⌘", ","],
+        shortcut: [KEYS.mod, ","],
         run: () => ctx.openPanel("settings"),
       },
       {
@@ -224,6 +227,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.commentsAction"),
         group,
         icon: <MessageSquare />,
+        shortcut: [KEYS.mod, KEYS.alt, "M"],
         run: () => ctx.openPanel("comments"),
       },
       {
@@ -232,6 +236,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         group,
         icon: <History />,
         disabled: !ctx.isOwner,
+        shortcut: [KEYS.mod, KEYS.alt, "H"],
         run: () => ctx.openPanel("history"),
       },
       {
@@ -239,6 +244,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.copyAllAction"),
         group,
         icon: <Copy />,
+        shortcut: [KEYS.mod, KEYS.alt, "C"],
         run: () => topActionsRef.current.copyAll(),
       },
       {
@@ -262,7 +268,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         group,
         icon: <Wand2 />,
         disabled: ctx.readOnly || !canFormat(language),
-        shortcut: ["⇧", "⌥", "F"],
+        shortcut: [KEYS.shift, KEYS.alt, "F"],
         run: () => topActionsRef.current.format(),
       },
       {
@@ -307,6 +313,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.shortcutsAction"),
         group,
         icon: <Keyboard />,
+        shortcut: ["?"],
         run: openShortcuts,
       },
     ];

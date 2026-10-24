@@ -193,7 +193,8 @@ function CommentsBody() {
 
       {resolvedCount > 0 ? (
         <Switch
-          label={showResolved ? t("comment.hideResolved") : t("comment.showResolved")}
+          // A switch is named for its on state; a label that flips with it reads as a double negative.
+          label={`${t("comment.showResolved")} (${resolvedCount})`}
           checked={showResolved}
           onCheckedChange={setShowResolved}
         />
@@ -270,7 +271,15 @@ function CommentsBody() {
                         size="xs"
                         onClick={() => {
                           deleteComment(ctx.doc, comment.id);
-                          toast({ title: t("toast.deleted"), tone: "neutral", duration: 2000 });
+                          toast({
+                            title: t("toast.commentDeleted"),
+                            tone: "neutral",
+                            action: {
+                              label: t("common.undo"),
+                              altText: t("common.undo"),
+                              onClick: () => addComment(ctx.doc, comment),
+                            },
+                          });
                         }}
                       >
                         <Trash2 />

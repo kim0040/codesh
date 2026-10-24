@@ -1,0 +1,95 @@
+/* App-wide rules that depend on the visitor's platform or system settings. */
+
+/*
+ * Windows and Linux draw wide light-grey scrollbars, even on the dark theme. Elsewhere than macOS
+ * (which overlays its own) they are thin and take the theme's colours. `data-platform` is set by
+ * AppShell.
+ */
+:root:not([data-platform="mac"]) * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--fg-3) 60%, transparent) transparent;
+}
+
+/* Windows High Contrast (forced colours): keep focus, state, selection and carets visible. */
+@media (forced-colors: active) {
+  /* Buttons without a border of their own would otherwise read as loose text and icons. */
+  button,
+  [role="button"],
+  [role="tab"] {
+    outline: 1px solid ButtonBorder;
+    outline-offset: -1px;
+  }
+
+  [aria-pressed="true"],
+  [aria-current="true"],
+  [aria-selected="true"],
+  [data-state="active"],
+  [data-state="checked"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  [role="switch"] > span {
+    forced-color-adjust: none;
+    background: ButtonText;
+  }
+
+  [role="switch"][data-state="checked"] > span {
+    background: Highlight;
+  }
+
+  /* biome-ignore-start lint/complexity/noImportantStyles: editor themes style these with selectors this file cannot outrank */
+  .cm-editor .cm-selectionBackground,
+  .cm-editor .cm-content ::selection {
+    forced-color-adjust: none;
+    background: Highlight !important;
+  }
+
+  .cm-editor .cm-cursor,
+  .cm-editor .cm-dropCursor {
+    border-left-color: CanvasText !important;
+  }
+
+  .cm-editor .cm-searchMatch {
+    outline: 1px solid CanvasText;
+  }
+
+  .cm-editor .cm-searchMatch-selected {
+    outline: 2px solid Highlight;
+  }
+  /* biome-ignore-end lint/complexity/noImportantStyles: editor theme overrides */
+
+  .cm-host .cm-editor.cm-focused:not([data-pointer-focus])::after {
+    border-color: Highlight;
+  }
+
+  .cm-remote-caret-bar,
+  .cm-comment-dot {
+    forced-color-adjust: none;
+    background: CanvasText;
+    color: Canvas;
+  }
+
+  .cm-remote-caret-flag {
+    forced-color-adjust: none;
+    background: CanvasText;
+    color: Canvas;
+  }
+
+  .cm-remote-selection {
+    forced-color-adjust: none;
+    background: transparent;
+    outline: 1px dashed CanvasText;
+  }
+
+  .cm-merge-host .cm-changedLine,
+  .cm-merge-host .cm-deletedChunk {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+}

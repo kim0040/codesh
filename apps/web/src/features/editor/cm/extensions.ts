@@ -127,9 +127,35 @@ export async function keymapExtension(mode: Keymap): Promise<Extension> {
   return plainKeymap(mode);
 }
 
-/** Always-on behaviour that does not depend on preferences. */
 /** Id of the visually hidden note that explains how to leave the editor with the keyboard. */
 export const EDITOR_HINT_ID = "editor-hint";
+
+/**
+ * Marks focus that came from a click or a tap (`data-pointer-focus`), so the editor's focus ring
+ * only shows for keyboard users, the way `:focus-visible` does for buttons (a contenteditable
+ * always matches `:focus-visible`, so CSS alone cannot tell the two apart).
+ */
+function pointerFocus(): Extension {
+  let pointer = false;
+  return EditorView.domEventHandlers({
+    mousedown() {
+      pointer = true;
+      return false;
+    },
+    focus(_event, view) {
+      view.dom.toggleAttribute("data-pointer-focus", pointer);
+      pointer = false;
+      return false;
+    },
+    blur(_event, view) {
+      view.dom.removeAttribute("data-pointer-focus");
+      pointer = false;
+      return false;
+    },
+  });
+}
+
+/** Always-on behaviour that does not depend on preferences. */
 
 export function baseExtensions(ariaLabel: string): Extension {
   return [
@@ -142,6 +168,7 @@ export function baseExtensions(ariaLabel: string): Extension {
     highlightSelectionMatches(),
     rectangularSelection(),
     crosshairCursor(),
+    pointerFocus(),
     EditorState.allowMultipleSelections.of(true),
     EditorView.contentAttributes.of({
       "aria-label": ariaLabel,

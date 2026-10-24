@@ -1,6 +1,6 @@
 import { Check, ChevronRight, Circle } from "lucide-react";
 import { DropdownMenu as MenuPrimitive } from "radix-ui";
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useRef } from "react";
 import { cx } from "../lib/cx.js";
 import { Kbd } from "./kbd.js";
 
@@ -16,19 +16,46 @@ const item =
   "relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-body-sm outline-none coarse:min-h-11 " +
   "data-[highlighted]:bg-fill-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-fg-3";
 
+/**
+ * Focus goes back to the trigger when the menu closes from the keyboard. Closed with a pointer
+ * (an item clicked, or a click outside) it does not: the browser would draw the keyboard focus
+ * ring on the trigger, because the menu items it moved focus through count as keyboard focus.
+ */
 export function DropdownMenuContent({
   sideOffset = 6,
   collisionPadding = 8,
   container,
   className,
+  onPointerDown,
+  onPointerDownOutside,
+  onKeyDown,
+  onCloseAutoFocus,
   ...props
 }: ComponentProps<typeof MenuPrimitive.Content> & { container?: HTMLElement | null }) {
+  const pointer = useRef(false);
   return (
     <MenuPrimitive.Portal container={container}>
       <MenuPrimitive.Content
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         className={cx(surface, "max-h-(--radix-dropdown-menu-content-available-height)", className)}
+        onPointerDown={(event) => {
+          pointer.current = true;
+          onPointerDown?.(event);
+        }}
+        onPointerDownOutside={(event) => {
+          pointer.current = true;
+          onPointerDownOutside?.(event);
+        }}
+        onKeyDown={(event) => {
+          pointer.current = false;
+          onKeyDown?.(event);
+        }}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          if (pointer.current) event.preventDefault();
+          pointer.current = false;
+        }}
         {...props}
       />
     </MenuPrimitive.Portal>

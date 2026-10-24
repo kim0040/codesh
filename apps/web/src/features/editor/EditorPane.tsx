@@ -6,7 +6,7 @@ import { type MutableRefObject, useEffect, useRef, useState } from "react";
 import { yCollab } from "y-codemirror.next";
 import * as Y from "yjs";
 import { useAppearance } from "../../lib/appearance";
-import { fileText } from "../../lib/collab/model";
+import { fileText, normalizeLineEndings } from "../../lib/collab/model";
 import type { DocSession } from "../../lib/collab/session";
 import { useT } from "../../lib/i18n";
 import { usePrefs } from "../../lib/prefs";
@@ -79,6 +79,8 @@ export function EditorPane(props: EditorPaneProps) {
     const host = hostRef.current;
     if (!host) return;
     const ytext = fileText(session.doc, fileId);
+    // Before the undo manager exists, so undo never brings the "\r" characters back.
+    if (!latest.current.readOnly) normalizeLineEndings(ytext);
     const undoManager = new Y.UndoManager(ytext);
     const parts: Compartments = {
       theme: new Compartment(),

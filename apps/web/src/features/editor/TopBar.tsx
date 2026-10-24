@@ -37,7 +37,7 @@ import { type Participant, useComments } from "../../lib/collab/hooks";
 import { setTitle } from "../../lib/collab/model";
 import { useT } from "../../lib/i18n";
 import { openPalette, openShortcuts } from "../../lib/overlays";
-import { MOD } from "../app/ShortcutSheet";
+import { KEYS } from "../../lib/platform";
 import { labelColorFor } from "./cm/remote-cursors";
 import { useEditor } from "./context";
 import { canFormat } from "./format-code";
@@ -84,7 +84,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
       <div className="ms-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
         <People />
 
-        <Tooltip content={t("editor.top.commentsAction")} shortcut={[MOD, "⌥", "M"]}>
+        <Tooltip content={t("editor.top.commentsAction")} shortcut={[KEYS.mod, KEYS.alt, "M"]}>
           <span className="relative inline-flex">
             <IconButton
               aria-label={t("editor.top.commentsAction")}
@@ -108,7 +108,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
         </Tooltip>
 
         {ctx.isOwner ? (
-          <Tooltip content={t("editor.top.historyAction")} shortcut={[MOD, "⌥", "H"]}>
+          <Tooltip content={t("editor.top.historyAction")} shortcut={[KEYS.mod, KEYS.alt, "H"]}>
             <IconButton
               aria-label={t("editor.top.historyAction")}
               pressed={ctx.panel.name === "history"}
@@ -123,7 +123,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
           </Tooltip>
         ) : null}
 
-        <Tooltip content={t("editor.top.settingsAction")} shortcut={[MOD, ","]}>
+        <Tooltip content={t("editor.top.settingsAction")} shortcut={[KEYS.mod, ","]}>
           <IconButton
             aria-label={t("editor.top.settingsAction")}
             onClick={() => ctx.openPanel("settings")}
@@ -152,11 +152,19 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             </IconButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem icon={<CommandIcon />} shortcut={[MOD, "K"]} onSelect={openPalette}>
+            <DropdownMenuItem
+              icon={<CommandIcon />}
+              shortcut={[KEYS.mod, "K"]}
+              onSelect={openPalette}
+            >
               {t("editor.top.commandAction")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem icon={<Copy />} shortcut={[MOD, "⌥", "C"]} onSelect={actions.copyAll}>
+            <DropdownMenuItem
+              icon={<Copy />}
+              shortcut={[KEYS.mod, KEYS.alt, "C"]}
+              onSelect={actions.copyAll}
+            >
               {t("editor.top.copyAllAction")}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<Download />} onSelect={actions.downloadFile}>
@@ -170,7 +178,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             {formattable ? (
               <DropdownMenuItem
                 icon={<Wand2 />}
-                shortcut={["⇧", "⌥", "F"]}
+                shortcut={[KEYS.shift, KEYS.alt, "F"]}
                 onSelect={actions.format}
               >
                 {t("editor.top.formatAction")}
@@ -197,7 +205,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               icon={<Settings />}
-              shortcut={[MOD, ","]}
+              shortcut={[KEYS.mod, ","]}
               onSelect={() => ctx.openPanel("settings")}
             >
               {t("editor.top.settingsAction")}
@@ -205,7 +213,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             {ctx.isOwner ? (
               <DropdownMenuItem
                 icon={<History />}
-                shortcut={[MOD, "⌥", "H"]}
+                shortcut={[KEYS.mod, KEYS.alt, "H"]}
                 onSelect={() => ctx.openPanel("history")}
               >
                 {t("editor.top.historyAction")}
@@ -266,6 +274,7 @@ function TitleField() {
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
           if (event.key === "Enter") {
             event.preventDefault();
             event.currentTarget.blur();
@@ -321,7 +330,8 @@ function PersonAvatar({ person, overlap }: { person: Participant; overlap: boole
   const interactive = !person.isSelf;
   const content = (
     <Avatar
-      name={name}
+      // Initials come from the name alone: "Kim (you)" would otherwise show "K(".
+      name={person.name}
       slot={1}
       size="sm"
       style={{ backgroundColor: person.color, color: labelColorFor(person.color) }}

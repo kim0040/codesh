@@ -11,6 +11,7 @@ import {
   type FileEntry,
   FileLimitError,
   fileText,
+  normalizeLineEndings,
   readComments,
   readFiles,
   readMeta,
@@ -178,5 +179,29 @@ describe("comments", () => {
     Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
     expect(readComments(left)).toHaveLength(1);
     expect(readComments(left)).toEqual(readComments(right));
+  });
+});
+
+describe("normalizeLineEndings", () => {
+  it("turns CRLF and lone CR into LF", () => {
+    const doc = new Y.Doc();
+    const text = doc.getText("t");
+    text.insert(0, "a\r\nb\rc\n");
+    expect(normalizeLineEndings(text)).toBe(true);
+    expect(text.toString()).toBe("a\nb\nc\n");
+    expect(normalizeLineEndings(text)).toBe(false);
+  });
+
+  it("converges when two people normalise the same text at once", () => {
+    const a = new Y.Doc();
+    a.getText("t").insert(0, "one\r\ntwo\r\n");
+    const b = new Y.Doc();
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    normalizeLineEndings(a.getText("t"));
+    normalizeLineEndings(b.getText("t"));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    expect(a.getText("t").toString()).toBe("one\ntwo\n");
+    expect(b.getText("t").toString()).toBe("one\ntwo\n");
   });
 });
