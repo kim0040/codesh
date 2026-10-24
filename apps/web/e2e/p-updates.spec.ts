@@ -81,7 +81,7 @@ test("admin: a newer release shows as a badge and an Updates section with plain-
 
     await panel.getByTestId("update-check").click();
     await expect(panel.getByTestId("update-status")).toContainText(
-      "Can't check: no internet connection",
+      "Cannot check: no internet connection",
     );
     await expect(panel).toContainText("1.2.0");
   } finally {

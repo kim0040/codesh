@@ -595,7 +595,7 @@ for (const databases of ["missing", "rejected"] as const) {
       await page.getByTestId("sign-out").click();
       await page.waitForURL((url) => url.pathname === "/");
       await page.waitForLoadState("load");
-      await expect(page.getByText("Some offline copies on this device might remain")).toHaveCount(
+      await expect(page.getByText("Some offline copies might remain on this device")).toHaveCount(
         0,
       );
       const check = await owner.context.newPage();
