@@ -32,6 +32,7 @@ const GROUPS: { title: MessageKey; items: Shortcut[] }[] = [
       { label: "shortcuts.item.format", keys: ["Shift", ALT, "F"] },
       { label: "shortcuts.item.undo", keys: [MOD, "Z"] },
       { label: "shortcuts.item.moveLine", keys: [ALT, "↑ / ↓"] },
+      { label: "shortcuts.item.leaveEditor", keys: ["Esc", "Tab"] },
     ],
   },
 ];

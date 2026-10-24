@@ -72,11 +72,15 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
   const t = useT();
   const [value, setValue] = useState("");
   const [invalid, setInvalid] = useState(false);
+  const [empty, setEmpty] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!value.trim()) return;
+    if (!value.trim()) {
+      setEmpty(true);
+      return;
+    }
     setBusy(true);
     setInvalid(false);
     try {
@@ -107,7 +111,13 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
         </h1>
         <Field
           label={t("admin.login.tokenLabel")}
-          error={invalid ? t("admin.login.invalid") : undefined}
+          error={
+            invalid
+              ? t("admin.login.invalid")
+              : empty && !value.trim()
+                ? t("admin.login.required")
+                : undefined
+          }
         >
           <Input
             autoFocus
@@ -123,7 +133,6 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
           variant="primary"
           loading={busy}
           loadingLabel={t("common.loading")}
-          disabled={!value.trim()}
           data-testid="admin-login"
         >
           {t("admin.login.action")}
@@ -425,7 +434,7 @@ function SettingsForm({ token, initial }: { token: string; initial: Settings }) 
                       ),
                     })
                   }
-                  className="w-full rounded-md border border-line-control bg-panel p-2 font-mono text-caption outline-none focus:border-accent-text"
+                  className="w-full rounded-md border border-line-control bg-panel p-2 font-mono text-caption focus:border-accent-text"
                 />
               </Field>
               <Button

@@ -75,10 +75,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
       <TitleField />
 
       {ctx.readOnly ? (
-        <Badge
-          tone={ctx.state.locked ? "warning" : "neutral"}
-          className="hidden shrink-0 sm:inline-flex"
-        >
+        <Badge tone={ctx.state.locked ? "warning" : "neutral"} className="shrink-0 max-sm:hidden">
           <Eye aria-hidden="true" className="size-3" />
           {ctx.state.locked ? t("status.locked") : t("status.readOnly")}
         </Badge>
@@ -118,7 +115,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
               onClick={() =>
                 ctx.panel.name === "history" ? ctx.closePanel() : ctx.openPanel("history")
               }
-              className="hidden sm:inline-flex"
+              className="max-sm:hidden"
               data-testid="history-button"
             >
               <History />
@@ -130,7 +127,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
           <IconButton
             aria-label={t("editor.top.settingsAction")}
             onClick={() => ctx.openPanel("settings")}
-            className="hidden sm:inline-flex"
+            className="max-sm:hidden"
             data-testid="settings-button"
           >
             <Settings />
@@ -259,6 +256,7 @@ function TitleField() {
   }
   return (
     <div className="min-w-0 flex-1 sm:max-w-md sm:flex-none sm:basis-80">
+      <h1 className="sr-only">{ctx.meta.title || t("editor.top.titlePlaceholder")}</h1>
       <input
         value={value}
         aria-label={t("editor.top.titleLabel")}
@@ -277,7 +275,7 @@ function TitleField() {
           }
         }}
         data-testid="title"
-        className="h-8 w-full truncate rounded-md border border-transparent bg-transparent px-2 text-body-sm font-semibold text-fg outline-none placeholder:font-normal placeholder:text-fg-3 hover:border-line focus:border-accent-text focus:bg-bg coarse:h-11 coarse:text-base"
+        className="h-8 w-full truncate rounded-md border border-transparent bg-transparent px-2 text-body-sm font-semibold text-fg placeholder:font-normal placeholder:text-fg-3 hover:border-line focus:border-accent-text focus:bg-bg coarse:h-11 coarse:text-base"
       />
       {tooLong ? (
         <p id="title-error" role="alert" className="sr-only">

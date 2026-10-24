@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { Dialog as DialogPrimitive, VisuallyHidden } from "radix-ui";
 import type { ComponentProps, ReactNode } from "react";
 import { cx } from "../lib/cx.js";
+import { useFocusReturn } from "../lib/focus-return.js";
 import { DialogDescription, DialogOverlay, DialogTitle } from "./dialog.js";
 import { IconButton } from "./icon-button.js";
 
@@ -42,8 +43,11 @@ export function SheetContent({
   container,
   className,
   children,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: SheetContentProps) {
+  const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
   return (
     <DialogPrimitive.Portal container={container}>
       <DialogOverlay />
@@ -55,6 +59,8 @@ export function SheetContent({
         )}
         {...(description ? {} : { "aria-describedby": undefined })}
         {...props}
+        onOpenAutoFocus={focusReturn.onOpenAutoFocus}
+        onCloseAutoFocus={focusReturn.onCloseAutoFocus}
       >
         {side === "bottom" ? (
           <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 rounded-full bg-line-strong" />

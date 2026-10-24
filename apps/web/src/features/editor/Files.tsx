@@ -269,10 +269,10 @@ export function FileTabs({
 }) {
   const t = useT();
   const ctx = useEditor();
-  const listRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLFieldSetElement>(null);
   const multi = ctx.files.length > 1;
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLFieldSetElement>) => {
     const index = ctx.files.findIndex((file) => file.id === ctx.activeFile.id);
     let next = -1;
     if (event.key === "ArrowRight") next = (index + 1) % ctx.files.length;
@@ -300,12 +300,11 @@ export function FileTabs({
       >
         <PanelLeft />
       </IconButton>
-      <div
+      <fieldset
         ref={listRef}
-        role="tablist"
         aria-label={t("editor.files.title")}
         onKeyDown={onKeyDown}
-        className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto"
+        className="m-0 flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto p-0"
       >
         {ctx.files.map((file) => {
           const selected = file.id === ctx.activeFile.id;
@@ -321,10 +320,9 @@ export function FileTabs({
             >
               <button
                 type="button"
-                role="tab"
                 data-file={file.id}
-                aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
+                aria-current={selected || undefined}
+                title={file.path}
                 ref={selected ? revealTab : undefined}
                 draggable
                 onDragStart={(event) => setFileDrag(event, file.id)}
@@ -345,7 +343,7 @@ export function FileTabs({
             </div>
           );
         })}
-      </div>
+      </fieldset>
       {!ctx.readOnly ? (
         <IconButton
           aria-label={t("editor.files.newAction")}
@@ -386,6 +384,7 @@ export function FileTree({ ops }: { ops: FileOps }) {
             type="button"
             style={pad}
             aria-current={selected || undefined}
+            title={file.path}
             draggable
             onDragStart={(event) => setFileDrag(event, file.id)}
             onClick={() => ctx.setActiveFileId(file.id)}
@@ -412,6 +411,7 @@ export function FileTree({ ops }: { ops: FileOps }) {
             type="button"
             style={pad}
             aria-expanded={!closed}
+            title={node.path}
             onClick={() => toggle(node.path)}
             className="flex h-8 min-w-0 flex-1 items-center gap-1 rounded-md pe-1 text-start text-body-sm text-fg-2 hover:bg-fill-hover coarse:h-10"
           >

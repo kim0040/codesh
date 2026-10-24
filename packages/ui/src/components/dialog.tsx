@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { Dialog as DialogPrimitive, VisuallyHidden } from "radix-ui";
 import type { ComponentProps, ReactNode } from "react";
 import { cx } from "../lib/cx.js";
+import { useFocusReturn } from "../lib/focus-return.js";
 import { IconButton } from "./icon-button.js";
 
 export const Dialog = DialogPrimitive.Root;
@@ -56,7 +57,7 @@ export interface DialogContentProps
 const widths = { sm: "max-w-sm", md: "max-w-md", lg: "max-w-xl" } as const;
 
 /**
- * Modal dialog: focus is trapped, Escape closes, focus returns to the trigger. Sized in rem with a
+ * Modal dialog: focus is trapped, Escape closes, focus returns to the trigger or, when opened from code, to the element that had it. Sized in rem with a
  * 1rem margin so it fits a 320px screen; the body scrolls if the content is taller than the screen.
  */
 export function DialogContent({
@@ -69,8 +70,11 @@ export function DialogContent({
   container,
   className,
   children,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: DialogContentProps) {
+  const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
   return (
     <DialogPrimitive.Portal container={container}>
       <DialogOverlay />
@@ -82,6 +86,8 @@ export function DialogContent({
         )}
         {...(description ? {} : { "aria-describedby": undefined })}
         {...props}
+        onOpenAutoFocus={focusReturn.onOpenAutoFocus}
+        onCloseAutoFocus={focusReturn.onCloseAutoFocus}
       >
         <div className="flex flex-col gap-1 px-5 pt-5">
           {hideTitle ? (

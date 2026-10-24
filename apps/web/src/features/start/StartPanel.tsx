@@ -258,7 +258,7 @@ function Recent() {
                 <LanguageBadge
                   name={language?.name ?? share.language}
                   color={language?.color ?? "#8b949e"}
-                  className="hidden sm:inline-flex"
+                  className="max-sm:hidden"
                 />
                 <span className="shrink-0 text-caption text-fg-3">
                   {formatRelativeTime(locale, new Date(share.updatedAt).getTime() - Date.now())}
