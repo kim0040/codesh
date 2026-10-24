@@ -5,8 +5,8 @@ import { type FormEvent, useState } from "react";
 import { useT } from "../../lib/i18n";
 import { StatusScreen } from "../app/StatusScreen";
 
-const homeLink = (label: string) => (
-  <Button asChild variant="primary">
+const homeLink = (label: string, variant: "primary" | "secondary" = "primary") => (
+  <Button asChild variant={variant}>
     <Link to="/">{label}</Link>
   </Button>
 );
@@ -37,7 +37,7 @@ export function ExpiredScreen() {
           <Link to="/new">{t("conn.expired.newAction")}</Link>
         </Button>
       }
-      secondaryAction={homeLink(t("error.page.homeAction"))}
+      secondaryAction={homeLink(t("error.page.homeAction"), "secondary")}
     />
   );
 }
@@ -87,7 +87,7 @@ export function LoadFailedScreen({
           {t("common.retry")}
         </Button>
       }
-      secondaryAction={homeLink(t("error.page.homeAction"))}
+      secondaryAction={homeLink(t("error.page.homeAction"), "secondary")}
     />
   );
 }
@@ -134,9 +134,14 @@ export function PinGate({
   const t = useT();
   const [pin, setPin] = useState("");
   const [shown, setShown] = useState(false);
+  const [empty, setEmpty] = useState(false);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (pin) onSubmit(pin);
+    if (!pin) {
+      setEmpty(true);
+      return;
+    }
+    onSubmit(pin);
   };
   return (
     <main id="main" className="grid min-h-dvh place-items-center px-4 py-12">
@@ -153,7 +158,15 @@ export function PinGate({
         </div>
         <Field
           label={t("pin.label")}
-          error={rateLimited ? t("pin.tooMany") : invalid ? t("pin.invalid") : undefined}
+          error={
+            rateLimited
+              ? t("pin.tooMany")
+              : invalid
+                ? t("pin.invalid")
+                : empty && !pin
+                  ? t("pin.required")
+                  : undefined
+          }
         >
           <Input
             autoFocus
@@ -174,13 +187,7 @@ export function PinGate({
             />
             {t("pin.show")}
           </label>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={busy}
-            loadingLabel={t("common.loading")}
-            disabled={!pin}
-          >
+          <Button type="submit" variant="primary" loading={busy} loadingLabel={t("common.loading")}>
             {t("pin.submitAction")}
           </Button>
         </div>

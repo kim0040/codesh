@@ -31,6 +31,7 @@ import { copyAll, downloadFile, downloadZip, looksLikeSecret } from "./actions";
 import { EditorBanners } from "./banners";
 import { CommentsPanel } from "./CommentsPanel";
 import { useEditor } from "./context";
+import { showAloneHint } from "./doc-info";
 import { collectDroppedFiles } from "./dropped-files";
 import { EditorPane } from "./EditorPane";
 import { FileTabs, FileTree, useFileOps } from "./Files";
@@ -49,7 +50,8 @@ function AloneHint() {
   const t = useT();
   const ctx = useEditor();
   const length = useStore(ctx.info).length;
-  if (ctx.participants.length > 1 || length > 0 || ctx.readOnly) return null;
+  if (!showAloneHint({ participants: ctx.participants.length, length, readOnly: ctx.readOnly }))
+    return null;
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
       <div className="pointer-events-auto max-w-sm rounded-xl border border-line bg-panel p-3 shadow-2">

@@ -11,9 +11,8 @@ import {
   Input,
   LanguageBadge,
   Skeleton,
-  Tabs,
-  TabsList,
-  TabsTrigger,
+  ToggleGroup,
+  ToggleGroupItem,
   toast,
 } from "@codesh/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -100,13 +99,17 @@ export function MySharesPage() {
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Tabs value={filter} onValueChange={(value) => setFilter(value as Filter)}>
-          <TabsList aria-label={t("myshares.title")}>
-            <TabsTrigger value="all">{t("myshares.tab.all")}</TabsTrigger>
-            <TabsTrigger value="saved">{t("myshares.tab.saved")}</TabsTrigger>
-            <TabsTrigger value="owned">{t("myshares.tab.owned")}</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <ToggleGroup label={t("myshares.title")}>
+          <ToggleGroupItem pressed={filter === "all"} onClick={() => setFilter("all")}>
+            {t("myshares.tab.all")}
+          </ToggleGroupItem>
+          <ToggleGroupItem pressed={filter === "saved"} onClick={() => setFilter("saved")}>
+            {t("myshares.tab.saved")}
+          </ToggleGroupItem>
+          <ToggleGroupItem pressed={filter === "owned"} onClick={() => setFilter("owned")}>
+            {t("myshares.tab.owned")}
+          </ToggleGroupItem>
+        </ToggleGroup>
         <div className="min-w-48 flex-1 sm:max-w-xs sm:flex-none">
           <Input
             type="search"

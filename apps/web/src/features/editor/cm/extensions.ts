@@ -128,6 +128,9 @@ export async function keymapExtension(mode: Keymap): Promise<Extension> {
 }
 
 /** Always-on behaviour that does not depend on preferences. */
+/** Id of the visually hidden note that explains how to leave the editor with the keyboard. */
+export const EDITOR_HINT_ID = "editor-hint";
+
 export function baseExtensions(ariaLabel: string): Extension {
   return [
     drawSelection(),
@@ -142,6 +145,7 @@ export function baseExtensions(ariaLabel: string): Extension {
     EditorState.allowMultipleSelections.of(true),
     EditorView.contentAttributes.of({
       "aria-label": ariaLabel,
+      "aria-describedby": EDITOR_HINT_ID,
       autocapitalize: "off",
       autocorrect: "off",
       spellcheck: "false",

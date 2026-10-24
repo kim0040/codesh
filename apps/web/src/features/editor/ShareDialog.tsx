@@ -605,7 +605,7 @@ function AccessTab() {
               placeholder={access.hasPin ? "••••" : ""}
               data-testid="pin-set-input"
             />
-            <Button size="sm" onClick={submitPin} disabled={!pin} data-testid="pin-set">
+            <Button size="sm" onClick={submitPin} data-testid="pin-set">
               {t("share.dialog.access.pinSetAction")}
             </Button>
             {access.hasPin ? (

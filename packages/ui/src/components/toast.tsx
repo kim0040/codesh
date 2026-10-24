@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { cx } from "../lib/cx.js";
+import { DEFAULT_TOAST_DURATION, toastDuration } from "../lib/toast-duration.js";
 import { IconButton } from "./icon-button.js";
 
 export type ToastTone = "neutral" | "success" | "warning" | "danger" | "info";
@@ -18,7 +19,10 @@ export interface ToastOptions {
   title: ReactNode;
   description?: ReactNode;
   tone?: ToastTone;
-  /** Milliseconds before auto-dismiss; the timer pauses while the stack is hovered or focused. */
+  /**
+   * Milliseconds before auto-dismiss; the timer pauses while the stack is hovered or focused.
+   * Defaults to 5 s, and to "until dismissed" for `danger` toasts and toasts with an action.
+   */
   duration?: number;
   action?: {
     label: string;
@@ -104,7 +108,7 @@ export function Toaster({ label, closeLabel, className }: ToasterProps) {
   const frontHeight = frontId ? (heights[frontId] ?? 64) : 64;
 
   return (
-    <ToastPrimitive.Provider label={label} swipeDirection="right" duration={5000}>
+    <ToastPrimitive.Provider label={label} swipeDirection="right" duration={DEFAULT_TOAST_DURATION}>
       {visible.map((item, index) => {
         const n = visible.length - 1 - index;
         const newer = visible.slice(index + 1);
@@ -168,7 +172,7 @@ function ToastView({
   return (
     <ToastPrimitive.Root
       open={item.open}
-      duration={item.duration}
+      duration={toastDuration(item)}
       onOpenChange={(open) => {
         if (open) return;
         toast.dismiss(item.id);

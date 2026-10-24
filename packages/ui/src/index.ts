@@ -19,6 +19,7 @@ export * from "./components/spinner.js";
 export * from "./components/switch.js";
 export * from "./components/tabs.js";
 export * from "./components/toast.js";
+export * from "./components/toggle-group.js";
 export * from "./components/tooltip.js";
 export { cx } from "./lib/cx.js";
 export { initialsOf } from "./lib/initials.js";

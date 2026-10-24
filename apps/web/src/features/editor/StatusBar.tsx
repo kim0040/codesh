@@ -131,6 +131,7 @@ function LanguagePicker({ label, color }: { label: string; color: string }) {
       <PopoverContent
         align="end"
         side="top"
+        aria-label={t("status.language.label")}
         className="flex w-72 max-w-[calc(100vw-1rem)] flex-col gap-2 p-2"
       >
         <input
@@ -141,7 +142,7 @@ function LanguagePicker({ label, color }: { label: string; color: string }) {
           onChange={(event) => setQuery(event.target.value)}
           aria-label={t("status.language.searchLabel")}
           placeholder={t("status.language.searchPlaceholder")}
-          className="h-8 rounded-md border border-line-control bg-panel px-2 text-body-sm outline-none focus:border-accent-text coarse:h-11 coarse:text-base"
+          className="h-8 rounded-md border border-line-control bg-panel px-2 text-body-sm focus:border-accent-text coarse:h-11 coarse:text-base"
         />
         <ul className="max-h-64 overflow-y-auto" aria-label={t("status.language.label")}>
           {!query ? (

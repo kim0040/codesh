@@ -12,8 +12,8 @@ export interface EmptyStateProps {
   secondaryAction?: ReactNode;
   /** `danger` for errors the user can retry. */
   tone?: "neutral" | "danger";
-  /** Heading level for the title. Defaults to h2. */
-  headingLevel?: 2 | 3 | 4;
+  /** Heading level for the title. Defaults to h2; full-page screens use 1. */
+  headingLevel?: 1 | 2 | 3 | 4;
   size?: "md" | "sm";
   className?: string;
 }

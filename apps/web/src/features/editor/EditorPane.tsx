@@ -10,11 +10,12 @@ import { fileText } from "../../lib/collab/model";
 import type { DocSession } from "../../lib/collab/session";
 import { useT } from "../../lib/i18n";
 import { usePrefs } from "../../lib/prefs";
-import { createStore, type Store } from "../../lib/store";
+import type { Store } from "../../lib/store";
 import { awarenessBridge } from "./cm/awareness-bridge";
 import { commentsExtension } from "./cm/comments-ext";
 import {
   baseExtensions,
+  EDITOR_HINT_ID,
   editingExtension,
   fontExtension,
   gutterExtension,
@@ -26,19 +27,8 @@ import {
 } from "./cm/extensions";
 import { remoteCursors } from "./cm/remote-cursors";
 import { searchPhrases } from "./cm/search-phrases";
+import { type EditorInfo, setInitialLength } from "./doc-info";
 import "./editor.css";
-
-export interface EditorInfo {
-  line: number;
-  col: number;
-  selected: number;
-  length: number;
-  bytes: number;
-}
-
-export function createInfoStore(): Store<EditorInfo> {
-  return createStore<EditorInfo>({ line: 1, col: 1, selected: 0, length: 0, bytes: 0 });
-}
 
 export interface EditorPaneProps {
   session: DocSession;
@@ -176,6 +166,7 @@ export function EditorPane(props: EditorPaneProps) {
       }),
     });
     viewRef.current = view;
+    setInitialLength(info, view.state.doc.length);
     measureSize(view);
     setReady(true);
     return () => {
@@ -250,12 +241,17 @@ export function EditorPane(props: EditorPaneProps) {
   }, [ready, support, viewRef]);
 
   return (
-    <div
-      ref={hostRef}
-      data-testid="editor"
-      data-readonly={readOnly || undefined}
-      className="cm-host"
-      style={{ backgroundColor: theme.background }}
-    />
+    <>
+      <p id={EDITOR_HINT_ID} className="sr-only">
+        {t("a11y.editorHint")}
+      </p>
+      <div
+        ref={hostRef}
+        data-testid="editor"
+        data-readonly={readOnly || undefined}
+        className="cm-host"
+        style={{ backgroundColor: theme.background }}
+      />
+    </>
   );
 }

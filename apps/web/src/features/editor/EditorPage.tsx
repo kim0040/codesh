@@ -12,7 +12,7 @@ import { useSseEvent } from "../../lib/events";
 import { useT } from "../../lib/i18n";
 import { guestNumber } from "../../lib/session";
 import { EditorContext, type EditorCtx, type PanelName, type PanelState } from "./context";
-import { createInfoStore } from "./EditorPane";
+import { createInfoStore } from "./doc-info";
 import { EditorShell } from "./EditorShell";
 import {
   DeniedScreen,

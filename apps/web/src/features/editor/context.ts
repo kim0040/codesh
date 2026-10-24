@@ -6,7 +6,7 @@ import type { Participant } from "../../lib/collab/hooks";
 import type { DocMetaView, FileEntry } from "../../lib/collab/model";
 import type { DocSession, SessionState } from "../../lib/collab/session";
 import type { Store } from "../../lib/store";
-import type { EditorInfo } from "./EditorPane";
+import type { EditorInfo } from "./doc-info";
 
 export type PanelName =
   | "share"

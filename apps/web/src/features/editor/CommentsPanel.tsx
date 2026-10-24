@@ -80,6 +80,7 @@ function CommentsBody() {
   const [showResolved, setShowResolved] = useState(false);
   const [draft] = useState<Draft | null>(() => (ctx.readOnly ? null : captureDraft(ctx)));
   const [body, setBody] = useState("");
+  const [missing, setMissing] = useState(false);
   const focusId = ctx.panel.arg;
   const focusRef = useRef<HTMLLIElement>(null);
 
@@ -94,7 +95,11 @@ function CommentsBody() {
 
   const post = () => {
     const text = body.trim();
-    if (!text || !draft) return;
+    if (!draft) return;
+    if (!text) {
+      setMissing(true);
+      return;
+    }
     addComment(ctx.doc, {
       id: newCommentId(),
       fileId: draft.fileId,
@@ -154,7 +159,12 @@ function CommentsBody() {
             maxLength={MAX_COMMENT_LENGTH}
             rows={3}
             placeholder={t("comment.placeholder")}
-            onChange={(event) => setBody(event.target.value)}
+            aria-invalid={missing || undefined}
+            aria-describedby={missing ? "comment-error" : undefined}
+            onChange={(event) => {
+              setBody(event.target.value);
+              setMissing(false);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
@@ -162,13 +172,17 @@ function CommentsBody() {
               }
             }}
             data-testid="comment-input"
-            className="w-full resize-y rounded-md border border-line-control bg-panel p-2 text-body-sm outline-none focus:border-accent-text coarse:text-base"
+            className="w-full resize-y rounded-md border border-line-control bg-panel p-2 text-body-sm focus:border-accent-text aria-invalid:border-danger-text coarse:text-base"
           />
+          {missing ? (
+            <p id="comment-error" role="alert" className="text-caption text-danger-text">
+              {t("comment.bodyRequired")}
+            </p>
+          ) : null}
           <Button
             type="submit"
             variant="primary"
             size="sm"
-            disabled={!body.trim()}
             className="self-end"
             data-testid="comment-post"
           >

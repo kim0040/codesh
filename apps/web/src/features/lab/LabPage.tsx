@@ -132,6 +132,7 @@ function Student({ lab }: { lab: GetLabResponse }) {
   const navigate = useNavigate();
   const session = useSession();
   const [name, setName] = useState(session.data?.name ?? "");
+  const [missing, setMissing] = useState(false);
   const own = lab.students[0];
 
   useEffect(() => {
@@ -156,6 +157,7 @@ function Student({ lab }: { lab: GetLabResponse }) {
         onSubmit={(event) => {
           event.preventDefault();
           if (name.trim()) join.mutate();
+          else setMissing(true);
         }}
       >
         <div className="flex flex-col gap-1">
@@ -167,7 +169,10 @@ function Student({ lab }: { lab: GetLabResponse }) {
             <p className="text-body-sm text-warning-text">{t("lab.student.locked")}</p>
           ) : null}
         </div>
-        <Field label={t("identity.nameLabel")}>
+        <Field
+          label={t("identity.nameLabel")}
+          error={missing && !name.trim() ? t("identity.nameRequired") : undefined}
+        >
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -179,7 +184,6 @@ function Student({ lab }: { lab: GetLabResponse }) {
         <Button
           type="submit"
           variant="primary"
-          disabled={!name.trim()}
           loading={join.isPending}
           loadingLabel={t("common.loading")}
           data-testid="lab-join"
@@ -481,7 +485,7 @@ function CellBody({
               ? t("lab.grid.offline")
               : status === "online"
                 ? t("lab.grid.online", { count: 1 })
-                : null}
+                : t("lab.grid.idle")}
           </span>
         }
         actions={

@@ -41,7 +41,6 @@ export function EventToasts() {
       title,
       description: invite.note ? `${detail} — ${invite.note}` : detail,
       tone: "info",
-      duration: 15_000,
       action: {
         label: t("invite.acceptAction"),
         altText: t("invite.acceptAction"),
@@ -65,7 +64,6 @@ export function EventToasts() {
       title,
       description: broadcast.title || t("common.untitled"),
       tone: "info",
-      duration: 20_000,
       action: {
         label: t("invite.broadcast.joinAction"),
         altText: t("invite.broadcast.joinAction"),
@@ -82,7 +80,6 @@ export function EventToasts() {
     toast({
       title,
       tone: "warning",
-      duration: 30_000,
       action: {
         label: t("approval.approveAction"),
         altText: t("approval.approveAction"),

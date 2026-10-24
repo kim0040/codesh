@@ -45,8 +45,9 @@ export function Input({
         {...field}
         {...props}
         className={cx(
-          // 16px on touch screens stops iOS Safari from zooming the page on focus.
-          "min-w-0 flex-1 bg-transparent text-body-sm outline-none placeholder:text-fg-3 coarse:text-base",
+          // 16px on touch screens stops iOS Safari from zooming the page on focus. `w-0` drops the
+          // input's intrinsic width (about 276px) so the frame can shrink inside a 320px screen.
+          "w-0 min-w-0 flex-1 bg-transparent text-body-sm outline-none placeholder:text-fg-3 coarse:text-base",
           "disabled:cursor-not-allowed",
           className,
         )}
