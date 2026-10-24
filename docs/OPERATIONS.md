@@ -516,7 +516,7 @@ API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1
 3. 설치 파일을 바꾸지 않은 채 새 이미지를 모두 pull하고 `IMAGES`의 digest와 비교합니다. 다운로드·검증 중에는 기존 서버가 계속 쓰기를 받습니다. 실패하면 서비스는 그대로 유지됩니다.
 4. 현재 파일·`.env`·문서·TLS 설정을 `state/rollback/`에 보관하고 maintenance에 들어갑니다. Caddy를 먼저 멈추고 API·Collab을 정지합니다. Collab의 SIGTERM flush와 정상 종료를 기다린 뒤 `backup.sh`로 백업하므로 다운로드 중 받은 쓰기와 종료 직전 편집도 백업에 들어갑니다.
 5. 파일·설정을 교체하고 새 앱을 기동합니다. Caddy는 정지한 채 컨테이너 내부 `/healthz`·`/readyz`의 2xx 응답을 확인합니다(`UPDATE_HEALTH_TIMEOUT`, 기본 180초; 각 요청도 남은 시간으로 제한). 검증 후 ingress를 엽니다.
-6. 파일 복사·rename 오류나 HUP/INT/TERM, 기동 실패는 자동 복구로 이어집니다(15.7). SIGKILL·전원 차단처럼 trap이 실행되지 못한 경우에는 `state/update.json`과 `state/rollback/`을 확인하고 수동 복구합니다.
+6. 검증 전 파일 복사·rename 오류나 HUP/INT/TERM, 기동 실패는 자동 복구로 이어집니다(15.7). 앱 검증을 통과한 뒤 ingress 활성화가 실패하면 이미 승인된 쓰기를 보존하기 위해 현재 파일·DB를 유지하고 쓰기를 닫은 채 `failed`로 기록합니다. 로그를 확인한 뒤 `docker compose up -d`로 재개합니다. SIGKILL·전원 차단처럼 trap이 실행되지 못한 경우에는 `state/update.json`과 `state/rollback/`을 확인하고 수동 복구합니다.
 
 모든 실행은 `state/update.log`(1 MiB에서 교체, 이전 파일 3개 보관)에 남고, 결과는 `state/update.json`에 기록되어 콘솔에 표시됩니다. 비밀값은 명령행 인자로 전달하지 않으며, GHCR 공개 이미지는 로그인 없이 받습니다. 이전 버전의 이미지는 되돌리기를 위해 남겨 두므로 여유 공간이 부족하면 확인 후 `docker image prune`으로 정리하십시오.
 

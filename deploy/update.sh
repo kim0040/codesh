@@ -524,8 +524,13 @@ update() {
   install_files "$CANDIDATE"
   DB_TOUCHED=1
   healthy || fail failed "$TARGET did not get healthy"
-  open_ingress || fail failed "could not start ingress"
+  # Commit before exposing the verified app. An ingress start can partly succeed and accept
+  # writes before reporting failure; restoring the old backup after that would lose those writes.
   TRANSACTION=0
+  if ! open_ingress; then
+    stop_writes || say "could not confirm writers stopped; inspect docker compose ps" >&2
+    fail failed "app verified but ingress failed; current files and DB retained; inspect logs and run docker compose up -d"
+  fi
   record updated "$CURRENT" "$TARGET" ""
   say "codesh $TARGET is running (backup: ${BACKUP:-none})"
 }

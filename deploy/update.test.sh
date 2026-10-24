@@ -67,6 +67,10 @@ if [ "$1" = compose ]; then
       [[ "$*" != *collab* ]] || printf 'shutdown-flushed\n' >>"$FAKE_DB" ;;
     ps) printf 'collab-fixture\n' ;;
     up)
+      if [ "$version" = "${FAKE_INGRESS_FAIL:-none}" ] && [[ " $* " != *' api '* ]]; then
+        printf 'accepted-at-ingress\n' >>"$FAKE_DB"
+        exit 1
+      fi
       printf 'up:%s:%s\n' "$version" "$*" >>"$DOCKER_CALLS"
       if [[ " $* " == *' api '* ]]; then
         if [ "$version" = "${FAKE_UNHEALTHY:-none}" ]; then
@@ -140,6 +144,7 @@ release 1.0.4
 release 1.0.5
 release 1.0.6 mongo-change
 release 1.1.0
+release 1.1.1
 release 2.0.0
 releases_json() {
   printf '['
@@ -441,5 +446,14 @@ cp -r "$I"/. "$F/checkout/deploy/"
 (cd "$F/checkout/deploy" && ./update.sh --yes) >"$F/run.log" 2>&1 && fail "updated a source checkout"
 grep -q 'source checkout' "$F/run.log" || fail "checkout message"
 ok "refused with the git pull / docker compose build hint"
+
+step "a partly opened ingress must not trigger a DB rollback that discards accepted writes"
+: >"$DOCKER_CALLS"
+FAKE_INGRESS_FAIL=1.1.1 run ./update.sh --version 1.1.1 --yes && fail "failed ingress reported success"
+[ "$(envv CODESH_VERSION)" = 1.1.1 ] || fail "verified version was put back after ingress opened"
+grep -q '^accepted-at-ingress$' "$FAKE_DB" || fail "write accepted while ingress opened was lost"
+grep -q '^restored$' "$DOCKER_CALLS" && fail "restored an old DB after ingress could accept writes"
+status | grep -q 'current files and DB retained' || fail "ingress recovery state unclear"
+ok "ingress activation failure stops writers and retains current DB and files for recovery"
 
 printf '\nupdate.test.sh: all checks passed\n'

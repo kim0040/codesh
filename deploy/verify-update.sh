@@ -10,8 +10,8 @@
 # kept, status in the admin API); then tries 1.0.2 and checks the rollback (1.0.1 runs again with
 # the database of just before). Own registry, compose project, ports and subnet; all removed at
 # the end unless KEEP=1. Needs curl, python3 and unzip, about 3 GiB free for docker and 2 GiB in
-# VERIFY_DIR (registry data and bundles live there, not in the docker root). VERIFY_PRUNE_CACHE=1
-# drops the build cache after the builds, for small shared hosts.
+# VERIFY_DIR (registry data and bundles live there, not in the docker root). VERIFY_REUSE_IMAGES=1
+# uses existing Collab/base Caddy layers on small shared hosts (API and web assets stay current).
 set -euo pipefail
 
 ROOT="$(pwd)"
@@ -96,11 +96,21 @@ for service in api collab caddy mdns; do
   base=""
   if [ "${VERIFY_REUSE_IMAGES:-0}" = 1 ]; then
     case "$service" in
-      api|collab) base="codesh/$service:preview" ;;
+      collab) base="codesh/$service:preview" ;;
       caddy) base="codesh/caddy:preview" ;;
     esac
   fi
-  if [ -n "$base" ]; then docker tag "$base" "$REG/codesh-$name:1.0.0"
+  if [ "$service" = caddy ] && [ -n "$base" ]; then
+    # The preview may predate the update feature. Use this tree's web assets and edge routes.
+    pnpm --filter @codesh/web build >/dev/null
+    node deploy/caddy/csp.mjs
+    mkdir -p "$WORK/build-web"
+    cp Caddyfile.production "$WORK/build-web/Caddyfile"
+    cp -r apps/web/dist "$WORK/build-web/dist"
+    printf 'FROM %s\nRUN rm -rf /srv\nCOPY Caddyfile /etc/caddy/Caddyfile\nCOPY dist /srv\n' "$base" >"$WORK/build-web/Dockerfile"
+    df -h /
+    docker build -q -t "$REG/codesh-$name:1.0.0" "$WORK/build-web" >/dev/null
+  elif [ -n "$base" ]; then docker tag "$base" "$REG/codesh-$name:1.0.0"
   else docker compose --env-file "$BUILD_ENV" --profile mdns -f "$ROOT/deploy/docker-compose.yml" build "$service"; fi
 done
 # The previous version cannot boot against the deliberate schema marker. This detects rollback
@@ -121,6 +131,7 @@ await c.db().collection("update_failure_marker").insertOne({ incompatible: true 
 await c.db().collection("shares").deleteMany({});
 await c.close();
 console.error("new API changed schema and deleted shares, then failed");
+await new Promise(resolve => setTimeout(resolve, 5000));
 process.exit(1);
 BAD
 printf 'FROM %s\nCOPY old-guard.mjs /app/old-guard.mjs\nCMD ["node", "--import", "/opt/tsx/node_modules/tsx/dist/esm/index.mjs", "old-guard.mjs"]\n' "$REG/codesh-api:1.0.0" >"$WORK/build/Dockerfile"
@@ -222,6 +233,22 @@ for _ in $(seq 200); do [ -e "$WORK/gate.started" ] && break; sleep .1; done
 ID3="$(create_data accepted-during-pull)"
 [ -n "$ID3" ] || fail "API did not accept a write while preparing update"
 touch "$WORK/gate.continue"
+# Observe the actual destructive migration before rollback removes its evidence.
+mutated=0
+for _ in $(seq 60); do
+  # shellcheck disable=SC2016 # credentials are read only inside our Mongo container
+  if in_install docker compose exec -T mongo mongosh --quiet --eval '
+    db.getSiblingDB("admin").auth("codesh", process.env.MONGO_INITDB_ROOT_PASSWORD);
+    const app = db.getSiblingDB("codesh");
+    print(app.update_failure_marker.countDocuments({}) > 0 && app.shares.countDocuments({}) === 0 ? "mutated" : "waiting");
+  ' 2>/dev/null | grep -qx mutated; then mutated=1; break; fi
+  sleep .1
+done
+[ "$mutated" = 1 ] || fail "did not observe the new API changing the DB"
+if curl -fsS --max-time 1 "http://127.0.0.1:$P/healthz" >/dev/null 2>&1; then
+  fail "ingress opened while the unverified API had changed the DB"
+fi
+ok "observed new collection and deleted shares with ingress closed, before rollback"
 if wait "$updater"; then fail "update to a broken release succeeded"; fi
 tail -n 8 "$WORK/bad.log"
 grep -q 'rolling back to 1.0.1' "$WORK/bad.log" || fail "no rollback"
