@@ -6,7 +6,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { type Command, matchCommand, useCommands } from "../../lib/commands";
 import { useT } from "../../lib/i18n";
-import { setPaletteOpen, useOverlays } from "../../lib/overlays";
+import { openTemplates, setPaletteOpen, useOverlays } from "../../lib/overlays";
 
 const MAX_RESULTS = 40;
 
@@ -49,6 +49,13 @@ function PaletteBody() {
       { id: "nav.home", label: t("nav.home"), group: t("palette.group.go"), run: go("/") },
       { id: "nav.me", label: t("nav.myShares"), group: t("palette.group.go"), run: go("/me") },
       { id: "nav.new", label: t("share.new"), group: t("palette.group.go"), run: go("/new") },
+      {
+        id: "nav.template",
+        label: t("palette.newFromTemplate"),
+        group: t("palette.group.go"),
+        keywords: t("template.title"),
+        run: openTemplates,
+      },
     ];
     const shareItems: Command[] = (shares.data ?? []).slice(0, 12).map((share) => ({
       id: `share.${share.id}`,

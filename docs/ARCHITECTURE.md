@@ -128,7 +128,7 @@ All bodies and responses are zod schemas in `packages/shared`. Errors: `{error: 
 | `POST /api/shares/:id/save` / `DELETE …/save` | any participant: add/remove from "my shares" (`savedBy`), sets `expiresAt=null` while savedBy non-empty |
 | `GET /api/shares` | my shares (owned ∪ saved), newest first, with language + preview + my `folder` and `tags` |
 | `PUT /api/shares/:id/labels` | a share in my shares: `{folder: string|null, tags: string[]}` (folder 1-60 chars, at most 10 tags of 1-30 chars, trimmed, duplicates removed case-insensitively; empty folder and no tags deletes the entry) → the stored labels |
-| `GET /api/templates` | code templates: built-in ones (`packages/shared/src/templates.ts`, `builtin: true`) followed by `settings.templates`, each `{id, name, language, description, files: [{path, language?, content}], builtin}`. The web app creates a share from one with the normal `POST /api/shares` |
+| `GET /api/templates` | code templates: built-in ones (`packages/shared/src/templates.ts`, `builtin: true`; their `name` and `description` are i18n keys such as `template.java.name`, resolved by the client, while templates from settings carry plain text) followed by `settings.templates`, each `{id, name, language, description, files: [{path, language?, content}], builtin}`. The web app creates a share from one with the normal `POST /api/shares` |
 | `GET /api/settings/public` | `{contact, anonymousTtlHours, historyRetentionDays, maxUploadMB, guestAllowed}` for the intro page and help text; no secrets |
 | `GET /api/codes/:code` | → `{id}` or `{labId}` |
 | `POST /api/shares/:id/kick` | owner `{clientId, ban}` |

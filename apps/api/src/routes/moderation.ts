@@ -41,6 +41,7 @@ export function moderationRoutes(app: App, ctx: Ctx): void {
         const expiresAt = new Date(Date.now() + settings.anonymousTtlHours * 3600 * 1000);
         const unsaved = await ctx.stores.shares.removeSaved(share.id, clientId, expiresAt);
         if (unsaved) await syncExpiry(ctx, unsaved);
+        await ctx.stores.labels.delete(clientId, share.id);
       }
       await ctx.publishPerm(share.id, "kick", clientId);
       await ctx.publishUser(clientId, {

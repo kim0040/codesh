@@ -1,5 +1,13 @@
 import { defineConfig } from "@playwright/test";
-import { API_PORT, BASE_URL, COLLAB_PORT, MONGO_URL, VALKEY_URL, WEB_PORT } from "./e2e/env";
+import {
+  ADMIN_TOKEN,
+  API_PORT,
+  BASE_URL,
+  COLLAB_PORT,
+  MONGO_URL,
+  VALKEY_URL,
+  WEB_PORT,
+} from "./e2e/env";
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
 const shared = { MONGO_URL, VALKEY_URL, COLLAB_SECRET: secret, NODE_ENV: "development" };
@@ -27,6 +35,7 @@ export default defineConfig({
         ...shared,
         PORT: String(API_PORT),
         SESSION_SECRET: secret,
+        ADMIN_TOKEN,
         RATE_LIMIT_API_PER_MIN: "100000",
         RATE_LIMIT_CODE_PER_MIN: "100000",
         RATE_LIMIT_CREATE_PER_MIN: "100000",

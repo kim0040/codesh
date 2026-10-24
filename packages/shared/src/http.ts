@@ -17,6 +17,7 @@ import {
   shareIdSchema,
   uploadIdSchema,
 } from "./ids.js";
+import { shareLabelsViewSchema } from "./labels.js";
 import { settingsSchema } from "./settings.js";
 import { colorSchema, displayNameSchema } from "./user.js";
 
@@ -178,9 +179,13 @@ export const shareListItemSchema = z.object({
   updatedAt: isoDate,
   expiresAt: isoDate.nullable(),
   preview: z.string(),
+  /** The viewer's own folder and tags (§5 `share_labels`); nobody else sees them. */
+  folder: z.string().nullable(),
+  tags: z.array(z.string()),
 });
 export type ShareListItem = z.infer<typeof shareListItemSchema>;
 export const listSharesResponseSchema = z.array(shareListItemSchema);
+export const shareLabelsResponseSchema = shareLabelsViewSchema;
 
 export const codeResolveResponseSchema = z.union([
   z.object({ id: shareIdSchema }),
@@ -301,6 +306,16 @@ export type LdapLoginBody = z.infer<typeof ldapLoginBodySchema>;
 export const getSettingsResponseSchema = settingsSchema;
 export const putSettingsBodySchema = settingsSchema;
 export type PutSettingsBody = z.infer<typeof putSettingsBodySchema>;
+
+/** `GET /api/settings/public`: what the intro page and help text need; no secrets. */
+export const publicSettingsSchema = z.object({
+  contact: z.string(),
+  anonymousTtlHours: z.number().positive(),
+  historyRetentionDays: z.number().int().nonnegative(),
+  maxUploadMB: z.number().positive(),
+  guestAllowed: z.boolean(),
+});
+export type PublicSettings = z.infer<typeof publicSettingsSchema>;
 
 export const auditEntrySchema = z.object({
   at: isoDate,

@@ -5,6 +5,8 @@ import type {
   LabRecord,
   LabStudent,
   Settings,
+  ShareLabelRecord,
+  ShareLabels,
   ShareRecord,
   SnapshotKind,
   SnapshotRecord,
@@ -165,6 +167,21 @@ export interface LabStore {
   deleteExpired(now: Date): Promise<number>;
 }
 
+/** One person's own folder and tags for a share (§5 `share_labels`). */
+export interface LabelStore {
+  get(clientId: string, shareId: string): Promise<ShareLabelRecord | null>;
+  /** Creates or replaces the entry; callers delete instead of storing empty labels. */
+  set(clientId: string, shareId: string, labels: ShareLabels, at: Date): Promise<ShareLabelRecord>;
+  /** False when there was nothing to delete. */
+  delete(clientId: string, shareId: string): Promise<boolean>;
+  /** Every entry of the client, in no particular order. */
+  listForClient(clientId: string): Promise<ShareLabelRecord[]>;
+  /** Removes the entries of every client for the share and returns how many there were. */
+  deleteForShare(shareId: string): Promise<number>;
+  /** Every share id that has at least one entry (used by the sweeper). */
+  shareIds(): Promise<string[]>;
+}
+
 export interface SettingsStore {
   /** Defaults when nothing is stored yet. */
   get(): Promise<Settings>;
@@ -189,6 +206,7 @@ export interface Stores {
   snapshots: SnapshotStore;
   files: FileStore;
   labs: LabStore;
+  labels: LabelStore;
   settings: SettingsStore;
   audit: AuditStore;
 }

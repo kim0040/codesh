@@ -3,12 +3,13 @@ import { formatRelativeTime } from "@codesh/i18n";
 import { Button, EmptyState, LanguageBadge, PinInput, Skeleton, Spinner } from "@codesh/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { History, Plus, Radar, Upload } from "lucide-react";
+import { History, LayoutTemplate, Plus, Radar, Upload } from "lucide-react";
 import { useState } from "react";
 import { api, isApiError } from "../../lib/api";
 import { useEventsSnapshot } from "../../lib/events";
 import { firstLines } from "../../lib/format";
 import { useLocale, useT } from "../../lib/i18n";
+import { openTemplates } from "../../lib/overlays";
 import { collectDroppedFiles } from "../editor/dropped-files";
 import { useCreateShare } from "./use-create-share";
 
@@ -59,6 +60,15 @@ export function StartPanel({ className }: { className?: string }) {
           className="sm:shrink-0"
         >
           {t("share.new")}
+        </Button>
+        <Button
+          size="lg"
+          leading={<LayoutTemplate />}
+          onClick={openTemplates}
+          data-testid="new-from-template"
+          className="sm:shrink-0"
+        >
+          {t("template.startAction")}
         </Button>
         <p className="flex items-center gap-1.5 text-caption text-fg-3">
           <Upload aria-hidden="true" className="size-3.5 shrink-0" />

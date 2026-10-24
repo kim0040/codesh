@@ -84,6 +84,16 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 - 여러 파일 공유를 새로 열거나, 공유 대화상자의 접속자 목록에서 특정 사용자의 아바타 위로 파일을 끌어다 놓으면 해당 사용자에게 파일을 바로 전송할 수 있습니다.
 - 단일 요청당 최대 업로드 용량은 관리자 설정(`maxUploadMB`, 기본 200MB)에 따르며, 코드 텍스트 용량은 문서 한도(`maxDocBytes`, 기본 5MB)를 초과할 수 없습니다.
 
+### 2.9 폴더와 태그로 내 공유 정리하기
+- **내 공유** 화면의 각 공유 카드에서 태그 아이콘(**정리**)을 누르면 폴더 하나와 태그를 최대 10개(태그당 30자)까지 지정할 수 있습니다. 폴더 이름은 60자까지이며, 기존 폴더 중에서 고르거나 새 이름을 입력해 만듭니다. 폴더와 태그는 대소문자를 구분하지 않고 같은 것으로 취급됩니다.
+- 왼쪽 폴더 목록(좁은 화면에서는 상단 버튼 줄)에서 **모든 공유**, 폴더 이름, **폴더 없음**을 골라 목록을 좁히고, 태그 칩을 눌러 다시 좁힐 수 있습니다. 검색어와 함께 사용할 수 있습니다.
+- 폴더와 태그는 **나에게만** 보이며 공유 링크를 가진 다른 사람에게는 전달되지 않습니다. 내가 만들지 않은 공유를 **목록에서 제거**하거나, 차단되거나, 공유가 삭제·만료되면 해당 폴더와 태그도 함께 사라집니다. 내가 만든 공유는 목록에서 제거해도 정리 정보가 유지됩니다.
+
+### 2.10 템플릿으로 시작하기
+- 첫 화면의 **템플릿으로 시작** 버튼 또는 명령 팔레트(`⌘K` / `Ctrl+K`)의 **템플릿으로 새 공유 만들기**로 템플릿 선택 창을 엽니다. 검색창에서 이름이나 언어로 찾고 방향키와 Enter로 고를 수 있으며, 오른쪽(좁은 화면에서는 아래)에서 파일 목록과 미리보기를 확인한 뒤 **공유 만들기**를 누릅니다.
+- 기본 제공 템플릿: Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, HTML·CSS·JS 웹 페이지, Markdown, Bash, 여러 파일로 된 Python 패키지.
+- 관리자가 등록한 조직 전용 템플릿은 **우리 조직** 그룹에 함께 표시됩니다. 템플릿을 고르지 않고 만드는 기존 **새 공유 만들기**는 그대로 동작합니다.
+
 ---
 
 ## 3. 권한 및 접근 제어
@@ -186,7 +196,7 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 ## 6. 자주 묻는 질문 (FAQ)
 
 **Q. 공유는 얼마나 오래 유지되나요?**  
-저장하지 않은 공유는 마지막 활동으로부터 24시간(관리자 설정)이 지나면 자동 만료되어 삭제됩니다. 상단 바의 **내 공유에 저장**을 눌러 보관한 공유는 만료되지 않고 계속 유지됩니다.
+저장하지 않은 공유는 마지막 활동으로부터 관리자가 정한 시간(기본 24시간, 소개 페이지 안내 문구에 현재 값이 표시됩니다)이 지나면 자동 만료되어 삭제됩니다. 상단 바의 **내 공유에 저장**을 눌러 보관한 공유는 만료되지 않고 계속 유지됩니다.
 
 **Q. 내가 작성한 코드는 사내에서 누가 볼 수 있나요?**  
 공유 링크나 6자리 코드를 가진 사람은 누구나 열람할 수 있습니다. 접근을 제한하려면 PIN 잠금이나 입장 승인(대기실) 기능을 사용하세요. 과거 편집 이력은 소유자만 볼 수 있으며 지운 내용은 다른 참여자에게 전송되지 않습니다.
@@ -232,6 +242,12 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 - **History & Restore**: Owners can inspect timeline snapshots, play back edits at 1x/2x/4x, compare a version with the current text, and restore it.
 - **Download**: Download single files with matching extensions or export all files as a `.zip` archive.
 - **Drag & Drop**: Drop files, folders, or `.zip` archives directly into the editor.
+
+### Organizing & Templates
+- **Folders and tags**: In **My shares**, use the tag icon (**Organize**) on a share to give it one folder (up to 60 characters) and up to 10 tags (30 characters each). Pick an existing folder or type a new name; names match regardless of letter case.
+- **Filtering**: Choose **All shares**, a folder or **No folder** in the folder list (a row of buttons on narrow screens), then narrow further with tag chips and the search box.
+- **Private to you**: Folders and tags are stored per person and never shown to others. They are removed when you unsave a share you do not own, when you are banned, or when the share is deleted or expires.
+- **Templates**: Press **Start from a template** on the home page, or run **New share from template** in the command palette (`⌘K` / `Ctrl+K`). Search, pick with the arrow keys and Enter, check the file list and preview, then **Create share**. Built-in templates cover Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, an HTML + CSS + JS page, Markdown, Bash and a multi-file Python package. Templates added by the administrator appear under **Your organization**.
 
 ### Access Control
 - **View-Only Mode**: Default to read-only access. Share the separate edit link with collaborators who need edit rights.

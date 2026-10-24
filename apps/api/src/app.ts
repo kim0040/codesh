@@ -18,6 +18,7 @@ import { eventRoutes } from "./routes/events.js";
 import { historyRoutes } from "./routes/history.js";
 import { labRoutes } from "./routes/labs.js";
 import { moderationRoutes } from "./routes/moderation.js";
+import { organizeRoutes } from "./routes/organize.js";
 import { sessionRoutes } from "./routes/session.js";
 import { shareRoutes } from "./routes/shares.js";
 import { socialRoutes } from "./routes/social.js";
@@ -27,7 +28,7 @@ import { SECURITY_HEADERS } from "./security.js";
 import { clientIp, loadSession } from "./session.js";
 
 /** Paths a visitor without a login may use even when `settings.guestAllowed` is false. */
-const OPEN_WITHOUT_LOGIN = ["/api/session", "/api/auth/", "/api/admin/"];
+const OPEN_WITHOUT_LOGIN = ["/api/session", "/api/auth/", "/api/admin/", "/api/settings/public"];
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -154,6 +155,7 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
   codeRoutes(app, ctx);
   shareRoutes(app, ctx);
   moderationRoutes(app, ctx);
+  organizeRoutes(app, ctx);
   historyRoutes(app, ctx);
   socialRoutes(app, ctx);
   transferRoutes(app, ctx);

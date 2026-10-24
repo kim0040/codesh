@@ -397,6 +397,69 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
       });
     });
 
+    describe("LabelStore", () => {
+      it("stores, replaces and deletes one person's labels for a share", async () => {
+        const { labels } = await open();
+        expect(await labels.get(OWNER, "abcd1234")).toBeNull();
+
+        const stored = await labels.set(OWNER, "abcd1234", { folder: "Week 1", tags: ["a"] }, T0);
+        expect(stored).toEqual({
+          clientId: OWNER,
+          shareId: "abcd1234",
+          folder: "Week 1",
+          tags: ["a"],
+          updatedAt: T0,
+        });
+        const replaced = await labels.set(
+          OWNER,
+          "abcd1234",
+          { folder: null, tags: ["b", "c"] },
+          later(1000),
+        );
+        expect(replaced).toMatchObject({ folder: null, tags: ["b", "c"], updatedAt: later(1000) });
+        expect(await labels.get(OWNER, "abcd1234")).toEqual(replaced);
+
+        expect(await labels.delete(OWNER, "abcd1234")).toBe(true);
+        expect(await labels.delete(OWNER, "abcd1234")).toBe(false);
+        expect(await labels.get(OWNER, "abcd1234")).toBeNull();
+      });
+
+      it("keeps labels apart per person and per share", async () => {
+        const { labels } = await open();
+        await labels.set(OWNER, "abcd1234", { folder: "mine", tags: [] }, T0);
+        await labels.set(OTHER, "abcd1234", { folder: "theirs", tags: ["x"] }, T0);
+        await labels.set(OWNER, "wxyz5678", { folder: null, tags: ["y"] }, T0);
+
+        expect((await labels.get(OTHER, "abcd1234"))?.folder).toBe("theirs");
+        const mine = await labels.listForClient(OWNER);
+        expect(mine.map((entry) => entry.shareId).sort()).toEqual(["abcd1234", "wxyz5678"]);
+        expect(await labels.listForClient("33333333-3333-4333-8333-333333333333")).toEqual([]);
+      });
+
+      it("returns copies, not references", async () => {
+        const { labels } = await open();
+        const input = { folder: "f", tags: ["a"] };
+        await labels.set(OWNER, "abcd1234", input, T0);
+        input.tags.push("mutated");
+        const read = await labels.get(OWNER, "abcd1234");
+        read?.tags.push("mutated");
+        expect((await labels.get(OWNER, "abcd1234"))?.tags).toEqual(["a"]);
+      });
+
+      it("removes every person's labels when a share goes, and lists the shares that have some", async () => {
+        const { labels } = await open();
+        await labels.set(OWNER, "abcd1234", { folder: "f", tags: [] }, T0);
+        await labels.set(OTHER, "abcd1234", { folder: "g", tags: [] }, T0);
+        await labels.set(OWNER, "wxyz5678", { folder: "f", tags: [] }, T0);
+
+        expect((await labels.shareIds()).sort()).toEqual(["abcd1234", "wxyz5678"]);
+        expect(await labels.deleteForShare("abcd1234")).toBe(2);
+        expect(await labels.deleteForShare("abcd1234")).toBe(0);
+        expect(await labels.shareIds()).toEqual(["wxyz5678"]);
+        expect(await labels.get(OWNER, "wxyz5678")).not.toBeNull();
+      });
+    });
+
     describe("SettingsStore", () => {
       it("returns defaults until something is stored", async () => {
         const { settings } = await open();
@@ -410,6 +473,21 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
           contact: "it@example.org",
           guestAllowed: false,
         });
+      });
+
+      it("stores templates and fills them in for documents written before they existed", async () => {
+        const { settings } = await open();
+        const templates = [
+          {
+            id: "org-service",
+            name: "Service",
+            language: "go",
+            description: "Our service skeleton",
+            files: [{ path: "main.go", content: "package main\n" }],
+          },
+        ];
+        await settings.put({ ...defaultSettings(), templates });
+        expect((await settings.get()).templates).toEqual(templates);
       });
     });
 

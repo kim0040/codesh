@@ -42,6 +42,16 @@ export const shareRecordSchema = z.object({
 });
 export type ShareRecord = z.infer<typeof shareRecordSchema>;
 
+/** One person's folder and tags for a share (§5 `share_labels`, `_id` = `<clientId>:<shareId>`). */
+export const shareLabelRecordSchema = z.object({
+  clientId: clientIdSchema,
+  shareId: shareIdSchema,
+  folder: z.string().nullable(),
+  tags: z.array(z.string()),
+  updatedAt: z.date(),
+});
+export type ShareLabelRecord = z.infer<typeof shareLabelRecordSchema>;
+
 export const updateRecordSchema = z.object({
   shareId: shareIdSchema,
   seq: z.number().int().positive(),

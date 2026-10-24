@@ -1,3 +1,5 @@
+import type { MessageKey } from "@codesh/i18n";
+import type { Template } from "@codesh/shared";
 import { toast } from "@codesh/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -36,6 +38,24 @@ export function useCreateShare() {
         await open(created.id);
       } catch (error) {
         fail(error);
+      } finally {
+        setPending(false);
+      }
+    },
+    /** Creates a share with the files of a template and opens it; true when it worked. */
+    createFromTemplate: async (template: Template) => {
+      setPending(true);
+      try {
+        const created = await api.createShare({
+          title: template.builtin ? t(template.name as MessageKey) : template.name,
+          language: template.language,
+          files: template.files,
+        });
+        await open(created.id);
+        return true;
+      } catch (error) {
+        fail(error);
+        return false;
       } finally {
         setPending(false);
       }

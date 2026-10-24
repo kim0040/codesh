@@ -29,6 +29,7 @@ import { fileText, readFiles } from "../../lib/collab/model";
 import { errorText } from "../../lib/errors";
 import { useLocale, useT } from "../../lib/i18n";
 import { usePrefs } from "../../lib/prefs";
+import { usePublicSettings } from "../../lib/public-settings";
 import { fontExtension } from "./cm/extensions";
 import { useEditor } from "./context";
 
@@ -86,6 +87,7 @@ export function HistoryView() {
   const queryClient = useQueryClient();
   const reduced = usePrefersReducedMotion();
   const shareId = ctx.share.id;
+  const retentionDays = usePublicSettings()?.historyRetentionDays;
 
   const list = useQuery({
     queryKey: ["history", shareId],
@@ -163,6 +165,11 @@ export function HistoryView() {
           {t("history.title")}
         </h2>
         <span className="text-caption text-fg-3">{t("history.privacy")}</span>
+        {retentionDays ? (
+          <span className="text-caption text-fg-3">
+            {t("history.retention", { count: retentionDays })}
+          </span>
+        ) : null}
         <IconButton
           aria-label={t("common.close")}
           size="sm"

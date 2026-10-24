@@ -111,6 +111,7 @@ export async function deleteShare(ctx: Ctx, share: ShareRecord): Promise<void> {
     ctx.stores.updates.deleteForShare(share.id),
     ctx.stores.snapshots.deleteForShare(share.id),
     ctx.stores.files.deleteForShare(share.id),
+    ctx.stores.labels.deleteForShare(share.id),
     releaseCode(ctx, "share", share.joinCode),
     removeNearby(ctx, share.id),
     ctx.valkey.zrem(apiKeys.sharesIndex, share.id),

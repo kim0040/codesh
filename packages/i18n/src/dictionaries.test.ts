@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "../../shared/src/errors.js";
+import { BUILTIN_TEMPLATES } from "../../shared/src/templates.js";
 import { dictionaries, LOCALES, type Locale } from "./index.js";
 
 const en: Readonly<Record<string, string>> = dictionaries.en as Record<string, string>;
@@ -34,6 +35,7 @@ const NAMESPACES = new Set([
   "admin",
   "identity",
   "palette",
+  "template",
   "shortcuts",
   "empty",
   "a11y",
@@ -187,6 +189,28 @@ describe("error codes", () => {
   it("does not surface raw codes to people", () => {
     for (const [key, message] of [...entries("en"), ...entries("ko")]) {
       if (key.startsWith("error.")) expect(message, key).not.toContain("_");
+    }
+  });
+});
+
+describe("template texts", () => {
+  it("has a name and a description in both languages for every built-in template", () => {
+    for (const template of BUILTIN_TEMPLATES) {
+      for (const locale of LOCALES) {
+        const dictionary = locale === "en" ? en : ko;
+        expect(dictionary[template.nameKey], `${locale} ${template.nameKey}`).toBeTruthy();
+        expect(
+          dictionary[template.descriptionKey],
+          `${locale} ${template.descriptionKey}`,
+        ).toBeTruthy();
+      }
+    }
+  });
+
+  it("names every language the same way in both languages", () => {
+    for (const template of BUILTIN_TEMPLATES) {
+      const first = (en[template.nameKey] ?? "").split(/[ ·]/)[0] ?? "";
+      expect(ko[template.nameKey] ?? "", template.nameKey).toContain(first);
     }
   });
 });

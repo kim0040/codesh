@@ -11,7 +11,7 @@ export interface SweepResult {
 }
 
 /**
- * §5 sweeper: removes update logs, snapshots and uploads of shares that no longer exist, history
+ * §5 sweeper: removes update logs, snapshots, uploads and labels of shares that no longer exist, history
  * snapshots past `historyRetentionDays`, expired uploads and audit entries past retention. One
  * instance at a time, guarded by `lock:sweeper`.
  */
@@ -27,6 +27,7 @@ export async function sweep(
       ...(await stores.updates.shareIds()),
       ...(await stores.snapshots.shareIds()),
       ...(await stores.files.shareIds()),
+      ...(await stores.labels.shareIds()),
     ]);
     const ids = [...referenced];
     const orphans: string[] = [];
@@ -41,6 +42,7 @@ export async function sweep(
       await stores.updates.deleteForShare(id);
       await stores.snapshots.deleteForShare(id);
       await stores.files.deleteForShare(id);
+      await stores.labels.deleteForShare(id);
     }
     await stores.snapshots.deleteOlderThan(
       "history",

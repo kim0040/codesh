@@ -15,11 +15,15 @@ import type {
   PatchSessionBody,
   PatchShareBody,
   PresenceUser,
+  PublicSettings,
+  PutLabelsBody,
   PutSettingsBody,
   SessionResponse,
   Settings,
+  ShareLabels,
   ShareListItem,
   StatsResponse,
+  Template,
   UploadResult,
 } from "@codesh/shared";
 
@@ -147,6 +151,8 @@ export const api = {
   createShare: (body: CreateShareBody = {}) =>
     request<CreateShareResponse>("POST", "/api/shares", { body }),
   listShares: (signal?: AbortSignal) => request<ShareListItem[]>("GET", "/api/shares", { signal }),
+  putLabels: (id: string, body: PutLabelsBody) =>
+    request<ShareLabels>("PUT", `/api/shares/${id}/labels`, { body }),
   getShare: (id: string, signal?: AbortSignal) =>
     request<GetShareResponse>("GET", `/api/shares/${id}`, { signal }),
   /** 200 with a token, or 202 while the owner has to approve. */
@@ -180,6 +186,10 @@ export const api = {
     request<{ ok: true }>("POST", `/api/shares/${id}/restore`, { body: { seq } }),
   downloadUrl: (id: string, fileId?: string) =>
     `/api/shares/${id}/download${fileId ? `?file=${encodeURIComponent(fileId)}` : ""}`,
+
+  listTemplates: (signal?: AbortSignal) => request<Template[]>("GET", "/api/templates", { signal }),
+  publicSettings: (signal?: AbortSignal) =>
+    request<PublicSettings>("GET", "/api/settings/public", { signal }),
 
   resolveCode: (code: string) =>
     request<{ id: string } | { labId: string }>("GET", `/api/codes/${code}`),

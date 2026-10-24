@@ -31,6 +31,9 @@ describe.runIf(available)("MongoDB stores", () => {
     expect(updates.find((i) => i.name === "shareId_seq")?.unique).toBe(true);
     const labs = await db.collection(COLLECTIONS.labs).indexes();
     expect(labs.find((i) => i.name === "expiresAt_ttl")?.expireAfterSeconds).toBe(0);
+    expect(await names(COLLECTIONS.labels)).toEqual(
+      expect.arrayContaining(["clientId", "shareId"]),
+    );
     expect(await names(COLLECTIONS.audit)).toContain("at_desc");
     expect(await names("uploads.files")).toContain("metadata_expiresAt");
   });
