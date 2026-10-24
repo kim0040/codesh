@@ -34,7 +34,7 @@ export function lang(id: string): LangChip {
 
 /** [token, dark (slate), light (paper)] */
 export const EDITOR_COLORS = [
-  ["bg", "#111419", "#fbfaf7"],
+  ["bg", "#12131c", "#fcfcff"],
   ["fg", "#e1e5eb", "#20242b"],
   ["keyword", "#cba1fa", "#7328ae"],
   ["string", "#7cd591", "#046a2f"],
