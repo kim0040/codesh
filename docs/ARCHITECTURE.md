@@ -16,6 +16,7 @@ dev: Vite (:5173) proxies /api → :3001 and /collab → :3002 (ws)
 
 - One Valkey and one MongoDB. `apps/collab` can run N instances; `@hocuspocus/extension-redis` (ioredis, Valkey-compatible) keeps them in sync, and Caddy routes by `doc` query so one doc normally lives on one instance.
 - No runtime request requires the public internet. No CDN, font, analytics or external API.
+- The one exception is the update check (§15): apps/api sends one plain GET to the GitHub releases API about every 12 h. It is on by default, off with `UPDATE_CHECK=off`, never blocks startup or a request, and fails silently in 5 s without internet. Browsers never contact anything but the codesh server.
 
 ## 2. Packages
 
@@ -122,6 +123,8 @@ All bodies and responses are zod schemas in `packages/shared`. Errors: `{error: 
 
 | Method & path | Purpose |
 |---|---|
+| `GET /api/version` | public, also without guest access: `{version}` of the running API (`no-store`); clients compare it with their build |
+| `GET /api/admin/update` / `POST /api/admin/update/check` | admin: the cached update state `{current, latest, url, publishedAt, notes, checkedAt, status, updateAvailable, repo, channel, releasesUrl, updater}`; the POST checks now, once a minute per deployment (`429` + `Retry-After`) |
 | `GET /api/session` | creates session if missing → `{clientId, name|null, color, net, room|null}` |
 | `PATCH /api/session` | `{name?, color?}` |
 | `POST /api/shares` | `{title?, language?, files?: [{path, language?, content}]}` → `{id, code, url}`; creator = owner |
@@ -167,7 +170,8 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 - Editor: CodeMirror 6 + `y-codemirror.next` (`yCollab`), keymaps via `@replit/codemirror-vim`, `@replit/codemirror-emacs`, sublime-style bindings from `@codemirror/commands`.
 - Smoothness: local edits render immediately; remote cursors animate position with CSS transforms; route transitions via the View Transitions API with a reduced-motion fallback; skeletons instead of spinners; optimistic UI for title/language/settings.
 - Offline: `y-indexeddb` copy per doc; banner shows "offline – changes kept" and merges on reconnect.
-- PWA: `vite-plugin-pwa`; notifications use the Notification API while the app is open (no external push service exists on a private network).
+- PWA: `vite-plugin-pwa` with `registerType: "prompt"`: a new build waits until the user chooses "Reload" in the update toast; nothing reloads by itself. The build version (root package.json) is compiled in and compared with `GET /api/version` at start, on focus, every 30 min and on every collab reconnect; a mismatch asks the service worker for the new build and shows the toast. A server of another version keeps the Yjs protocol, so open documents resync after the reconnect.
+- PWA notifications use the Notification API while the app is open (no external push service exists on a private network).
 
 ## 12. Commands
 
@@ -179,6 +183,7 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 | `pnpm check` | biome lint/format check + `tsc -b` + vitest + license check |
 | `pnpm test:e2e` | Playwright (Chromium) against a running dev stack |
 | `pnpm load` | Node WebSocket load script (`scripts/load`) |
+| `node scripts/release.mjs check [vX.Y.Z]` | version in package.json, deploy/.env.example and CHANGELOG.md agree (CI, release) |
 
 ## 13. Dependency policy
 
@@ -196,6 +201,14 @@ Allowed licenses: MIT, Apache-2.0, BSD-2/3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC0
 - Caddy applies a self-hosted CSP, Permissions-Policy, COOP, nosniff, frame denial and same-origin referrer policy. Inline styles are needed by CodeMirror/Radix; the Caddy image hashes the production entry point’s inline bootstrap scripts at build time; arbitrary inline scripts and eval are not permitted. Bundled inline font subsets require `font-src data:`. Shared Zod schemas initialize with `jitless: true` before construction, avoiding eval probes under CSP. `blob:` workers and `data:`/`blob:` images permit local formatting and QR workflows. HTTPS opt-in is in `deploy/tls/README.md`; HSTS belongs only to its TLS snippet.
 - Metrics through Caddy are limited to loopback and the configured compose subnet, including denial of bare `/metrics`. Application ports remain unpublished. api and collab use the Mongo user `codesh_app` with `readWrite` only on `codesh`; the one-shot compose service `mongo-users` creates it (or resets its password and role) as root on every start, so volumes created before it existed move over on their next `up` without an operator step. The root user is only used by `mongo-users`, backup and restore. Backups and temporary password configs are private (`0600`, `umask 077`), and no password is passed as a process argument (the container init process shows its arguments to every host user): the Mongo tools read a private config file, Valkey a generated private configuration file.
 - Offline bundles include a content manifest verified before image loading; upgrade also verifies the archive sidecar before extracting. Checksums detect corruption and mismatch, not publisher authenticity: distribute them through a trusted channel.
+
+## 15. Versions and updates
+
+- Version: the root `package.json` `version` is the product version. Images get it as build arg `CODESH_VERSION` (the Dockerfiles refuse a different value) and as `org.opencontainers.image.version`; the API reads `/app/VERSION`, the web build compiles it in. Workspace packages stay private and unversioned.
+- Releases: a `vX.Y.Z` tag runs `.github/workflows/release.yml`: images `ghcr.io/kim0040/codesh-{api,collab,web,mdns}` for linux/amd64 and linux/arm64 with GitHub build provenance, offline bundles per platform, `codesh-deploy-X.Y.Z.tar.gz` (compose, scripts, `IMAGES` digests; no images) and `SHA256SUMS`, published as a GitHub release whose notes are the CHANGELOG section (RELEASING.md). A version with a suffix (`-rc.1`) is a pre-release.
+- Update check (apps/api `updates.ts`): a background job. First run 3-5 min after start, then every 12 h ±30 min; a Valkey lock (`lock:update-check`) and the stored `checkedAt` make it one request per deployment, however many API instances run. Request: `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` (`/releases?per_page=20` on the prerelease channel), headers `Accept`, `User-Agent: codesh/<version>`, `X-GitHub-Api-Version` and `If-None-Match`; no credentials, cookies, identifiers or usage data. 5 s timeout, 1 MB body cap. 304 keeps the cached release; 403/429 store a retry time from `retry-after`/`x-ratelimit-reset` (unauthenticated limit: 60/h per IP); failures keep the last known release with status `unreachable`. Drafts are ignored, pre-releases unless `UPDATE_CHANNEL=prerelease`; versions are compared by SemVer 2.0.0 precedence. The result is cached in Valkey `update:state` (30 days); notes are stored as plain text without control or bidi characters, at most 4000 characters, and rendered as text. Release URLs must be https. `HTTPS_PROXY` works through Node's `NODE_USE_ENV_PROXY=1`, which compose sets when a proxy is configured.
+- Applying updates (`deploy/update.sh`, host side): no container gets the Docker socket, so the admin console only shows commands and status. The script verifies `SHA256SUMS`, backs up, installs the new compose file and scripts, pulls and checks image digests against `IMAGES`, restarts and waits for `/healthz` and `/readyz`; on failure it restores files, `.env`, previous images and the backup. Its status goes to `deploy/state/update.json`, mounted read-only into api at `/codesh-state` (`UPDATE_STATUS_FILE`). Optional daily automatic updates run from a systemd timer or cron, never across a major version.
+- Clients and servers of different versions: the collab protocol is Yjs/Hocuspocus and stays compatible across minor versions; a reconnect after a restart resyncs from the server state. A release that breaks this must be a major version.
 
 ### Pending web-owned changes
 

@@ -14,7 +14,7 @@
   - 디스크: 최소 20GB 이상 (MongoDB 데이터 볼륨 및 Docker 이미지 보관)
 - **네트워크**:
   - 외부 인터넷 연결 없이 오프라인 환경에서 단독 구동할 수 있습니다.
-  - 런타임 중 외부 CDN, 웹 폰트, 분석 스크립트, 외부 API 호출이 전혀 발생하지 않습니다.
+  - 런타임 중 외부 CDN, 웹 폰트, 분석 스크립트, 외부 API 호출이 발생하지 않습니다. 유일한 예외는 운영자가 끌 수 있는 업데이트 확인(15장)으로, 12시간마다 GitHub API에 GET 요청 하나를 보내고 인터넷이 없으면 조용히 실패합니다. `UPDATE_CHECK=off`이면 아무 요청도 보내지 않습니다.
   - 외부 노출 포트: Caddy 에지 프록시의 HTTP(80) 및 HTTPS(443) 포트만 외부에 공개됩니다.
 
 ---
@@ -28,7 +28,8 @@ Docker와 인터넷이 연결된 환경(또는 개발 박스)에서 번들 스�
 ```sh
 deploy/bundle.sh [버전]
 ```
-- 실행 결과로 `deploy/dist/codesh-<버전>.tar.gz` 및 SHA256 체크섬 파일이 생성됩니다.
+- 실행 결과로 `deploy/dist/codesh-<버전>.tar.gz`, 이미지가 없는 온라인 업데이트용 `codesh-deploy-<버전>.tar.gz`와 각각의 SHA256 체크섬 파일이 생성됩니다.
+- 직접 만들 필요 없이 [GitHub 릴리스](https://github.com/kim0040/codesh/releases)에서 `codesh-<버전>-linux-amd64.tar.gz`(또는 `-linux-arm64`)와 `.sha256` 파일을 받아도 됩니다. 릴리스 파일은 GitHub Actions가 만들고 빌드 출처 증명(attestation)이 붙습니다(15.8).
 - 번들 아카이브 내부에는 모든 컨테이너 이미지(`images.tar`), 설정 예시(`.env.example`), 배포 파일(`docker-compose.yml`), 관리 스크립트(`install.sh`, `backup.sh`, `restore.sh`, `upgrade.sh` 등)가 포함됩니다.
 
 ### 2.2 폐쇄망 설치 절차
@@ -54,7 +55,12 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
-| `CODESH_VERSION` | `dev` | 배포할 codesh 이미지 태그. 오프라인 번들 설치 시 번들 버전으로 자동 설정됩니다. |
+| `CODESH_VERSION` | `1.0.0` | 실행할 codesh 릴리스(이미지 태그). `install.sh`, `upgrade.sh`, `update.sh`가 맞춰 줍니다. |
+| `CODESH_REGISTRY` | `ghcr.io/kim0040` | `docker compose pull`이 이미지를 받는 곳입니다. 공개 GitHub 패키지 또는 직접 운영하는 미러를 지정합니다. 오프라인 번들은 번들의 값으로 맞춥니다. |
+| `UPDATE_CHECK` | `on` | 새 릴리스 확인(15장). `off`이면 외부로 아무 요청도 보내지 않습니다. |
+| `UPDATE_REPO` | `kim0040/codesh` | 릴리스를 확인할 GitHub 저장소(`소유자/이름`)입니다. |
+| `UPDATE_CHANNEL` | `stable` | `prerelease`로 바꾸면 릴리스 후보(`1.2.0-rc.1` 등)도 알려 줍니다. |
+| `HTTPS_PROXY` / `NO_PROXY` | 주석 처리됨 | 업데이트 확인이 거칠 HTTPS 프록시와 거치지 않을 호스트입니다(15.9). |
 | `HTTP_PORT` | `80` | Caddy 컨테이너가 호스트에 바인딩할 HTTP 포트입니다. |
 | `HTTPS_PORT` | `443` | Caddy 컨테이너가 호스트에 바인딩할 HTTPS 포트입니다. |
 | `SITE_ADDRESS` | `:80` | Caddy가 응답할 주소입니다. `:80`은 모든 IP/도메인의 일반 HTTP 요청을 처리합니다. 도메인(예: `codesh.corp`)을 지정하면 HTTPS가 활성화됩니다. |
@@ -199,6 +205,7 @@ docker compose up -d --scale collab=3
 - `mongorestore --drop`을 사용하여 기존 데이터베이스를 백업 데이터로 대체한 후 서비스를 다시 시작합니다.
 
 ### 9.3 새 버전으로 업그레이드
+인터넷이 되는 서버는 `./update.sh`로 업데이트합니다(15.4). 인터넷이 없는 서버는 새 번들로 업그레이드합니다.
 ```sh
 ./upgrade.sh ../codesh-<새버전>.tar.gz
 ```
@@ -214,7 +221,7 @@ docker compose up -d --scale collab=3
 
 ### 10.1 상태 점검 엔드포인트
 - `GET /healthz`: Caddy 및 API 서버의 기본 동작 여부 확인 (Valkey ping 응답 검증).
-- `GET /readyz`: Collab 서버의 의존성 준비 완료 상태 확인 (MongoDB 및 Valkey 연결 검증). Caddy를 거치지 않으므로 collab 컨테이너의 3002 포트에서 확인합니다(Compose 헬스체크가 사용).
+- `GET /readyz`: API 서버가 Valkey와 MongoDB를 모두 읽을 수 있는지 확인합니다. Caddy를 거쳐 응답하며 `update.sh`가 새 버전을 확인할 때 사용합니다. Collab 서버에도 같은 경로가 있지만 Caddy를 거치지 않으므로 collab 컨테이너의 3002 포트에서 확인합니다(Compose 헬스체크가 사용).
 
 ### 10.2 프로메테우스 메트릭 수집
 Caddy는 보안을 위해 루프백과 전용 Compose 서브넷의 요청에 대해서만 메트릭 경로를 개방합니다.
@@ -331,6 +338,7 @@ docker compose logs -f valkey    # 캐시/메시징 로그
 - [ ] **차단과 PIN**: 차단(ban)은 그 클라이언트가 참여한 주소도 막으므로 쿠키를 지워도 다시 들어오지 못합니다. 다만 같은 주소로 다른 참여자가 들어와 있으면(NAT 등) 반 전체가 막히지 않도록 주소 차단은 생략됩니다. 공유별 PIN 오답은 10분에 200회까지이며, 이를 넘기면 맞는 PIN도 거절됩니다. 누군가 일부러 오답을 반복해 공유를 막으면 소유자가 PIN을 새로 지정해 카운터를 초기화합니다.
 - [ ] **공개 범위**: 기본값은 누구나 편집 가능하고 주변 목록에 표시됩니다. 주변 목록은 네트워크 그룹 전체에 제목과 앞 8줄을 공개합니다. 민감한 내용은 관리 설정 `nearbyDefault=false` 또는 해당 공유의 `access.nearby=false`를 먼저 설정하고, 필요하면 PIN/승인을 사용합니다. 짧은 PIN은 강한 비밀번호가 아닙니다.
 - [ ] **공용 기기**: 현재 웹 앱은 방문한 문서를 IndexedDB에 보관합니다. 로그아웃만으로 이 사본이 삭제되지 않으므로 개인 브라우저 프로필을 사용하거나 기기 이용 후 사이트 데이터를 지웁니다. URL의 편집 키도 브라우저 기록과 화면에 남을 수 있습니다. 웹 변경 추적은 [아키텍처의 남은 항목](ARCHITECTURE.md#pending-web-owned-changes)을 참고합니다.
+- [ ] **업데이트**: 업데이트 확인을 쓸지 정합니다(기본 켜짐, 15.1). 자동 업데이트는 기본 꺼짐이며 켜면 서버가 매일 정한 시간에 허용된 릴리스를 받아 적용합니다(15.6). 받는 릴리스 파일은 `SHA256SUMS`와 이미지 digest로 확인하지만 서명은 아니므로, 더 강한 확인이 필요하면 `gh attestation verify`를 사용합니다(15.8).
 - [ ] **오프라인 번들**: 아카이브와 `.sha256`을 신뢰할 수 있는 경로로 함께 전달합니다. `install.sh`는 추출된 `SHA256SUMS`를 검사하고, `upgrade.sh`는 압축 해제 전 아카이브 체크섬과 로드 전 내용 목록을 검사합니다. 체크섬은 서명이 아니므로 배포자 신원까지 보증하지는 않습니다.
 
 | 환경 변수 | 기본값 | 의미 |
@@ -369,3 +377,93 @@ API와 Collab은 `codesh` DB의 `readWrite` 역할만 가진 `codesh_app` 사용
 이 사용자가 없던 이전 버전의 설치도 따로 전환할 필요가 없습니다. 이전 버전의 `upgrade.sh`로 이 버전 번들을 적용하면 새 `.env.example`의 `MONGO_APP_PASSWORD`가 추가되고 새 `generate-secrets.sh`가 값을 채운 뒤, 시작할 때 `mongo-users`가 기존 볼륨에 사용자를 만듭니다. 저장소에서 직접 `docker compose up`하는 설치는 먼저 `./generate-secrets.sh`를 한 번 실행하십시오(값이 없으면 Compose가 이를 안내하며 시작하지 않습니다).
 
 `mongo-users`가 실패하면(예: `.env`의 `MONGO_PASSWORD`가 볼륨의 root 비밀번호와 다름) API와 Collab은 시작하지 않습니다. `docker compose logs mongo-users`로 원인을 확인하십시오. root 비밀번호를 바꾸려면 먼저 `mongosh`로 볼륨의 비밀번호를 바꾼 뒤 `.env`를 같은 값으로 고칩니다.
+
+---
+
+## 15. 업데이트
+
+새 릴리스가 나오면 관리 콘솔의 **업데이트** 탭에 표시되고, 운영자가 서버에서 `./update.sh` 한 줄로 적용합니다. 원하면 정한 시간에 자동으로 적용하게 할 수 있습니다. 사용하는 서비스(GitHub 릴리스, GHCR 공개 패키지, 공개 저장소의 GitHub Actions, 인증 없는 GitHub API)는 모두 무료입니다(15.10).
+
+### 15.1 업데이트 확인: 무엇이 언제 밖으로 나가나
+- `UPDATE_CHECK=on`(기본값)이면 API 서버가 시작하고 3~5분 뒤, 그 뒤로 약 12시간(±30분)마다 한 번 확인합니다. API 인스턴스가 여러 개여도 Valkey 잠금으로 배포 전체에서 한 번만 요청합니다. 시작과 요청 처리를 막지 않는 백그라운드 작업입니다.
+- 보내는 것: `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` 하나(`UPDATE_CHANNEL=prerelease`이면 `/releases?per_page=20`). 헤더는 `User-Agent: codesh/<현재 버전>`, `Accept`, `X-GitHub-Api-Version`, 그리고 이전 응답의 `If-None-Match`(ETag)뿐입니다. 인증 정보, 쿠키, 설치 식별자, 사용 통계는 보내지 않습니다. GitHub는 요청을 보낸 서버의 공인 IP를 볼 수 있습니다.
+- 인터넷이 없으면 5초 안에 실패하고 콘솔에 "인터넷에 연결되지 않아 확인할 수 없어요"가 표시됩니다. 서비스 동작에는 영향이 없습니다.
+- 인증 없는 GitHub API는 IP당 시간당 60회까지 허용합니다. codesh는 12시간에 한 번(관리 콘솔의 "지금 확인"은 배포 전체에서 1분에 한 번) 요청하고, 한도에 걸리면 GitHub가 알려 준 재설정 시각까지 다시 묻지 않습니다. 같은 공인 IP를 쓰는 다른 프로그램이 한도를 다 쓴 경우에도 같은 방식으로 기다립니다.
+- 결과(현재·최신 버전, 출시일, 릴리스 노트, 확인 시각, 상태)는 Valkey `update:state`에 보관합니다. 릴리스 노트는 최대 4000자의 일반 텍스트로만 저장하고 표시하며 HTML이나 Markdown으로 렌더링하지 않습니다.
+
+### 15.2 업데이트 확인 끄기
+`.env`에 `UPDATE_CHECK=off`를 쓰고 `docker compose up -d`로 API를 다시 만듭니다. 이후 API는 외부로 어떤 요청도 보내지 않으며 콘솔에는 "업데이트 확인이 꺼져 있어요"가 표시됩니다. `update.sh`는 운영자가 직접 실행할 때만 GitHub에 접속하므로 이 설정과 상관없습니다.
+
+### 15.3 관리 콘솔
+관리 콘솔(관리자 토큰 필요)의 **업데이트** 탭에서 설치된 버전과 최신 릴리스, 출시일, 릴리스 노트, 릴리스 페이지 링크(새 탭), "지금 확인" 버튼, 서버에서 실행할 명령, 자동 업데이트 상태와 마지막 실행 결과를 봅니다. 새 버전이 있으면 탭 이름 옆에 "새 버전" 배지가 붙습니다. 관리자가 아닌 사용자에게는 업데이트 관련 정보가 보이지 않으며, 공개된 것은 `GET /api/version`의 현재 버전 번호뿐입니다.
+
+API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1분에 한 번)를 제공합니다. 자동 업데이트 상태는 `update.sh`가 쓰는 `state/update.json`을 API 컨테이너에 읽기 전용으로 연결(`./state:/codesh-state:ro`)해서 보여 줍니다. 어떤 컨테이너도 Docker 소켓에 접근하지 않으므로 콘솔에서 업데이트를 실행할 수는 없습니다.
+
+열려 있는 브라우저 탭은 서버의 `/api/version`이 자기 빌드와 다르면 "새 버전이 있어요 · 새로고침" 알림을 띄웁니다(탭을 열 때, 다시 볼 때, 30분마다, 실시간 연결이 다시 붙을 때 확인). 탭은 스스로 새로고침하지 않으므로 편집 중인 사람이 작업을 잃지 않으며, "나중에"를 누르면 다음 버전이 나올 때까지 다시 묻지 않습니다.
+
+### 15.4 수동 업데이트 (인터넷이 되는 서버)
+설치 폴더(`install.sh`를 실행한 곳)에서 실행합니다. Docker 권한이 있는 사용자 또는 root로 실행하십시오.
+```sh
+./update.sh --check              # 설치된 버전과 최신 릴리스만 보여 주고 아무것도 바꾸지 않음
+./update.sh                      # 같은 주 버전(1.x)의 최신 릴리스로 업데이트 (확인 질문)
+./update.sh --yes                # 질문 없이
+./update.sh --version 1.4.2      # 특정 릴리스로
+./update.sh --allow-major        # 새 주 버전(2.0.0 등)까지. 릴리스 노트의 변경 사항을 먼저 읽으십시오
+```
+`update.sh`는 다음 순서로 진행하며, 앞 단계가 실패하면 그 뒤는 실행하지 않습니다.
+1. GitHub 릴리스 목록에서 대상 버전을 고릅니다. 주 버전이 바뀌는 업데이트와 이전 버전으로 내리는 것은 거절합니다(되돌리기는 15.7).
+2. 릴리스의 `SHA256SUMS`와 이미지가 없는 배포 파일 `codesh-deploy-<버전>.tar.gz`를 받아 체크섬을 확인하고, 압축 안의 `SHA256SUMS`도 확인합니다. 하나라도 다르면 백업 전에 중단합니다.
+3. `backup.sh`로 데이터베이스를 백업하고, 지금의 Compose 파일·스크립트·`.env`를 `state/rollback/`에 복사합니다.
+4. 새 Compose 파일과 스크립트를 설치하고 `.env`의 `CODESH_VERSION`을 바꿉니다. 새 버전이 추가한 설정은 기본값으로 채우고 기존 값은 그대로 둡니다.
+5. `docker compose pull`로 GHCR(`CODESH_REGISTRY`)에서 이미지를 받고, 각 이미지의 digest가 릴리스의 `IMAGES` 목록과 같은지 확인합니다. 다르거나 받지 못하면 파일을 되돌리고 아무것도 재시작하지 않은 채 중단합니다.
+6. `docker compose up -d`로 재시작하고 `/healthz`와 `/readyz`가 응답할 때까지 기다립니다(`UPDATE_HEALTH_TIMEOUT`, 기본 180초).
+7. 정상이 아니면 자동으로 되돌립니다(15.7).
+
+모든 실행은 `state/update.log`(1 MiB에서 교체, 이전 파일 3개 보관)에 남고, 결과는 `state/update.json`에 기록되어 콘솔에 표시됩니다. 비밀값은 명령행 인자로 전달하지 않으며, GHCR 공개 이미지는 로그인 없이 받습니다. 이전 버전의 이미지는 되돌리기를 위해 남겨 두므로 여유 공간이 부족하면 확인 후 `docker image prune`으로 정리하십시오.
+
+### 15.5 오프라인 업데이트 (인터넷이 없는 서버)
+인터넷이 되는 컴퓨터에서 [릴리스 페이지](https://github.com/kim0040/codesh/releases)의 번들(`codesh-<버전>-linux-amd64.tar.gz` 또는 `-linux-arm64.tar.gz`)과 같은 이름의 `.sha256` 파일을 받아 서버의 설치 폴더 옆에 복사한 뒤 실행합니다.
+```sh
+./upgrade.sh ../codesh-<버전>-linux-amd64.tar.gz
+./update.sh --bundle ../codesh-<버전>-linux-amd64.tar.gz    # 같은 동작에 콘솔용 기록을 더함
+```
+`upgrade.sh`는 체크섬을 확인하고, 먼저 백업한 뒤, `docker load`로 이미지를 불러와 재시작합니다(9.3). 자동 되돌리기는 하지 않으므로 새 버전이 시작되지 않으면 15.7의 수동 절차를 따릅니다.
+
+### 15.6 자동 업데이트 (선택, 기본 꺼짐)
+```sh
+sudo ./update.sh --enable-auto --at 04:00 --policy patch     # 켜기
+sudo ./update.sh --enable-auto --dry-run                     # 무엇을 설치할지 보기만
+sudo ./update.sh --disable-auto                              # 끄기
+```
+- systemd가 있으면 `/etc/systemd/system/codesh-update.service`와 `.timer`(매일 `--at` 시각, 최대 15분 무작위 지연, 꺼져 있던 동안 놓친 실행은 켜질 때 한 번)를 설치하고, 없으면 현재 사용자의 crontab에 한 줄을 추가합니다. 한 호스트에 설치 하나를 기준으로 합니다.
+- 타이머는 `./update.sh --auto`를 실행합니다. 정책에 맞는 릴리스만 적용하며, 주 버전이 바뀌는 업데이트는 정책과 상관없이 자동으로 적용하지 않습니다.
+  - `patch`(기본값): 같은 `x.y`의 버그 수정 릴리스만(1.2.0 → 1.2.3).
+  - `minor`: 같은 주 버전의 기능 릴리스까지(1.2.0 → 1.5.1).
+- 업데이트 순서와 되돌리기는 수동 업데이트와 같고, 결과는 콘솔의 "자동 업데이트"에 표시됩니다. 사용자가 적은 시간대를 고르십시오. 재시작하는 동안 실시간 편집은 잠시 끊겼다가 자동으로 다시 연결됩니다.
+
+### 15.7 되돌리기 (롤백)
+- 자동: 새 버전이 `/healthz`·`/readyz`를 통과하지 못하면 `update.sh`가 `state/rollback/`의 파일과 `.env`를 되돌리고, 호스트에 남아 있는 이전 이미지로 재시작한 뒤, 업데이트 직전의 백업을 복원합니다. 결과는 "rolled-back"으로 기록되고 종료 코드는 1입니다.
+- 수동: 업데이트 직후 문제를 발견했다면 `state/rollback/`의 파일을 설치 폴더로 복사하고(`.env` 포함) `docker compose up -d` 후 `./restore.sh backups/<업데이트 직전 백업> --yes`를 실행합니다. 오프라인 업그레이드도 같은 방법으로, `upgrade.sh`가 만든 백업과 이전 번들의 파일을 사용합니다.
+
+### 15.8 릴리스 확인과 출처 증명
+릴리스의 모든 파일과 GHCR 이미지에는 GitHub의 빌드 출처 증명이 붙습니다. GitHub CLI로 확인할 수 있습니다(인터넷 필요).
+```sh
+gh attestation verify codesh-<버전>-linux-amd64.tar.gz --repo kim0040/codesh
+gh attestation verify oci://ghcr.io/kim0040/codesh-api:<버전> --repo kim0040/codesh
+```
+`SHA256SUMS`와 `.sha256`은 손상과 바뀐 파일을 찾아내지만 서명은 아닙니다. HTTPS로 GitHub에서 직접 받거나 출처 증명을 확인하십시오.
+
+### 15.9 프록시
+서버가 프록시를 거쳐야 인터넷에 나갈 수 있으면 `.env`에 `HTTPS_PROXY=http://프록시:포트`를 씁니다. Compose가 이 값과 `NODE_USE_ENV_PROXY=1`을 API 컨테이너에 전달합니다(Node 22의 `fetch`는 이 설정이 있어야 `HTTPS_PROXY`를 사용합니다). OIDC 로그인처럼 API가 내부 서버에 접속하는 경우가 있으면 그 호스트를 `NO_PROXY`에 넣으십시오. `update.sh`는 `curl`을 사용하므로 실행하는 셸의 `HTTPS_PROXY`를 따릅니다. 이미지 다운로드는 Docker 데몬의 프록시 설정을 따릅니다.
+
+### 15.10 비용
+- GitHub 릴리스(파일 보관과 다운로드), GHCR의 공개 패키지(저장과 전송), 공개 저장소의 GitHub Actions 실행과 빌드 출처 증명, 인증 없는 GitHub REST API는 모두 무료입니다. 인증 없는 API는 IP당 시간당 60회로 제한되며 codesh의 확인 주기(12시간)는 이 한도보다 훨씬 적습니다.
+- 유료 서비스나 계정, 토큰이 필요하지 않습니다. 자동 업데이트도 서버 자신의 systemd 타이머 또는 cron으로 동작합니다.
+
+### 15.11 소스에서 설치한 경우
+저장소에서 직접 실행하는 설치(`deploy/`에서 `docker compose`)는 `update.sh`가 저장소 파일을 덮어쓰지 않도록 거절합니다. 다음 중 하나를 사용합니다.
+```sh
+git pull && docker compose build && docker compose up -d     # 소스에서 다시 빌드
+docker compose pull && docker compose up -d                  # .env의 CODESH_VERSION 릴리스 이미지를 받아 실행
+```
+

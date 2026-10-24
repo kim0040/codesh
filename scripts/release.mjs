@@ -44,7 +44,9 @@ if (command === "check") {
   if (!/ - \d{4}-\d{2}-\d{2}$/.test(section.heading))
     fail(`CHANGELOG.md: "${section.heading}" needs a release date (## [${version}] - YYYY-MM-DD)`);
   if (!section.body) fail(`CHANGELOG.md: the ${version} section is empty`);
-  console.log(`release: ${version} is consistent (package.json, deploy/.env.example, CHANGELOG.md)`);
+  console.log(
+    `release: ${version} is consistent (package.json, deploy/.env.example, CHANGELOG.md)`,
+  );
 } else if (command === "notes") {
   const section = changelogSection(read("CHANGELOG.md"), argument ?? version);
   if (!section) fail(`CHANGELOG.md has no section for ${argument ?? version}`);
