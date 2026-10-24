@@ -94,5 +94,42 @@ describe.skipIf(!integration)("security resource boundaries", () => {
     ).toBe(200);
   });
 
+  it("M4: caps open SSE streams per client and IPv6 network key, and releases slots", async () => {
+    const config = loadConfig({ SSE_MAX_PER_CLIENT: "1", SSE_MAX_PER_IP: "2" });
+    h = await createHarness({ config: { limits: config.limits } });
+    const base = await h.listen();
+    const client = h.client({ ip: "2001:db8:4::1" });
+    const first = await client.events(base);
+    try {
+      const same = await client.events(base);
+      expect(same.status).toBe(429);
+      same.close();
+      const second = await h.client({ ip: "2001:db8:4::2" }).events(base);
+      try {
+        expect(second.status).toBe(200);
+        const third = await h.client({ ip: "2001:db8:4::3" }).events(base);
+        expect(third.status).toBe(429);
+        third.close();
+      } finally {
+        second.close();
+      }
+    } finally {
+      first.close();
+    }
+  });
 
+  it("M4: refuses new presence entries when a network group is full", async () => {
+    const config = loadConfig({ PRESENCE_MAX_PER_NET: "2" });
+    h = await createHarness({ config: { limits: config.limits } });
+    const base = await h.listen();
+    const streams = [];
+    try {
+      for (let i = 1; i <= 3; i++)
+        streams.push(await h.client({ ip: `198.51.100.${i}` }).events(base));
+      expect(streams.map((s) => s.status)).toEqual([200, 200, 429]);
+      expect(await h.valkey.zcard("presence:198.51.100.0/24")).toBe(2);
+    } finally {
+      for (const stream of streams) stream.close();
+    }
+  });
 });
