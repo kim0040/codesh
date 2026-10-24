@@ -13,5 +13,5 @@ process.exitCode = await run(process.argv.slice(2), {
   cwd: process.cwd(),
   readStdin,
   stdinIsTTY: process.stdin.isTTY === true,
-  openBrowser: openInBrowser,
+  openBrowser: (url, platform) => openInBrowser(url, platform),
 });

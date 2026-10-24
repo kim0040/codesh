@@ -25,7 +25,7 @@ upgrade() {
   echo "upgrade: $(env_get CODESH_VERSION) -> $version"
   ./backup.sh ./backups
   docker load -i "$src/images.tar"
-  for file in docker-compose.yml .env.example VERSION lib.sh generate-secrets.sh install.sh upgrade.sh backup.sh restore.sh README.md; do
+  for file in docker-compose.yml .env.example VERSION lib.sh lib.ps1 generate-secrets.sh generate-secrets.ps1 install.sh install.ps1 upgrade.sh upgrade.ps1 backup.sh backup.ps1 restore.sh restore.ps1 README.md; do
     # A new inode, so the running script is not overwritten in place.
     [ -f "$src/$file" ] && cp "$src/$file" "./$file.new" && mv "./$file.new" "./$file"
   done

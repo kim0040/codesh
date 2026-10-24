@@ -1,2 +1,2 @@
 export const PACKAGE_NAME = "@codesh/cli";
-export { type Io, run, safeJoin } from "./run.js";
+export { browserCommand, type Io, qrOutputType, run, safeJoin, sharePath } from "./run.js";

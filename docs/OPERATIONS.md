@@ -6,14 +6,14 @@
 
 ## 1. 시스템 요구사항
 
-- **운영체제**: Linux (Docker Compose 지원 환경 권장)
+- **운영체제**: Linux Docker Compose 환경 또는 Windows 10/11 Docker Desktop (WSL2 backend)
 - **런타임 의존성**: Docker Engine 및 Docker Compose 플러그인(`docker compose`)
 - **하드웨어 권장 사양**:
   - 최소: 2 vCPU, 4GB RAM
   - 권장: 4 vCPU, 8GB RAM (부하 테스트에 쓴 사양, 11.1 참고)
   - 디스크: 최소 20GB 이상 (MongoDB 데이터 볼륨 및 Docker 이미지 보관)
 - **네트워크**:
-  - 외부 인터넷 연결 불필요 (오프라인 폐쇄망 단독 구동).
+  - 외부 인터넷 연결 없이 오프라인 환경에서 단독 구동할 수 있습니다.
   - 런타임 중 외부 CDN, 웹 폰트, 분석 스크립트, 외부 API 호출이 전혀 발생하지 않습니다.
   - 외부 노출 포트: Caddy 에지 프록시의 HTTP(80) 및 HTTPS(443) 포트만 외부에 공개됩니다.
 
@@ -59,7 +59,7 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 | `PUBLIC_URL` | 비어 있음 | 사용자가 브라우저 주소창에 입력하는 기준 URL(예: `https://codesh.corp`, 끝 슬래시 제외)입니다. 세션 쿠키의 Secure 플래그, OIDC 콜백 주소, CSRF 원본 검증에 사용됩니다. 일반 HTTP IP 접근 시 비워둘 수 있습니다. |
 | `NETWORK_SUBNET` | `172.29.88.0/24` | Compose 내부 브리지 네트워크 서브넷입니다. 호스트 내부 사설망과 대역이 충돌하는 경우에만 변경합니다. |
 | `TRUST_PROXY` | `NETWORK_SUBNET`과 동일 | API 앞단에 위치한 리버스 프록시(Caddy)의 CIDR 대역입니다. Caddy가 실행되는 네트워크 대역을 신뢰하여 `X-Forwarded-For` 헤더로부터 실제 클라이언트 IP를 추출합니다. 비워두면 모든 사용자가 동일 IP로 인식되어 레이트 리밋을 공유하게 됩니다. |
-| `CADDY_TRUSTED_PROXIES` | `127.0.0.1/32` | Caddy 앞단에 별도의 사내 로드밸런서가 있을 때, 해당 프록시의 `X-Forwarded-For` 헤더를 신뢰하기 위한 CIDR 대역입니다. |
+| `CADDY_TRUSTED_PROXIES` | `127.0.0.1/32` | Caddy 앞단에 별도의 로드밸런서가 있을 때, 해당 프록시의 `X-Forwarded-For` 헤더를 신뢰하기 위한 CIDR 대역입니다. |
 | `SESSION_SECRET` | 자동 생성 | `codesh_sid` 쿠키 서명에 사용하는 최소 32자의 비밀키입니다. |
 | `COLLAB_SECRET` | 자동 생성 | API 서버와 Collab 서버가 협업 세션 토큰(HMAC-SHA256)을 검증할 때 공유하는 최소 32자의 비밀키입니다. |
 | `ADMIN_TOKEN` | 비어 있음 | `/api/admin/*` 및 관리 콘솔 접근에 사용하는 Bearer 토큰입니다. 비워두면 관리자 기능이 비활성화됩니다. |
@@ -72,8 +72,8 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 | `RATE_LIMIT_CODE_PER_MIN` | `30` | 클라이언트 IP당 분당 허용되는 참여 코드 확인 요청 횟수입니다. |
 | `RATE_LIMIT_CREATE_PER_MIN` | `60` | 클라이언트 IP당 분당 허용되는 공유 생성 요청 횟수입니다. |
 | `RATE_LIMIT_LOGIN_PER_MIN` | `10` | 클라이언트 IP당 분당 허용되는 인증/로그인 시도 횟수입니다. |
-| `COMPOSE_PROFILES` | 주석 처리됨 | `mdns`로 지정하면 사내 LAN용 mDNS 사이드카 컨테이너가 함께 실행됩니다. |
-| `MDNS_HOSTNAME` | `codesh.local` | mDNS를 통해 사내망에 알릴 도메인 이름입니다. |
+| `COMPOSE_PROFILES` | 주석 처리됨 | `mdns`로 지정하면 로컬 네트워크용 mDNS 사이드카 컨테이너가 함께 실행됩니다. |
+| `MDNS_HOSTNAME` | `codesh.local` | mDNS를 통해 로컬 네트워크에 알릴 도메인 이름입니다. |
 | `MDNS_IP` | 비어 있음 | 호스트에 여러 네트워크 카드가 있을 때 mDNS로 응답할 특정 IP 주소입니다. 비워두면 비루프백 IPv4 전체를 공지합니다. |
 
 ---
@@ -83,7 +83,7 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 도메인 기반 HTTPS를 구성하려면 `SITE_ADDRESS`를 도메인으로 설정하고 `deploy/tls/` 디렉터리에 `.caddy` 파일을 추가합니다.
 
 ### 4.1 자체 인증서 적용
-사내 인증기관(CA)에서 발급받은 인증서와 키를 사용하는 경우:
+인증기관(CA)에서 발급받은 인증서와 키를 사용하는 경우:
 1. 인증서 파일(`codesh.crt`)과 비밀키(`codesh.key`)를 `deploy/tls/`에 배치합니다.
 2. `deploy/tls/tls.caddy` 파일을 생성하고 다음 내용을 작성합니다.
    ```caddy
@@ -167,7 +167,7 @@ docker compose up -d --scale collab=3
 - **감사 로그 기록 (`audit.enabled`, 기본값: false)**: 공유 생성, 열람, 다운로드, 삭제 활동을 기록할지 여부입니다.
 - **감사 로그 보관 기간 (`audit.retentionDays`, 기본값: 90)**: 감사 로그 보관 일수입니다.
 - **비밀 정보 경고 (`secretWarning`, 기본값: true)**: API 키나 비밀번호 패턴의 텍스트가 입력될 때 경고 표시 여부입니다.
-- **OIDC / LDAP 로그인 (`auth.oidc`, `auth.ldap`, 기본값: null)**: 사내 인증 제공자 연동 설정입니다.
+- **OIDC / LDAP 로그인 (`auth.oidc`, `auth.ldap`, 기본값: null)**: 조직에서 사용하는 인증 제공자 연동 설정입니다.
 - **바닥글 연락처 (`contact`, 기본값: "")**: 소개 페이지 하단에 노출될 IT 지원 부서 이메일 또는 연락처입니다.
 - **코드 템플릿 (`templates`, 기본값: `[]`)**: 새 공유를 만들 때 고를 수 있는 조직 전용 시작 파일입니다. 관리 콘솔 **설정** 탭의 **코드 템플릿**에서 추가·수정·삭제하며(삭제 전 확인), 저장하면 바로 템플릿 선택 창에 **우리 조직** 그룹으로 나타납니다.
   - 최대 50개, 템플릿마다 `{id, name(60자), language, description(200자), files}`. `id`는 서로 달라야 하고 `builtin-`으로 시작할 수 없습니다(기본 제공 템플릿과 충돌 방지). 관리 콘솔은 새 템플릿에 `org-…` id를 부여합니다.
@@ -214,7 +214,7 @@ docker compose up -d --scale collab=3
 - `GET /readyz`: Collab 서버의 의존성 준비 완료 상태 확인 (MongoDB 및 Valkey 연결 검증). Caddy를 거치지 않으므로 collab 컨테이너의 3002 포트에서 확인합니다(Compose 헬스체크가 사용).
 
 ### 10.2 프로메테우스 메트릭 수집
-Caddy는 보안을 위해 사내 비공개 IP 대역(`private_ranges`)의 요청에 대해서만 메트릭 경로를 개방합니다.
+Caddy는 보안을 위해 사설 IP 대역(`private_ranges`)의 요청에 대해서만 메트릭 경로를 개방합니다.
 - `GET /metrics/api`: API 서버의 HTTP 요청 처리량, 지연 시간, Fastify 및 프로세스 상태.
 - `GET /metrics/collab`: Collab 서버의 Hocuspocus 활성 연결 수(`hocuspocus_connections_count`), 활성 문서 수(`hocuspocus_documents_count`), 이벤트 루프 상태.
 - Collab 인스턴스가 여러 개인 경우 Caddy를 통한 `/metrics/collab`은 복제본 중 하나로부터 응답하므로, 인스턴스별 메트릭이 필요한 경우 컨테이너 포트(3002)로 직접 스크랩하십시오.
@@ -251,7 +251,19 @@ pnpm load -- --url http://codesh.corp --shares 20 --writers 3 --viewers 10 --dur
 CLI는 다음 순서로 대상 서버 URL을 찾습니다.
 1. 명령행 플래그: `--url <URL>`
 2. 환경 변수: `CODESH_URL`
-3. 설정 파일: `~/.config/codesh.json`의 `"url"` 필드
+3. 설정 파일: Windows는 `%APPDATA%\codesh\codesh.json`, Linux/macOS는 `~/.config/codesh.json`의 `"url"` 필드
+
+Windows에서 저장소를 내려받은 뒤 Node.js 22 이상과 Corepack을 준비하고 다음 명령으로 CLI를 빌드해 전역 링크를 등록할 수 있습니다.
+```powershell
+corepack pnpm install --filter @codesh/cli...
+corepack pnpm --filter @codesh/cli build
+corepack pnpm --filter @codesh/cli link --global
+$env:CODESH_URL = "http://192.168.1.20"
+codesh push .\sample-project --no-qr
+codesh open 123456
+codesh pull 123456 -o .\received
+```
+폴더 공유는 폴더 이름을 포함한 상대 경로로 보관하고, 경로 구분자는 공유 안에서 `/`로 정규화됩니다. 내려받은 텍스트 파일의 줄바꿈 바이트는 변경하지 않습니다. `codesh open`은 Windows 기본 브라우저를 열며, QR 출력은 ANSI 색상 코드 없이 표시합니다. `Ctrl+C`는 실행 중인 CLI를 종료합니다.
 
 ### 12.2 주요 명령어
 - **코드 및 파일 공유 (`codesh push`)**:
@@ -276,9 +288,54 @@ CLI는 다음 순서로 대상 서버 URL을 찾습니다.
 
 ---
 
-## 13. 로그 및 문제 해결
+## 13. Windows에서 운영하기
 
-### 13.1 로그 위치 및 로테이션
+### 13.1 요구사항과 첫 실행
+
+- Windows 10/11에서 Docker Desktop을 설치하고 WSL2 backend와 Linux containers를 사용합니다.
+- Docker Compose v2가 포함된 Docker Desktop을 사용합니다. 설치 상태는 PowerShell에서 `docker compose version`으로 확인합니다.
+- 저장소에서 직접 운영할 때는 `deploy` 폴더에서 다음과 같이 준비합니다.
+  ```powershell
+  Copy-Item .env.example .env
+  .\generate-secrets.ps1
+  docker compose up -d --build
+  ```
+- TLS 파일을 사용할 경우 `deploy\tls`에 인증서, 키, Caddy 설정을 둡니다. Compose는 이 경로를 읽기 전용으로 컨테이너에 연결합니다. Windows에는 Unix `chmod 600`이 없으므로 PowerShell 시크릿 스크립트가 `.env`의 ACL을 현재 사용자로 제한합니다.
+- `.gitattributes`는 Linux 이미지로 복사되는 텍스트 파일을 LF로 체크아웃하므로 Windows Git의 `core.autocrlf=true` 설정에서도 shell script, Dockerfile, Caddyfile, Compose 설정이 Linux 줄바꿈을 유지합니다.
+
+### 13.2 오프라인 번들
+
+번들을 Windows PC로 복사하고 PowerShell에서 압축을 풉니다. `tar.exe`는 Windows 10/11에 포함되어 있습니다.
+```powershell
+tar.exe -xzf .\codesh-<버전>.tar.gz
+Set-Location .\codesh-<버전>
+$env:PUBLIC_URL = "http://192.168.1.20"
+./install.ps1
+./backup.ps1
+./restore.ps1 .\backups\codesh-<시각>.archive.gz
+./upgrade.ps1 ..\codesh-<새버전>.tar.gz
+```
+설치 스크립트는 이미지를 `docker load`로 읽고 `.env`를 준비한 다음 Compose 스택을 시작하고 `/healthz` 응답을 기다립니다. 기존 `.env`가 있으면 설치 시 그대로 유지합니다. 복원은 현재 데이터베이스를 대체하며, 기본 동작은 확인을 요청합니다. 확인을 생략하려면 `./restore.ps1 <백업파일> --yes`를 사용하십시오.
+
+### 13.3 같은 Wi-Fi에서 휴대전화로 접속
+
+Windows PC와 휴대전화를 같은 Wi-Fi에 연결하고, 공유기에서 무선 단말 간 통신 차단(client isolation)이 켜져 있지 않은지 확인합니다. Windows에서 `ipconfig`를 실행해 Wi-Fi 어댑터의 IPv4 주소를 확인한 뒤 `http://<PC의-IPv4-주소>:<HTTP_PORT>`로 접속합니다. 기본 HTTP 포트는 `80`이며, 다른 포트를 설정했다면 해당 값을 사용합니다.
+
+Windows Defender 방화벽에서 해당 TCP 포트를 **Private 네트워크 프로필**에 허용합니다. 관리자 PowerShell에서 기본 포트를 열려면 다음 명령을 실행합니다.
+```powershell
+New-NetFirewallRule -DisplayName "codesh HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -Profile Private
+```
+`HTTP_PORT`를 변경했다면 `-LocalPort`에도 같은 포트를 지정합니다. HTTPS를 사용하는 경우 `HTTPS_PORT`도 별도 규칙으로 허용합니다. 이 예시는 로컬 네트워크에서 PC 주소로 직접 접속하므로 `localhost`를 휴대전화 주소에 입력하지 않습니다.
+
+### 13.4 지원 범위
+
+Docker Desktop에서는 `mdns` sidecar의 `network_mode: host`가 동작하지 않으므로 `COMPOSE_PROFILES=mdns`를 설정하지 마십시오. 이 환경에서는 위의 PC IPv4 주소를 사용하거나 네트워크에서 제공하는 DNS 이름을 사용하십시오. mDNS sidecar는 Linux Docker host에서만 사용할 수 있습니다.
+
+---
+
+## 14. 로그 및 문제 해결
+
+### 14.1 로그 위치 및 로테이션
 모든 서비스는 Docker `json-file` 로깅 드라이버를 사용하며, 컨테이너당 **최대 10MB x 3개 파일(총 30MB)**로 제한되어 디스크 풀림을 방지합니다.
 ```sh
 docker compose logs -f api       # API 서버 로그
@@ -288,7 +345,7 @@ docker compose logs -f mongo     # 데이터베이스 로그
 docker compose logs -f valkey    # 캐시/메시징 로그
 ```
 
-### 13.2 주요 장애 유형과 대응 방법
+### 14.2 주요 장애 유형과 대응 방법
 
 - **503 `unavailable` (실시간 편집 서버 응답 없음)**:
   - API 서버가 Collab 서버와의 통신(`cmd:<shareId>`) 응답을 5초 이내에 수신하지 못한 경우 발생합니다.
