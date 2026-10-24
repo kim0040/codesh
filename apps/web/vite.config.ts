@@ -81,11 +81,13 @@ export default defineConfig({
   server: {
     port: webPort,
     strictPort: true,
+    // As Caddy serves the app shell (deploy/caddy/Caddyfile).
+    headers: { "Referrer-Policy": "no-referrer" },
     proxy: {
       "/api": `http://localhost:${apiPort}`,
       "/collab": { target: `ws://localhost:${collabPort}`, ws: true },
     },
   },
-  preview: { port: webPort, strictPort: true },
+  preview: { port: webPort, strictPort: true, headers: { "Referrer-Policy": "no-referrer" } },
   build: { target: "es2023" },
 });

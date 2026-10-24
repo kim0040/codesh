@@ -97,9 +97,12 @@
 
 	# Everything else is the SPA: files that exist (index.html, the service worker, manifest,
 	# icons) are revalidated on every load; any other path gets index.html.
+	# The app shell sends no Referer at all: a legacy `?key=` address must not leave in one
+	# before the app has scrubbed it (docs/ARCHITECTURE.md §14).
 	handle {
 		root * /srv
 		header Cache-Control "no-cache"
+		header Referrer-Policy no-referrer
 		encode zstd gzip
 		try_files {path} /index.html
 		file_server
