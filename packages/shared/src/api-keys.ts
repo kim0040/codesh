@@ -4,6 +4,12 @@
  */
 
 export const apiKeys = {
+  pinFailsShare: (shareId: string) => `pinfail:s:${shareId}` as const,
+  admittedNetworks: (shareId: string) => `admitted-net:${shareId}` as const,
+  bannedNetworks: (shareId: string) => `banned-net:${shareId}` as const,
+  quota: (kind: "shares" | "uploads" | "bytes", scope: "c" | "i", key: string) =>
+    `quota:${kind}:${scope}:${key}` as const,
+  streams: (scope: "c" | "i", key: string) => `sse:${scope}:${key}` as const,
   /** HASH clientId -> edit key presented at admission ("" when none). Who passed PIN / approval. */
   grants: (shareId: string) => `grants:${shareId}` as const,
   /** Monotonic counter behind `PermMessage.version`. */

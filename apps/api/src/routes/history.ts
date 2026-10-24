@@ -7,10 +7,10 @@ import {
   shareParamsSchema,
 } from "@codesh/shared";
 import * as Y from "yjs";
-import { findShare, requireOwner } from "../access.js";
+import { accessOf, findShare, requireOwner } from "../access.js";
 import type { Ctx } from "../ctx.js";
 import { contentBytes, readContent, sendCommand } from "../docs.js";
-import { notFound } from "../errors.js";
+import { forbidden, notFound } from "../errors.js";
 import { type App, OK } from "./types.js";
 
 /** Edit history is kept server-side and only the owner may read it (never sent to participants). */
@@ -52,6 +52,8 @@ export function historyRoutes(app: App, ctx: Ctx): void {
     async (request) => {
       const share = await findShare(ctx, request.params.id);
       requireOwner(share, request.session);
+      if (share.labId && (await accessOf(ctx, share, request.session)).role === "view")
+        throw forbidden("A locked lab share is read-only");
       const snapshot = await ctx.stores.snapshots.get(share.id, "history", request.body.seq);
       if (!snapshot) throw notFound("No such history entry");
 

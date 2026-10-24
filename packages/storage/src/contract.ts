@@ -1,7 +1,12 @@
 import type { LabRecord, ShareRecord } from "@codesh/shared";
 import { defaultSettings } from "@codesh/shared";
 import { describe, expect, it } from "vitest";
-import { DuplicateSeqError, FileTooLargeError, type Stores } from "./types.js";
+import {
+  DuplicateSeqError,
+  FileTooLargeError,
+  StorageCapacityError,
+  type Stores,
+} from "./types.js";
 
 /** Behaviour every `Stores` implementation must have. `open` returns empty stores. */
 
@@ -287,6 +292,32 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
     });
 
     describe("FileStore", () => {
+      it("M3: reserves global upload bytes atomically and returns space after deletion", async () => {
+        const { files } = await open();
+        const input = (name: string) => ({
+          name,
+          ownerId: OWNER,
+          expiresAt: later(1000),
+          contentType: null,
+          stream: (async function* () {
+            yield new Uint8Array(6);
+          })(),
+        });
+        const results = await Promise.allSettled([
+          files.putStream(input("a"), 100, 10),
+          files.putStream(input("b"), 100, 10),
+        ]);
+        const accepted = results.find((result) => result.status === "fulfilled");
+        const refused = results.find((result) => result.status === "rejected");
+        expect(accepted?.status).toBe("fulfilled");
+        expect(refused?.status === "rejected" && refused.reason).toBeInstanceOf(
+          StorageCapacityError,
+        );
+        if (accepted?.status !== "fulfilled") throw new Error("missing upload");
+        await files.delete(accepted.value.id);
+        expect((await files.putStream(input("c"), 100, 10)).size).toBe(6);
+      });
+
       const upload = (overrides = {}) => ({
         name: "a.txt",
         contentType: "text/plain",

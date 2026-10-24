@@ -39,6 +39,7 @@ import {
   type ShareStore,
   type ShareUpdate,
   type SnapshotStore,
+  StorageCapacityError,
   type Stores,
   type UpdateEntry,
   type UpdateLog,
@@ -345,34 +346,50 @@ class MongoSnapshotStore implements SnapshotStore {
 class MongoFileStore implements FileStore {
   private readonly bucket: GridFSBucket;
 
-  constructor(db: Db) {
+  private ledgerReady: Promise<void> | null = null;
+  private readonly ledger: Collection<{ _id: string; bytes: number }>;
+
+  constructor(private readonly db: Db) {
+    this.ledger = db.collection("storage_quotas");
     this.bucket = new GridFSBucket(db, { bucketName: UPLOADS_BUCKET });
   }
 
   async put(upload: NewUpload) {
-    const { data, name, ...rest } = upload;
-    const metadata: UploadMetadata = defined({
-      ownerId: rest.ownerId,
-      shareId: rest.shareId,
-      expiresAt: rest.expiresAt,
-      contentType: rest.contentType,
+    const { data, ...rest } = upload;
+    return this.putStream({
+      ...rest,
+      stream: (async function* () {
+        yield data;
+      })(),
     });
-    const stream = this.bucket.openUploadStream(name, { metadata });
-    try {
-      await new Promise<void>((resolve, reject) => {
-        stream.once("finish", () => resolve());
-        stream.once("error", reject);
-        stream.end(data);
-      });
-    } catch (error) {
-      // Removes the chunks written so far.
-      await stream.abort().catch(() => {});
-      throw error;
-    }
-    return this.toRecord(stream.id as ObjectId, name, data.byteLength, metadata);
   }
 
-  async putStream(upload: NewUploadStream, maxBytes?: number) {
+  private async readyLedger(): Promise<void> {
+    if (!this.ledgerReady)
+      this.ledgerReady = (async () => {
+        if (await this.ledger.findOne({ _id: "uploads" })) return;
+        const [usage] = await this.db
+          .collection(`${UPLOADS_BUCKET}.files`)
+          .aggregate<{ bytes: number }>([{ $group: { _id: null, bytes: { $sum: "$length" } } }])
+          .toArray();
+        try {
+          await this.ledger.updateOne(
+            { _id: "uploads" },
+            { $setOnInsert: { bytes: usage?.bytes ?? 0 } },
+            { upsert: true },
+          );
+        } catch (error) {
+          if (!isDuplicateKey(error)) throw error;
+        }
+      })().catch((error) => {
+        this.ledgerReady = null;
+        throw error;
+      });
+    await this.ledgerReady;
+  }
+
+  async putStream(upload: NewUploadStream, maxBytes?: number, maxTotalBytes?: number) {
+    await this.readyLedger();
     const { stream, name, ...rest } = upload;
     const metadata: UploadMetadata = defined({
       ownerId: rest.ownerId,
@@ -383,6 +400,24 @@ class MongoFileStore implements FileStore {
     const target = this.bucket.openUploadStream(name, { metadata });
     let size = 0;
     let tooLarge = false;
+    let reserved = 0;
+    const ledger = this.ledger;
+    async function* charged() {
+      for await (const chunk of stream) {
+        const accepted = await ledger.findOneAndUpdate(
+          {
+            _id: "uploads",
+            ...(maxTotalBytes === undefined
+              ? {}
+              : { bytes: { $lte: maxTotalBytes - chunk.byteLength } }),
+          },
+          { $inc: { bytes: chunk.byteLength } },
+        );
+        if (!accepted) throw new StorageCapacityError();
+        reserved += chunk.byteLength;
+        yield chunk;
+      }
+    }
     const limit = new Transform({
       transform(chunk: Uint8Array, _encoding, done) {
         size += chunk.byteLength;
@@ -392,15 +427,20 @@ class MongoFileStore implements FileStore {
       },
     });
     try {
-      await pipeline(stream, limit, target);
+      await pipeline(charged(), limit, target);
     } catch (error) {
       // Drops the chunks written so far; the file document is only written when the stream ends.
-      await target.abort().catch(() => undefined);
+      const cleaned = await target.abort().then(
+        () => true,
+        () => false,
+      );
+      if (cleaned) await ledger.updateOne({ _id: "uploads" }, { $inc: { bytes: -reserved } });
       throw error;
     }
     if (tooLarge) {
       // The upload finished cleanly, so no chunk insert is still in flight when it is deleted.
       await this.bucket.delete(target.id as ObjectId);
+      await ledger.updateOne({ _id: "uploads" }, { $inc: { bytes: -reserved } });
       throw new FileTooLargeError(maxBytes as number);
     }
     return this.toRecord(target.id as ObjectId, name, size, metadata);
@@ -443,8 +483,12 @@ class MongoFileStore implements FileStore {
 
   async delete(id: string) {
     const _id = this.parseId(id);
-    if (!_id || !(await this.bucket.find({ _id }).hasNext())) return false;
+    if (!_id) return false;
+    await this.readyLedger();
+    const file = await this.bucket.find({ _id }).next();
+    if (!file) return false;
     await this.bucket.delete(_id);
+    await this.ledger.updateOne({ _id: "uploads" }, { $inc: { bytes: -file.length } });
     return true;
   }
 
@@ -463,7 +507,7 @@ class MongoFileStore implements FileStore {
 
   private async deleteWhere(filter: Record<string, unknown>) {
     const files = await this.bucket.find(filter, { projection: { _id: 1 } }).toArray();
-    for (const file of files) await this.bucket.delete(file._id);
+    for (const file of files) await this.delete(file._id.toHexString());
     return files.length;
   }
 

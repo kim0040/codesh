@@ -12,6 +12,7 @@ import { z } from "zod";
 import type { Ctx } from "../ctx.js";
 import { ApiError, forbidden, invalid, notFound, tooLarge } from "../errors.js";
 import { attachment, basename, decodeText, sanitizePath, utf8Length } from "../files.js";
+import { chargeQuota, chargeUpload } from "../quotas.js";
 import { createShare } from "../shares.js";
 import {
   discardUpload,
@@ -224,6 +225,7 @@ export function transferRoutes(app: App, ctx: Ctx): void {
     async (request) => {
       if (!request.isMultipart()) throw invalid("Expected multipart/form-data");
       const { session } = request;
+      await chargeQuota(ctx, session.clientId, session.ip, "uploads");
       const settings = await ctx.settings();
       const maxBytes = Math.floor(settings.maxUploadMB * 1024 * 1024);
       const tooBig = () => tooLarge(`Uploads are limited to ${settings.maxUploadMB} MB`);
@@ -240,7 +242,7 @@ export function transferRoutes(app: App, ctx: Ctx): void {
               name: basename(sanitizePath(part.filename) ?? "upload"),
               contentType: part.mimetype || null,
               ownerId: session.clientId,
-              stream: part.file,
+              stream: chargeUpload(ctx, session.clientId, session.ip, part.file),
               maxBytes: maxBytes - total,
             });
             stored.push(meta);
@@ -270,8 +272,12 @@ export function transferRoutes(app: App, ctx: Ctx): void {
         names.push(part.filename);
         entries.push(
           ...(isZip(part.filename)
-            ? await unpack(part.file, budget)
-            : await readTextFile(part.filename, part.file, budget)),
+            ? await unpack(chargeUpload(ctx, session.clientId, session.ip, part.file), budget)
+            : await readTextFile(
+                part.filename,
+                chargeUpload(ctx, session.clientId, session.ip, part.file),
+                budget,
+              )),
         );
       }
       if (names.length === 0) throw invalid("No files in the upload");
@@ -291,6 +297,7 @@ export function transferRoutes(app: App, ctx: Ctx): void {
       );
       const { response } = await createShare(ctx, {
         ownerId: session.clientId,
+        ip: session.ip,
         title,
         files,
         net: session.net,

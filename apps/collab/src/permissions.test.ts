@@ -73,6 +73,98 @@ describe.runIf(available)("collab permissions", () => {
     });
   });
 
+  it("L4: rejects a forged comment author before it reaches another participant", async () => {
+    const {
+      share,
+      clients: [editor, watcher],
+    } = await room(["edit", "view"]);
+    if (!editor || !watcher) throw new Error("clients missing");
+    editor.doc.getArray("comments").push([
+      {
+        id: "forged",
+        fileId: "main",
+        anchor: {},
+        head: {},
+        author: { clientId: generateClientId(), name: "Teacher", color: "#336699" },
+        body: "forged attribution",
+        createdAt: Date.now(),
+        resolved: false,
+      },
+    ]);
+    await waitFor(() => editor.closes.includes("reauth"), "forged author refused");
+    expect(watcher.doc.getArray("comments").toJSON()).toEqual([]);
+    expect(server.collab.docs.get(share.id)?.document.getArray("comments").toJSON()).toEqual([]);
+    expect(
+      watcher.received.some((bytes) =>
+        new TextDecoder().decode(bytes).includes("forged attribution"),
+      ),
+    ).toBe(false);
+  });
+
+  it("L4: accepts a comment from its verified author and refuses replacement under another author", async () => {
+    const {
+      share,
+      clients: [author, editor],
+    } = await room(["edit", "edit"]);
+    if (!author || !editor) throw new Error("clients missing");
+    const comment = {
+      id: "owned-comment",
+      fileId: "main",
+      anchor: {},
+      head: {},
+      author: { clientId: author.clientId, name: "Tester", color: "#336699" },
+      body: "original",
+      createdAt: Date.now(),
+      resolved: false,
+    };
+    author.doc.getArray("comments").push([comment]);
+    await waitFor(() => editor.doc.getArray("comments").length === 1, "verified comment received");
+    editor.doc.transact(() => {
+      editor.doc.getArray("comments").delete(0);
+      editor.doc.getArray("comments").push([{ ...comment, body: "impersonated replacement" }]);
+    });
+    await waitFor(() => editor.closes.includes("reauth"), "replacement refused");
+    expect(server.collab.docs.get(share.id)?.document.getArray("comments").toJSON()).toEqual([
+      comment,
+    ]);
+  });
+
+  it("L4: accepts the localized guest name and resolving another author's comment", async () => {
+    const {
+      share,
+      clients: [owner, guest],
+    } = await room(["owner", "edit"]);
+    if (!owner || !guest) throw new Error("clients missing");
+    // The web client shows unnamed guests as "손님 1234"; the token carries "Guest-abcd".
+    const comment = {
+      id: "guest-comment",
+      fileId: "main",
+      anchor: {},
+      head: {},
+      author: { clientId: guest.clientId, name: "손님 1234", color: "#336699" },
+      body: "question",
+      createdAt: Date.now(),
+      resolved: false,
+    };
+    guest.doc.getArray("comments").push([comment]);
+    await waitFor(() => owner.doc.getArray("comments").length === 1, "guest comment received");
+    owner.doc.transact(() => {
+      owner.doc.getArray("comments").delete(0);
+      owner.doc.getArray("comments").push([{ ...comment, resolved: true }]);
+    });
+    await waitFor(
+      () =>
+        (guest.doc.getArray("comments").get(0) as { resolved?: boolean } | undefined)?.resolved ===
+        true,
+      "resolve received",
+    );
+    expect(guest.closes).toEqual([]);
+    expect(owner.closes).toEqual([]);
+    expect(server.collab.docs.get(share.id)?.document.getArray("comments").toJSON()).toEqual([
+      { ...comment, resolved: true },
+    ]);
+  });
+
   it("rejects updates from viewers", async () => {
     const {
       share,

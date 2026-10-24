@@ -1,6 +1,6 @@
-import { z } from "zod";
 import { languageSchema, roleSchema, titleSchema } from "./http.js";
 import { fileIdSchema } from "./ids.js";
+import { z } from "./zod.js";
 
 /** Messages between apps/collab and the editor beyond the Yjs protocol (§6.7, §6.8). */
 

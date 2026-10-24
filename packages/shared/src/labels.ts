@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { MAX_FOLDER_LENGTH, MAX_TAG_LENGTH, MAX_TAGS_PER_SHARE } from "./constants.js";
+import { z } from "./zod.js";
 
 /** A person's own folder and tags for a share in "my shares" (§5 `share_labels`, §9). */
 

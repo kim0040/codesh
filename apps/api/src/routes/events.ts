@@ -10,11 +10,13 @@ import {
 import type { Ctx } from "../ctx.js";
 import {
   listNearbyCached,
-  listPresence,
+  listPresenceCached,
   publishPresence,
   removePresence,
   touchPresence,
 } from "../presence.js";
+import { presenceFrame } from "../presence-frame.js";
+import { reserveStream } from "../streams.js";
 import type { App } from "./types.js";
 
 const MAX_BUFFERED_BYTES = 1024 * 1024;
@@ -27,6 +29,13 @@ export function eventRoutes(app: App, ctx: Ctx): void {
   app.get("/api/events", async (request, reply) => {
     const { session } = request;
     const { clientId, net } = session;
+    const lease = await reserveStream(ctx, session);
+    try {
+      await touchPresence(ctx, session);
+    } catch (error) {
+      await lease.release();
+      throw error;
+    }
     // A stream payload (not a hijacked socket) keeps Fastify's onSend hooks, which is where the
     // cookie of a first-time visitor is written.
     const stream = new PassThrough();
@@ -42,6 +51,7 @@ export function eventRoutes(app: App, ctx: Ctx): void {
       for (const timer of timers) clearInterval(timer);
       for (const off of unsubscribers) off();
       ctx.streamClosers.delete(close);
+      void lease.release().catch(() => undefined);
       if (counted) {
         ctx.metrics.sseConnections.dec();
         const left = (ctx.streams.get(clientId) ?? 1) - 1;
@@ -74,8 +84,14 @@ export function eventRoutes(app: App, ctx: Ctx): void {
       lastSent.set(event.event, body);
       send(event);
     };
-    const presenceList = async () =>
-      (await listPresence(ctx, net)).filter((user) => user.clientId !== clientId);
+    const sendPresence = async () => {
+      const frame = presenceFrame(await listPresenceCached(ctx, net));
+      if (closed || stream.writableLength > MAX_BUFFERED_BYTES) return close();
+      const fingerprint = frame.fingerprint(clientId);
+      if (lastSent.get("presence") === fingerprint) return;
+      lastSent.set("presence", fingerprint);
+      for (const chunk of frame.chunks(clientId)) stream.write(chunk);
+    };
 
     const onMessage = (message: string) => {
       let parsed: ReturnType<typeof sseEventSchema.safeParse>;
@@ -87,10 +103,7 @@ export function eventRoutes(app: App, ctx: Ctx): void {
       if (!parsed.success) return;
       const event = parsed.data as SseEvent;
       if (event.event === "presence") {
-        sendList({
-          event: "presence",
-          data: event.data.filter((user) => user.clientId !== clientId),
-        });
+        void sendPresence().catch(close);
       } else if (event.event === "nearby") {
         sendList(event);
       } else {
@@ -104,37 +117,44 @@ export function eventRoutes(app: App, ctx: Ctx): void {
       .header("X-Accel-Buffering", "no");
     stream.write("retry: 3000\n\n");
 
-    for (const channel of [channels.user(clientId), channels.net(net)]) {
-      const off = await ctx.hub.subscribe(channel, onMessage);
-      if (closed) off();
-      else unsubscribers.push(off);
+    try {
+      for (const channel of [channels.user(clientId), channels.net(net)]) {
+        const off = await ctx.hub.subscribe(channel, onMessage);
+        if (closed) off();
+        else unsubscribers.push(off);
+      }
+      if (closed) return reply.send(stream);
+
+      counted = true;
+      ctx.streams.set(clientId, (ctx.streams.get(clientId) ?? 0) + 1);
+      ctx.metrics.sseConnections.inc();
+      timers.push(
+        setInterval(() => {
+          if (!closed) stream.write(": heartbeat\n\n");
+        }, heartbeatMs),
+        setInterval(() => {
+          void (async () => {
+            try {
+              await lease.renew();
+              await touchPresence(ctx, session);
+              await sendPresence();
+              sendList({ event: "nearby", data: await listNearbyCached(ctx, net) });
+            } catch (error) {
+              request.log.warn({ err: error }, "sse refresh failed");
+              close();
+            }
+          })();
+        }, refreshMs),
+      );
+
+      await touchPresence(ctx, session);
+      await sendPresence();
+      sendList({ event: "nearby", data: await listNearbyCached(ctx, net) });
+      void publishPresence(ctx, net).catch(() => undefined);
+      return reply.send(stream);
+    } catch (error) {
+      close();
+      throw error;
     }
-    if (closed) return reply.send(stream);
-
-    counted = true;
-    ctx.streams.set(clientId, (ctx.streams.get(clientId) ?? 0) + 1);
-    ctx.metrics.sseConnections.inc();
-    timers.push(
-      setInterval(() => {
-        if (!closed) stream.write(": heartbeat\n\n");
-      }, heartbeatMs),
-      setInterval(() => {
-        void (async () => {
-          try {
-            await touchPresence(ctx, session);
-            sendList({ event: "presence", data: await presenceList() });
-            sendList({ event: "nearby", data: await listNearbyCached(ctx, net) });
-          } catch (error) {
-            request.log.warn({ err: error }, "sse refresh failed");
-          }
-        })();
-      }, refreshMs),
-    );
-
-    await touchPresence(ctx, session);
-    sendList({ event: "presence", data: await presenceList() });
-    sendList({ event: "nearby", data: await listNearbyCached(ctx, net) });
-    await publishPresence(ctx, net);
-    return reply.send(stream);
   });
 }

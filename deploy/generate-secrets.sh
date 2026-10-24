@@ -4,10 +4,11 @@
 #   ./generate-secrets.sh            # creates .env from .env.example if missing, then fills it
 #   ./generate-secrets.sh path/.env  # fills that file
 set -euo pipefail
+umask 077
 
 cd "$(dirname "$0")"
 FILE="${1:-.env}"
-SECRETS=(SESSION_SECRET COLLAB_SECRET ADMIN_TOKEN MONGO_PASSWORD VALKEY_PASSWORD)
+SECRETS=(SESSION_SECRET COLLAB_SECRET ADMIN_TOKEN MONGO_PASSWORD MONGO_APP_PASSWORD VALKEY_PASSWORD)
 
 if [ ! -f "$FILE" ]; then
   [ -f .env.example ] || { echo "generate-secrets: $FILE and .env.example are missing" >&2; exit 1; }
@@ -22,7 +23,6 @@ random_hex() {
   fi
 }
 
-umask 077
 TMP="$(mktemp "$FILE.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 cp "$FILE" "$TMP"

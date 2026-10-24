@@ -14,6 +14,7 @@ import { touchCode } from "./codes.js";
 import { safeEqual, verifyPin } from "./crypto.js";
 import type { Ctx } from "./ctx.js";
 import { ApiError, notFound } from "./errors.js";
+import { abuseKeys, addressKey } from "./net.js";
 import { refreshNearby } from "./presence.js";
 import { displayName, type Session } from "./session.js";
 
@@ -21,6 +22,8 @@ import { displayName, type Session } from "./session.js";
 
 /** Wrong PINs per share and client IP in one window; generous because a classroom can share an IP. */
 const PIN_IP_MAX_ATTEMPTS = 30;
+/** Wrong PINs per share in one window from all addresses together; a new PIN resets it. */
+export const PIN_SHARE_MAX_ATTEMPTS = 200;
 const GRANT_TTL_SECONDS = 30 * 24 * 3600;
 const PENDING_TTL_SECONDS = 24 * 3600;
 
@@ -35,6 +38,8 @@ export async function findShare(ctx: Ctx, id: string): Promise<ShareRecord> {
 
 export interface Access {
   owner: boolean;
+  /** Role before a temporary lock is applied. */
+  tokenRole: Role;
   /** The teacher of the lab this share belongs to: edits any student share, even when locked. */
   teacher: boolean;
   /** Passed PIN and approval (or does not need to). */
@@ -62,6 +67,11 @@ export async function accessOf(
   if (share.bans.includes(clientId))
     throw new ApiError("banned", "You were removed from this share");
   const owner = share.ownerId === clientId;
+  if (
+    !owner &&
+    (await ctx.valkey.sismember(apiKeys.bannedNetworks(share.id), addressKey(session.ip)))
+  )
+    throw new ApiError("banned", "This network address was removed from this share");
   const lab = share.labId ? await ctx.stores.labs.get(share.labId) : null;
   const teacher = lab !== null && lab.ownerId === clientId;
   const [grantKey, pending] = await Promise.all([
@@ -73,6 +83,7 @@ export async function accessOf(
     (candidate) => !!candidate && safeEqual(candidate, share.access.editKey),
   );
   let role: Role = owner ? "owner" : teacher ? "edit" : keyOk ? "edit" : share.access.default;
+  const tokenRole = role;
   // A locked share is read-only for everyone but the controller: the teacher in a lab, else the
   // owner. In a lab the student owns the share but must not be able to undo the teacher's lock.
   // The lab decides for its shares: a copy created while the teacher locks the lab may lag behind.
@@ -84,6 +95,7 @@ export async function accessOf(
   const needsApproval = share.access.requireApproval && !granted;
   return {
     owner,
+    tokenRole,
     teacher,
     granted,
     needsPin,
@@ -113,35 +125,38 @@ export function requireOwner(share: ShareRecord, session: Session): void {
 }
 
 /**
- * Reserves one PIN attempt for the client and for its IP before the (slow) PIN check runs, so
- * parallel requests cannot all see a count below the limit. KEYS: [client counter, ip counter],
- * ARGV: [window seconds, client limit, ip limit]. A refused attempt is not counted. Returns
- * `{allowed, ttl}`; the window starts with the first attempt and later ones do not extend it.
+ * Reserves one PIN attempt for the client, the share and the client address before the (slow) PIN
+ * check runs, so parallel requests cannot all see a count below the limit. KEYS: [client counter,
+ * then the others], ARGV: [window seconds, limit of each key]. A refused attempt is not counted.
+ * Returns `{allowed, ttl}`; the window starts with the first attempt and later ones do not extend it.
  */
 const RESERVE_PIN_ATTEMPT = `
-local client = redis.call('INCR', KEYS[1])
-redis.call('EXPIRE', KEYS[1], ARGV[1], 'NX')
-local ip = redis.call('INCR', KEYS[2])
-redis.call('EXPIRE', KEYS[2], ARGV[1], 'NX')
-if client > tonumber(ARGV[2]) or ip > tonumber(ARGV[3]) then
-  redis.call('DECR', KEYS[1])
-  redis.call('DECR', KEYS[2])
+local over = false
+for i = 1, #KEYS do
+  local count = redis.call('INCR', KEYS[i])
+  redis.call('EXPIRE', KEYS[i], ARGV[1], 'NX')
+  if count > tonumber(ARGV[i + 1]) then over = true end
+end
+if over then
+  for i = 1, #KEYS do redis.call('DECR', KEYS[i]) end
   return {0, redis.call('TTL', KEYS[1])}
 end
 return {1, 0}
 `;
 
-/** After a correct PIN: forgets the client's wrong attempts and gives the reserved IP slot back. */
+/** After a correct PIN: forgets the client's wrong attempts and gives the other reserved slots back. */
 const RELEASE_PIN_ATTEMPT = `
 redis.call('DEL', KEYS[1])
-if redis.call('EXISTS', KEYS[2]) == 1 and redis.call('DECR', KEYS[2]) <= 0 then
-  redis.call('DEL', KEYS[2])
+for i = 2, #KEYS do
+  if redis.call('EXISTS', KEYS[i]) == 1 and redis.call('DECR', KEYS[i]) <= 0 then
+    redis.call('DEL', KEYS[i])
+  end
 end
 return 1
 `;
 
 /**
- * Counts wrong PINs per client and per IP (§8: 5 per client per 10 minutes) and throws
+ * Counts wrong PINs per client, share and IP (§8: 5 per client per 10 minutes) and throws
  * `rate_limited` once a limit is reached, even for the right PIN, so guessing cannot continue.
  * The attempt is reserved atomically before the PIN is verified; a correct PIN gives it back.
  */
@@ -154,16 +169,20 @@ export async function checkPin(
   const hash = share.access.pinHash;
   if (hash === null) return;
   if (pin === undefined || pin === "") throw new ApiError("pin_required", "This share needs a PIN");
-  const clientKey = apiKeys.pinFailsClient(share.id, session.clientId);
-  const ipKey = apiKeys.pinFailsIp(share.id, session.ip);
+  const ipKeys = abuseKeys(session.ip);
+  const counters = [
+    apiKeys.pinFailsClient(share.id, session.clientId),
+    apiKeys.pinFailsShare(share.id),
+    ...ipKeys.map(({ key }) => apiKeys.pinFailsIp(share.id, key)),
+  ];
   const [allowed, ttl] = (await ctx.valkey.eval(
     RESERVE_PIN_ATTEMPT,
-    2,
-    clientKey,
-    ipKey,
+    counters.length,
+    ...counters,
     String(PIN_ATTEMPT_WINDOW_SECONDS),
     String(PIN_MAX_ATTEMPTS),
-    String(PIN_IP_MAX_ATTEMPTS),
+    String(PIN_SHARE_MAX_ATTEMPTS),
+    ...ipKeys.map(({ factor }) => String(PIN_IP_MAX_ATTEMPTS * factor)),
   )) as [number, number];
   if (allowed !== 1) {
     ctx.metrics.rateLimited.inc({ bucket: "pin" });
@@ -172,7 +191,7 @@ export async function checkPin(
     });
   }
   if (await verifyPin(pin, hash)) {
-    await ctx.valkey.eval(RELEASE_PIN_ATTEMPT, 2, clientKey, ipKey);
+    await ctx.valkey.eval(RELEASE_PIN_ATTEMPT, counters.length, ...counters);
     return;
   }
   throw new ApiError("pin_invalid", "Wrong PIN");
@@ -197,7 +216,7 @@ export function mintToken(
   ctx: Ctx,
   share: ShareRecord,
   session: Session,
-  role: Role,
+  access: Access,
 ): Promise<string> {
   return signCollabToken(
     {
@@ -205,7 +224,9 @@ export function mintToken(
       clientId: session.clientId,
       name: displayName(session),
       color: session.color,
-      role,
+      role: access.tokenRole,
+      controller: share.labId ? access.teacher : access.owner,
+      generation: share.access.generation ?? "",
       exp: Math.floor(Date.now() / 1000) + COLLAB_TOKEN_TTL_SECONDS,
     },
     ctx.config.collabSecret,

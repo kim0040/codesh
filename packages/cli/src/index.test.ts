@@ -48,12 +48,12 @@ describe("platform-specific paths and terminal integration", () => {
     expect(safeJoin("C:\\out", "NUL.txt", "win32")).toBeNull();
   });
 
-  it("uses a plain QR renderer and Explorer on Windows", () => {
+  it("uses a plain QR renderer and the URL handler on Windows", () => {
     expect(qrOutputType("win32")).toBe("utf8");
     expect(qrOutputType("linux")).toBe("terminal");
     expect(browserCommand("win32", "http://codesh.local/abc12345")).toEqual([
-      "explorer.exe",
-      ["http://codesh.local/abc12345"],
+      "rundll32.exe",
+      ["url.dll,FileProtocolHandler", "http://codesh.local/abc12345"],
     ]);
     expect(browserCommand("darwin", "http://codesh.local/abc12345")[0]).toBe("open");
   });

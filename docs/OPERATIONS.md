@@ -32,17 +32,19 @@ deploy/bundle.sh [버전]
 - 번들 아카이브 내부에는 모든 컨테이너 이미지(`images.tar`), 설정 예시(`.env.example`), 배포 파일(`docker-compose.yml`), 관리 스크립트(`install.sh`, `backup.sh`, `restore.sh`, `upgrade.sh` 등)가 포함됩니다.
 
 ### 2.2 폐쇄망 설치 절차
-생성된 번들을 대상 서버로 복사한 후 압축을 풀고 설치 스크립트를 실행합니다.
+생성된 번들과 `.sha256` 파일을 대상 서버로 복사하고, 체크섬을 확인한 다음 압축을 풀고 설치 스크립트를 실행합니다. 체크섬 값은 번들과 다른 신뢰할 수 있는 경로(예: 직접 전달한 메모)로 대조하십시오.
 ```sh
+sha256sum -c codesh-<버전>.tar.gz.sha256
 tar xzf codesh-<버전>.tar.gz
 cd codesh-<버전>
 PUBLIC_URL=http://codesh.corp ./install.sh
 ```
 `install.sh` 스크립트는 다음 작업을 순차적으로 수행합니다.
+1. 번들 안의 `SHA256SUMS`로 모든 파일을 검사하고, 맞지 않으면 아무것도 하지 않고 중단.
 1. `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`).
 2. `.env` 파일이 없으면 `.env.example`을 복사하고 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
 3. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성.
-4. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초).
+4. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 시작할 때마다 일회성 서비스 `mongo-users`가 앱 전용 MongoDB 사용자 `codesh_app`을 만들거나 비밀번호와 역할을 다시 맞춥니다.
 
 ---
 
@@ -63,12 +65,13 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 | `SESSION_SECRET` | 자동 생성 | `codesh_sid` 쿠키 서명에 사용하는 최소 32자의 비밀키입니다. |
 | `COLLAB_SECRET` | 자동 생성 | API 서버와 Collab 서버가 협업 세션 토큰(HMAC-SHA256)을 검증할 때 공유하는 최소 32자의 비밀키입니다. |
 | `ADMIN_TOKEN` | 비어 있음 | `/api/admin/*` 및 관리 콘솔 접근에 사용하는 Bearer 토큰입니다. 비워두면 관리자 기능이 비활성화됩니다. |
-| `MONGO_PASSWORD` | 자동 생성 | MongoDB의 `codesh` 사용자 비밀번호입니다. 최초 컨테이너 구동 시 볼륨을 시딩하는 데 사용되며, 이후 변경은 `mongosh`로 수행해야 합니다. |
+| `MONGO_PASSWORD` | 자동 생성 | MongoDB root 사용자 `codesh`의 비밀번호입니다. `mongo-users`, `backup.sh`, `restore.sh`만 사용하고 API와 Collab은 사용하지 않습니다. 최초 컨테이너 구동 시 볼륨을 시딩하는 데 사용되며, 이후 변경은 `mongosh`로 수행해야 합니다. |
+| `MONGO_APP_PASSWORD` | 자동 생성 | API와 Collab이 접속하는 `codesh_app` 사용자(`codesh` DB의 `readWrite`만 보유)의 비밀번호입니다. `mongo-users`가 시작할 때마다 이 값으로 맞추므로, 바꾼 뒤 `docker compose up -d`만 하면 됩니다. |
 | `VALKEY_PASSWORD` | 자동 생성 | Valkey 서버 접근 비밀번호(`requirepass`)입니다. |
 | `COLLAB_REPLICAS` | `1` | Collab(실시간 협업 편집) 인스턴스 복제본 수입니다. |
 | `MONGO_CACHE_GB` | `2` | MongoDB의 WiredTiger 캐시 메모리 크기(GB)입니다. |
-| `VALKEY_MAXMEMORY` | `1gb` | Valkey의 최대 메모리 사용량 한도입니다. 참여 코드와 접속자 상태를 보관하므로 메모리 초과 시 키를 임의 삭제하지 않는 `noeviction` 정책을 사용합니다. |
-| `RATE_LIMIT_API_PER_MIN` | `1200` | 클라이언트 IP당 분당 허용되는 일반 API 요청 횟수입니다. |
+| `VALKEY_MAXMEMORY` | `1gb` | Valkey의 최대 메모리 사용량 한도입니다. 참여 코드, 접속자 상태, 승인·차단과 보안 카운터를 보관하므로 메모리 초과 시 키를 임의 삭제하지 않는 `noeviction` 정책을 사용합니다(14장). |
+| `RATE_LIMIT_API_PER_MIN` | `1200` | 클라이언트 주소당 분당 허용되는 일반 API 요청 횟수입니다. 모든 `RATE_LIMIT_*`는 주소별로 세고, IPv6는 /64 전체에도 16배 한도의 카운터가 따로 있습니다. |
 | `RATE_LIMIT_CODE_PER_MIN` | `30` | 클라이언트 IP당 분당 허용되는 참여 코드 확인 요청 횟수입니다. |
 | `RATE_LIMIT_CREATE_PER_MIN` | `60` | 클라이언트 IP당 분당 허용되는 공유 생성 요청 횟수입니다. |
 | `RATE_LIMIT_LOGIN_PER_MIN` | `10` | 클라이언트 IP당 분당 허용되는 인증/로그인 시도 횟수입니다. |
@@ -92,14 +95,12 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 3. `.env` 파일에서 `SITE_ADDRESS=codesh.corp` 및 `PUBLIC_URL=https://codesh.corp`로 변경 후 컨테이너를 재시작합니다.
 
 ### 4.2 Caddy 내장 로컬 CA 사용
-테스트 또는 소규모 환경에서 Caddy 내장 CA를 사용하는 경우:
-1. `deploy/tls/tls.caddy` 파일에 다음 내용을 작성합니다.
-   ```caddy
-   tls internal
-   ```
-2. 클라이언트 브라우저에서 경고가 발생하지 않도록 Caddy 컨테이너 데이터 볼륨의 루트 인증서(`pki/authorities/local/root.crt`)를 추출하여 클라이언트 기기에 신뢰할 수 있는 루트 인증서로 등록해야 합니다.
+인터넷 없이 HTTPS를 제공하려면 Caddy 내장 CA를 사용합니다.
+1. `cp tls/internal.caddy.example tls/local.caddy`로 설정을 복사합니다(`tls internal`과 HTTPS 전용 HSTS).
+2. `.env`에 `SITE_ADDRESS=codesh.local`, `PUBLIC_URL=https://codesh.local`을 지정하고 `docker compose up -d caddy api`로 재시작합니다.
+3. 루트 인증서만(`root.crt`, 비밀키 `root.key`는 절대 배포하지 않음) 추출하여 지문을 확인한 뒤 모든 클라이언트 기기에 신뢰할 수 있는 루트 인증서로 등록합니다.
 
-자세한 내용은 [deploy/tls/README.md](../deploy/tls/README.md)를 참고하십시오.
+인증서 추출·지문 확인·운영체제별 등록 절차는 [TLS 안내](../deploy/tls/README.md)에 있습니다. CA 비밀키가 있는 `caddy-data` 볼륨은 보호하고 백업하십시오.
 
 ---
 
@@ -187,7 +188,8 @@ docker compose up -d --scale collab=3
 ```
 - 기본 저장 디렉터리는 `./backups`입니다.
 - 실행 중인 MongoDB 컨테이너 내부에서 `mongodump`를 실행하여 `codesh-<타임스탬프>.archive.gz` 아카이브 파일로 백업합니다.
-- Valkey는 임시 세션, 접속자 상태, 참여 코드 및 캐시만 보관하므로 백업 대상에서 제외됩니다.
+- 백업 파일은 `0600`, 새로 만드는 백업 디렉터리는 `0700`으로 생성됩니다. root 비밀번호는 컨테이너 안의 임시 설정 파일로만 전달되고 명령행 인자에 나타나지 않습니다.
+- Valkey(참여 코드, 접속자 상태, 승인·차단, 카운터)는 백업 대상에서 제외됩니다. 볼륨을 유지하고 운영 중 flush하지 마십시오.
 
 ### 9.2 백업 복원
 ```sh
@@ -200,6 +202,7 @@ docker compose up -d --scale collab=3
 ```sh
 ./upgrade.sh ../codesh-<새버전>.tar.gz
 ```
+- 번들 옆에 `.sha256` 파일이 있어야 합니다. 압축을 풀기 전에 아카이브 체크섬을, 이미지를 로드하기 전에 번들 안의 `SHA256SUMS`를 검사하며, 하나라도 다르면 백업·이미지 로드·파일 교체 없이 중단합니다.
 - 기존 데이터베이스를 자동으로 사전 백업합니다.
 - 새 번들의 컨테이너 이미지를 로드하고 관리 스크립트와 Compose 설정을 갱신합니다.
 - 기존 `.env` 설정을 그대로 유지하면서 신규 추가된 환경 변수 키가 있을 경우 기본값을 보충합니다.
@@ -214,7 +217,7 @@ docker compose up -d --scale collab=3
 - `GET /readyz`: Collab 서버의 의존성 준비 완료 상태 확인 (MongoDB 및 Valkey 연결 검증). Caddy를 거치지 않으므로 collab 컨테이너의 3002 포트에서 확인합니다(Compose 헬스체크가 사용).
 
 ### 10.2 프로메테우스 메트릭 수집
-Caddy는 보안을 위해 사설 IP 대역(`private_ranges`)의 요청에 대해서만 메트릭 경로를 개방합니다.
+Caddy는 보안을 위해 루프백과 전용 Compose 서브넷의 요청에 대해서만 메트릭 경로를 개방합니다.
 - `GET /metrics/api`: API 서버의 HTTP 요청 처리량, 지연 시간, Fastify 및 프로세스 상태.
 - `GET /metrics/collab`: Collab 서버의 Hocuspocus 활성 연결 수(`hocuspocus_connections_count`), 활성 문서 수(`hocuspocus_documents_count`), 이벤트 루프 상태.
 - Collab 인스턴스가 여러 개인 경우 Caddy를 통한 `/metrics/collab`은 복제본 중 하나로부터 응답하므로, 인스턴스별 메트릭이 필요한 경우 컨테이너 포트(3002)로 직접 스크랩하십시오.
@@ -315,3 +318,54 @@ docker compose logs -f valkey    # 캐시/메시징 로그
   - 네트워크 지연 등으로 특정 클라이언트의 수신 버퍼가 4MB를 초과하면 서버가 4408 코드로 연결을 강제 종료합니다. 클라이언트는 자동으로 재연결을 시도하여 상태를 다시 동기화합니다.
 - **403 `forbidden` (CSRF / Origin 불일치)**:
   - API 상태 변경 요청에 `X-Codesh: 1` 헤더가 누락되었거나 허용되지 않은 출처에서 전송된 경우 차단됩니다. API 연동 스크립트 작성 시 해당 헤더를 추가하십시오.
+
+
+## 14. 운영자 보안 점검표
+
+- [ ] **HTTPS**: 실제 접속 origin을 `PUBLIC_URL=https://...`로 지정해 `Secure` 쿠키를 사용합니다. 로컬 CA 옵션과 신뢰 등록은 [TLS 안내](../deploy/tls/README.md)를 따릅니다. 기본 `SITE_ADDRESS=:80` HTTP도 사용할 수 있지만, 트래픽을 관찰·변조할 수 있는 사람에게 문서, 세션 쿠키, 관리자 토큰, PIN, 편집 키와 협업 토큰이 노출됩니다. 서명 쿠키와 private 주소는 암호화를 제공하지 않습니다.
+- [ ] **관리자 토큰**: `ADMIN_TOKEN`을 생성하고 접근 가능한 사람을 제한합니다. 빈 값이면 관리 API가 비활성화됩니다. 토큰을 URL·스크린샷·로그에 넣지 말고, 유출 시 즉시 교체하고 API를 재시작합니다.
+- [ ] **백업**: 정기 백업과 별도 호스트의 복원 연습을 수행합니다. `backup.sh`는 `umask 077`, 파일 `0600`, 디렉터리 `0700`을 적용합니다. 백업에는 PIN 해시, 편집 키, 인증 설정과 감사 기록이 포함되므로 암호화된 별도 보관소에 저장합니다. `caddy-data`의 CA 비밀키도 보호하고 백업합니다. Valkey에는 차단, 승인과 일회성 코드 상태가 있으므로 실행 중 임의로 flush하지 않습니다.
+- [ ] **메트릭**: Caddy의 `/metrics/api`, `/metrics/collab`은 루프백과 `NETWORK_SUBNET`에서만 접근됩니다. 일반 클라이언트 LAN은 허용하지 않습니다. 외부 수집기는 전용 네트워크 또는 인증된 프록시를 사용하고 Mongo/Valkey/API/Collab 포트를 공개하지 않습니다. 개발 Compose 포트도 기본적으로 `127.0.0.1`에만 바인딩됩니다.
+- [ ] **실제 클라이언트 주소**: 속도 제한, PIN 카운터, 할당량, SSE 한도와 차단은 클라이언트 주소별로 적용됩니다. IPv6는 주소별 한도에 더해 /64 전체에 16배 한도가 있습니다(한 기기가 /64 안의 주소를 마음대로 바꿀 수 있기 때문). `TRUST_PROXY`가 Caddy를 가리켜야 API가 실제 주소를 봅니다. Docker Desktop(macOS/Windows), rootless Docker, 또는 IPv6를 사용하지 않는 Compose 네트워크로 들어오는 IPv6 접속은 모든 클라이언트를 같은 주소(게이트웨이)로 보이게 합니다. 이 경우 한 반 전체가 주소별 한도를 함께 쓰고 `/metrics/*`도 모든 클라이언트에 열리므로, Linux 호스트의 rootful Docker에서 IPv4로 접속하게 하거나 한도를 인원에 맞게 올리십시오. `curl http://<서버>/api/session`을 여러 기기에서 호출한 뒤 `docker compose logs api`에서 서로 다른 주소가 보이는지 확인합니다.
+- [ ] **할당량과 디스크**: 아래 설정을 사용 인원에 맞게 조정하고, 429/503 증가·Mongo 볼륨 여유 공간·Valkey 사용량을 감시합니다. NAT 뒤의 클라이언트들은 주소별 한도를 공유합니다. 할당량은 첫 예약부터 시작하는 고정 창이며 실패한 업로드의 입장/수신량도 환급하지 않습니다. 공유로 변환하는 업로드는 수신량과 저장 문서량을 모두 계산합니다. 영구 저장 문서·편집 이력·DB 인덱스에는 별도 호스트 디스크 한도가 필요합니다.
+- [ ] **차단과 PIN**: 차단(ban)은 그 클라이언트가 참여한 주소도 막으므로 쿠키를 지워도 다시 들어오지 못합니다. 다만 같은 주소로 다른 참여자가 들어와 있으면(NAT 등) 반 전체가 막히지 않도록 주소 차단은 생략됩니다. 공유별 PIN 오답은 10분에 200회까지이며, 이를 넘기면 맞는 PIN도 거절됩니다. 누군가 일부러 오답을 반복해 공유를 막으면 소유자가 PIN을 새로 지정해 카운터를 초기화합니다.
+- [ ] **공개 범위**: 기본값은 누구나 편집 가능하고 주변 목록에 표시됩니다. 주변 목록은 네트워크 그룹 전체에 제목과 앞 8줄을 공개합니다. 민감한 내용은 관리 설정 `nearbyDefault=false` 또는 해당 공유의 `access.nearby=false`를 먼저 설정하고, 필요하면 PIN/승인을 사용합니다. 짧은 PIN은 강한 비밀번호가 아닙니다.
+- [ ] **공용 기기**: 현재 웹 앱은 방문한 문서를 IndexedDB에 보관합니다. 로그아웃만으로 이 사본이 삭제되지 않으므로 개인 브라우저 프로필을 사용하거나 기기 이용 후 사이트 데이터를 지웁니다. URL의 편집 키도 브라우저 기록과 화면에 남을 수 있습니다. 웹 변경 추적은 [아키텍처의 남은 항목](ARCHITECTURE.md#pending-web-owned-changes)을 참고합니다.
+- [ ] **오프라인 번들**: 아카이브와 `.sha256`을 신뢰할 수 있는 경로로 함께 전달합니다. `install.sh`는 추출된 `SHA256SUMS`를 검사하고, `upgrade.sh`는 압축 해제 전 아카이브 체크섬과 로드 전 내용 목록을 검사합니다. 체크섬은 서명이 아니므로 배포자 신원까지 보증하지는 않습니다.
+
+| 환경 변수 | 기본값 | 의미 |
+|---|---:|---|
+| `QUOTA_WINDOW_SECONDS` | 86400 | 저장 입장/바이트 한도 창, 초 |
+| `QUOTA_SHARES_PER_CLIENT` / `QUOTA_SHARES_PER_IP` | 200 / 1000 | 창 안의 공유 생성 수, 포크·실습 사본 포함 |
+| `QUOTA_UPLOADS_PER_CLIENT` / `QUOTA_UPLOADS_PER_IP` | 200 / 1000 | 창 안의 업로드 요청 수 |
+| `QUOTA_BYTES_PER_CLIENT` / `QUOTA_BYTES_PER_IP` | 536870912 / 2147483648 | 창 안의 수신/저장 문서 바이트 |
+| `UPLOAD_STORAGE_MAX_BYTES` | 10737418240 | 전체 GridFS 콘텐츠 상한, 동시 업로드 포함 |
+| `SSE_MAX_PER_CLIENT` / `SSE_MAX_PER_IP` | 20 / 200 | 동시 SSE 스트림 수(브라우저 탭마다 1개) |
+| `PRESENCE_MAX_PER_NET` | 500 | 네트워크 그룹의 접속자 목록 상한. 가득 차면 새 접속자는 목록에만 빠지고 이벤트는 계속 받습니다 |
+| `PENDING_MAX_PER_SHARE` | 100 | 공유별 승인 대기 수 |
+| `BROADCASTS_PER_MIN` | 5 | 주소 및 네트워크 그룹별 분당 전체 알림 수 |
+| `BROADCAST_FANOUT_MAX` | 500 | 전체 알림 대상 접속자 상한 |
+| `MONGO_APP_PASSWORD` | 생성됨 | 앱 DB 사용자 `codesh_app`의 비밀번호 |
+
+`*_PER_IP` 값은 주소 하나의 한도이며, IPv6 /64 전체에는 그 16배가 적용됩니다.
+
+Valkey는 `noeviction`으로 참여 코드, 문서 잠금, 승인과 PIN/속도 제한 카운터를 보존합니다. `maxmemory`의 90%부터 새 저장·프로필·SSE 입장을 503으로 거절하며, OOM 시 필수 쓰기는 실패 처리합니다. 읽기 경로의 전역 속도 제한은 크기가 제한된 보수적 프로세스 내 카운터로 전환하고 `/healthz`도 유지합니다. 기존 협업의 잠금 갱신과 잠깐의 캐시 지연을 위한 여유 공간이 필요하므로 사용량 경고는 90%보다 먼저 설정하십시오. TTL이 있는 코드나 보안 카운터를 임의 축출하는 정책으로 바꾸지 마십시오.
+
+GridFS 전역 바이트 예약은 Mongo의 `storage_quotas`에 보관됩니다. 기존 볼륨에서는 `uploads.files.length` 합계로 처음 초기화합니다. 업로더가 중단되거나 청크 정리가 실패하면 보수적으로 공간이 예약된 채 남을 수 있습니다. 업로드 거절(503)이 실제 사용량보다 이르게 나오면 원장을 다시 계산합니다. 원장 문서를 지우면 다음 업로드가 `uploads.files` 합계로 다시 만듭니다. 실행 중 원장을 지우면 진행 중 업로드 예약을 잃으므로 API·Collab을 멈춘 상태에서만 합니다.
+
+```sh
+./backup.sh
+docker compose stop api collab
+docker compose exec -T mongo sh -c 'mongosh --quiet -u codesh -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin codesh --eval "db.storage_quotas.deleteOne({ _id: \"uploads\" })"'
+docker compose start api collab
+```
+
+(이 일회성 명령은 컨테이너 안에서만 비밀번호를 인자로 넘깁니다.) 콘텐츠 한도는 WiredTiger, 인덱스 및 파일시스템 오버헤드를 포함하지 않습니다.
+
+### 14.1 MongoDB 최소 권한 사용자
+
+API와 Collab은 `codesh` DB의 `readWrite` 역할만 가진 `codesh_app` 사용자로 접속합니다. root 사용자 `codesh`(`MONGO_PASSWORD`)는 일회성 서비스 `mongo-users`, `backup.sh`, `restore.sh`만 사용합니다. `mongo-users`는 `docker compose up` 때마다 root로 인증해 `codesh_app`을 만들거나 비밀번호(`MONGO_APP_PASSWORD`)와 역할을 다시 맞추고 종료하며, API와 Collab은 그 성공 후에 시작합니다.
+
+이 사용자가 없던 이전 버전의 설치도 따로 전환할 필요가 없습니다. 이전 버전의 `upgrade.sh`로 이 버전 번들을 적용하면 새 `.env.example`의 `MONGO_APP_PASSWORD`가 추가되고 새 `generate-secrets.sh`가 값을 채운 뒤, 시작할 때 `mongo-users`가 기존 볼륨에 사용자를 만듭니다. 저장소에서 직접 `docker compose up`하는 설치는 먼저 `./generate-secrets.sh`를 한 번 실행하십시오(값이 없으면 Compose가 이를 안내하며 시작하지 않습니다).
+
+`mongo-users`가 실패하면(예: `.env`의 `MONGO_PASSWORD`가 볼륨의 root 비밀번호와 다름) API와 Collab은 시작하지 않습니다. `docker compose logs mongo-users`로 원인을 확인하십시오. root 비밀번호를 바꾸려면 먼저 `mongosh`로 볼륨의 비밀번호를 바꾼 뒤 `.env`를 같은 값으로 고칩니다.

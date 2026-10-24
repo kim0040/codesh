@@ -1,5 +1,7 @@
 import { apiKeys } from "@codesh/shared";
+import { StorageCapacityError } from "@codesh/storage";
 import type { Ctx } from "./ctx.js";
+import { ApiError } from "./errors.js";
 
 export interface UploadMeta {
   id: string;
@@ -27,16 +29,23 @@ export async function storeUpload(
 ): Promise<UploadMeta> {
   const settings = await ctx.settings();
   const expiresAt = new Date(Date.now() + settings.anonymousTtlHours * 3600 * 1000);
-  const record = await ctx.stores.files.putStream(
-    {
-      name: input.name,
-      contentType: input.contentType,
-      ownerId: input.ownerId,
-      expiresAt,
-      stream: input.stream,
-    },
-    input.maxBytes,
-  );
+  const record = await ctx.stores.files
+    .putStream(
+      {
+        name: input.name,
+        contentType: input.contentType,
+        ownerId: input.ownerId,
+        expiresAt,
+        stream: input.stream,
+      },
+      input.maxBytes,
+      ctx.config.limits.UPLOAD_STORAGE_MAX_BYTES,
+    )
+    .catch((error) => {
+      if (error instanceof StorageCapacityError)
+        throw new ApiError("unavailable", "Upload storage capacity reached; contact the operator");
+      throw error;
+    });
   const meta: UploadMeta = {
     id: record.id,
     name: record.name,
@@ -45,7 +54,12 @@ export async function storeUpload(
     ownerId: record.ownerId,
     expiresAt: record.expiresAt.getTime(),
   };
-  await cacheUploadMeta(ctx, meta);
+  try {
+    await cacheUploadMeta(ctx, meta);
+  } catch (error) {
+    await ctx.stores.files.delete(meta.id).catch(() => undefined);
+    throw error;
+  }
   return meta;
 }
 

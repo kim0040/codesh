@@ -20,6 +20,8 @@ export const keys = {
   nearbyNet: (net: string) => `nearby:${net}` as const,
   nearbyItem: (id: string) => `nearby:item:${id}` as const,
   pending: (shareId: string) => `pending:${shareId}` as const,
+  commandReceipt: (shareId: string, requestId: string) =>
+    `cmd:receipt:${shareId}:${requestId}` as const,
   docLock: (id: string) => `doclock:${id}` as const,
   sweeperLock: "lock:sweeper",
   rateLimit: (ip: string, bucket: string) => `rl:${ip}:${bucket}` as const,

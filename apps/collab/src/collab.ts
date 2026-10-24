@@ -56,6 +56,7 @@ import type {
 } from "@hocuspocus/server";
 import type { Redis } from "ioredis";
 import * as Y from "yjs";
+import { validCommentAuthors } from "./comments.js";
 import { applyMeta, syncContent } from "./content.js";
 import { ValkeyLock } from "./lock.js";
 import type { CollabMetrics } from "./metrics.js";
@@ -68,6 +69,8 @@ export interface CollabContext {
   color: string;
   role: Role;
   shareId: string;
+  controller: boolean;
+  generation: string;
   /** Perm messages this instance had received when access was checked (see `catchUp`). */
   permMark: number;
 }
@@ -118,8 +121,8 @@ export interface CollabDeps {
 }
 
 /** Viewers, and everyone but the owner of a locked share, cannot edit (§6.7). */
-export function isReadOnly(role: Role, locked: boolean): boolean {
-  return role === "view" || (locked && role !== "owner");
+export function isReadOnly(role: Role, locked: boolean, controller = role === "owner"): boolean {
+  return role === "view" || (locked && !controller);
 }
 
 class DocState {
@@ -318,6 +321,13 @@ export class Collab implements Extension<CollabContext> {
       .catch(() => {});
   }
 
+  private async currentShare(id: string): Promise<ShareRecord | null> {
+    const share = await this.deps.stores.shares.get(id);
+    if (!share?.labId) return share;
+    const lab = await this.deps.stores.labs.get(share.labId);
+    return lab ? { ...share, locked: lab.locked } : share;
+  }
+
   // auth
 
   async onAuthenticate({ token, documentName, connectionConfig }: onAuthenticatePayload) {
@@ -326,17 +336,22 @@ export class Collab implements Extension<CollabContext> {
     // Perm messages from now on may not be reflected in the share read below.
     const permMark = this.permCount;
     const share = await this.available(`authentication for ${documentName}`, () =>
-      this.deps.stores.shares.get(documentName),
+      this.currentShare(documentName),
     );
     if (!share) throw deny(COLLAB_DENY_REASONS.notFound);
     if (share.bans.includes(payload.clientId)) throw deny(COLLAB_DENY_REASONS.banned);
-    connectionConfig.readOnly = isReadOnly(payload.role, share.locked);
+    const controller = payload.controller ?? (!share.labId && payload.role === "owner");
+    if (!controller && (payload.generation ?? "") !== (share.access.generation ?? ""))
+      throw deny(COLLAB_DENY_REASONS.unauthorized);
+    connectionConfig.readOnly = isReadOnly(payload.role, share.locked, controller);
     const result: CollabContext = {
       clientId: payload.clientId,
       name: payload.name,
       color: payload.color,
       role: payload.role,
       shareId: payload.shareId,
+      controller,
+      generation: payload.generation ?? "",
       permMark,
     };
     return result;
@@ -354,7 +369,7 @@ export class Collab implements Extension<CollabContext> {
     }
 
     const share = await this.available(`loading ${documentName}`, () =>
-      this.deps.stores.shares.get(documentName),
+      this.currentShare(documentName),
     );
     if (!share) throw deny(COLLAB_DENY_REASONS.notFound);
     const lockKey = keys.docLock(documentName);
@@ -390,6 +405,12 @@ export class Collab implements Extension<CollabContext> {
     if (state.unloadTimer) clearTimeout(state.unloadTimer);
     state.unloadTimer = null;
     await this.catchUp(state, connection);
+    // A permission change can commit while authentication is in flight, even if pub/sub was lost.
+    const share = await this.available(`connected permissions for ${documentName}`, () =>
+      this.currentShare(documentName),
+    );
+    if (!share) return this.applyDelete(state);
+    this.applyShare(state, share, false);
   }
 
   /**
@@ -409,7 +430,7 @@ export class Collab implements Extension<CollabContext> {
     try {
       if (missed.some((m) => m.kind === "delete")) return this.applyDelete(state);
       if (missed.some((m) => m.kind === "lock")) {
-        const share = await this.deps.stores.shares.get(state.name);
+        const share = await this.currentShare(state.name);
         if (state.deleted || state.document.isDestroyed) return;
         if (!share) return this.applyDelete(state);
         this.applyShare(state, share, false);
@@ -529,6 +550,11 @@ export class Collab implements Extension<CollabContext> {
     if ((type !== 1 && type !== 2) || connection.readOnly) return;
     const state = this.docs.get(document.name);
     if (!state) return;
+    if (!validCommentAuthors(document, payload, context(connection))) {
+      connection.readOnly = true;
+      connection.close({ code: 4401, reason: COLLAB_CLOSE_REASONS.reauth });
+      return;
+    }
     const max = this.maxDocBytes();
     if (state.core.sizeEstimate + payload.byteLength <= max) return;
     if (onlyDeletes(payload)) return;
@@ -544,7 +570,11 @@ export class Collab implements Extension<CollabContext> {
     if (!this.refused.has(connection)) return;
     this.refused.delete(connection);
     const state = this.docs.get(document.name);
-    connection.readOnly = isReadOnly(context(connection).role, state?.locked ?? false);
+    connection.readOnly = isReadOnly(
+      context(connection).role,
+      state?.locked ?? false,
+      context(connection).controller,
+    );
   }
 
   /**
@@ -756,7 +786,7 @@ export class Collab implements Extension<CollabContext> {
     state.reconciling = true;
     state.reconciledAt = Date.now();
     try {
-      const share = await this.deps.stores.shares.get(state.name);
+      const share = await this.currentShare(state.name);
       if (state.deleted || state.document.isDestroyed) return;
       if (!share) {
         console.warn(`collab: share ${state.name} no longer exists, closing it`);
@@ -778,12 +808,17 @@ export class Collab implements Extension<CollabContext> {
     state.locked = share.locked;
     state.nearby = share.access.nearby;
     for (const c of state.document.getConnections()) {
-      const { clientId, role } = context(c);
+      const { clientId, role, controller, generation } = context(c);
       if (role !== "owner" && share.bans.includes(clientId)) {
         c.close({ code: 4403, reason: COLLAB_CLOSE_REASONS.kicked });
         continue;
       }
-      const readOnly = isReadOnly(role, state.locked);
+      if (!controller && generation !== (share.access.generation ?? "")) {
+        c.readOnly = true;
+        c.close({ code: 4401, reason: COLLAB_CLOSE_REASONS.reauth });
+        continue;
+      }
+      const readOnly = isReadOnly(role, state.locked, controller);
       if (!this.refused.has(c)) c.readOnly = readOnly;
       if (announceLock || lockChanged) {
         this.notify(c, { type: "locked", locked: state.locked, readOnly });
@@ -922,6 +957,16 @@ export class Collab implements Extension<CollabContext> {
 
     let error: CollabCommandError | undefined;
     try {
+      // A missing/invalid doc releases its lock before slower subscribers receive this command.
+      // Keep a short receipt so those subscribers cannot execute or answer the same request twice.
+      const first = await this.deps.redis.set(
+        keys.commandReceipt(shareId, requestId),
+        this.deps.instanceId,
+        "PX",
+        30_000,
+        "NX",
+      );
+      if (first !== "OK") return;
       error = parsed.success
         ? await this.runCommand(shareId, parsed.data)
         : COLLAB_COMMAND_ERRORS.invalid;
@@ -1036,6 +1081,7 @@ export class Collab implements Extension<CollabContext> {
     if (!state || state.document.isDestroyed || state.deleted) return;
     try {
       await this.enforce(state, message, state.document.getConnections());
+      if (message.kind === "role" || message.kind === "kick") await this.reconcile(state);
     } catch (error) {
       console.error(`collab: applying a ${message.kind} message to ${shareId} failed`, error);
       // Read the share again on the next lock tick.
@@ -1073,19 +1119,18 @@ export class Collab implements Extension<CollabContext> {
           state.roleVersions.set(clientId, message.version);
           for (const c of connections.filter(targets)) {
             context(c).role = role;
-            c.readOnly = isReadOnly(role, state.locked);
+            c.readOnly = isReadOnly(role, state.locked, context(c).controller);
             this.notify(c, { type: "role", role, readOnly: c.readOnly });
           }
           return;
         }
         for (const c of connections.filter(targets)) {
-          if (context(c).role !== "owner")
-            c.close({ code: 4401, reason: COLLAB_CLOSE_REASONS.reauth });
+          if (!context(c).controller) c.close({ code: 4401, reason: COLLAB_CLOSE_REASONS.reauth });
         }
         return;
       }
       case "lock": {
-        const share = await this.deps.stores.shares.get(state.name);
+        const share = await this.currentShare(state.name);
         if (state.deleted || state.document.isDestroyed) return;
         if (!share) return this.applyDelete(state);
         this.applyShare(state, share, true);

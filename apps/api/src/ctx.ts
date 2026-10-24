@@ -4,6 +4,7 @@ import {
   channels,
   type NearbyItem,
   type PermMessage,
+  type PresenceUser,
   type Settings,
   type SseEvent,
 } from "@codesh/shared";
@@ -58,6 +59,11 @@ export class Ctx {
   readonly nearbyCache = new Map<string, { at: number; list: Promise<NearbyItem[]> }>();
   readonly trusted: Cidr[];
   /** Open SSE streams in this process per client, so presence outlives a closed second tab. */
+  readonly presenceCache = new Map<string, { at: number; list: Promise<PresenceUser[]> }>();
+  readonly presencePublishes = new Map<string, Promise<void>>();
+  readonly fallbackRates = new Map<string, { count: number; until: number }>();
+  capacityAt = 0;
+  capacityAvailable = true;
   readonly streams = new Map<string, number>();
   /** Ends every open SSE stream; called when the server closes. */
   readonly streamClosers = new Set<() => void>();
@@ -103,14 +109,28 @@ export class Ctx {
   async publishPerm(shareId: string, kind: PermMessage["kind"], clientId?: string): Promise<void> {
     // One script, so two API instances can never publish their versions out of order.
     const message = JSON.stringify({ kind, ...(clientId ? { clientId } : {}) });
-    await this.valkey.eval(
-      PUBLISH_PERM,
-      1,
-      apiKeys.permVersion(shareId),
-      channels.perm(shareId),
-      message,
-      30 * 24 * 3600,
-    );
+    await this.valkey
+      .eval(
+        PUBLISH_PERM,
+        1,
+        apiKeys.permVersion(shareId),
+        channels.perm(shareId),
+        message,
+        30 * 24 * 3600,
+      )
+      .catch(async (error: unknown) => {
+        if (
+          !(error instanceof Error) ||
+          !/OOM|command not allowed when used memory/i.test(error.message)
+        )
+          throw error;
+        // Permission messages must still arrive when INCR cannot allocate a counter. Mongo's
+        // generation is the authority; kick/lock/delete and global role messages accept version 0.
+        await this.valkey.publish(
+          channels.perm(shareId),
+          JSON.stringify({ version: 0, kind, ...(clientId ? { clientId } : {}) }),
+        );
+      });
   }
 
   /** Writes an audit entry when `settings.audit.enabled`. */

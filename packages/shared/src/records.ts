@@ -1,6 +1,6 @@
-import { z } from "zod";
 import { ACCESS_LEVELS } from "./constants.js";
 import { clientIdSchema, joinCodeSchema, shareIdSchema, uploadIdSchema } from "./ids.js";
+import { z } from "./zod.js";
 
 /**
  * Domain shapes of the MongoDB collections (§5). They use `id` instead of Mongo's `_id`;
@@ -12,6 +12,8 @@ const binarySchema = z.instanceof(Uint8Array);
 export const accessSchema = z.object({
   default: z.enum(ACCESS_LEVELS),
   editKey: z.string(),
+  /** Persistent collab-token generation; absent on shares created before permission revocation. */
+  generation: z.string().optional(),
   pinHash: z.string().nullable(),
   requireApproval: z.boolean(),
   nearby: z.boolean(),

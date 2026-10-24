@@ -41,3 +41,45 @@ wait_healthy() {
   docker compose logs --tail 20 >&2 || true
   return 1
 }
+
+# mongo_transfer dump|restore: mongodump to stdout, or mongorestore from stdin, as the root user
+# inside the mongo container. The password goes through a private config file, never arguments.
+mongo_transfer() {
+  # shellcheck disable=SC2016 # expanded by the shell in the container
+  docker compose exec -T mongo sh -c '
+    set -eu
+    umask 077
+    cfg="$(mktemp)"
+    trap "rm -f $cfg" EXIT
+    mongosh --nodb --quiet --eval "print(\"password: \" + JSON.stringify(process.env.MONGO_INITDB_ROOT_PASSWORD))" </dev/null >"$cfg"
+    set -- --quiet --host localhost --username codesh --authenticationDatabase admin --config "$cfg" --archive --gzip
+    case "$0" in
+      dump) mongodump "$@" --db codesh ;;
+      restore) mongorestore "$@" --drop --nsInclude "codesh.*" ;;
+      *) exit 2 ;;
+    esac
+  ' "$1"
+}
+
+# SHA-256 detects corruption and mismatch; obtain the checksum via a trusted delivery channel.
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1;
+  else shasum -a 256 "$1" | cut -d ' ' -f 1; fi
+}
+
+verify_archive() {
+  [ -f "$1.sha256" ] || die "missing checksum: $1.sha256"
+  local expected
+  expected="$(awk 'NR == 1 {print $1}' "$1.sha256")"
+  [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || die "invalid archive checksum"
+  [ "$(sha256_file "$1")" = "$expected" ] || die "bundle checksum mismatch"
+}
+
+verify_bundle() {
+  local dir="$1"
+  [ -f "$dir/SHA256SUMS" ] || die "bundle SHA256SUMS is missing"
+  (cd "$dir" && {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum --quiet --strict -c SHA256SUMS;
+    else shasum -a 256 --quiet -c SHA256SUMS; fi
+  }) || die "bundle content checksum mismatch"
+}

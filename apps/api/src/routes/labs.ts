@@ -104,9 +104,15 @@ export function labRoutes(app: App, ctx: Ctx): void {
   };
 
   /** Each student works on a copy they own; the teacher edits it as controller of the lab. */
-  const forkForStudent = async (lab: LabRecord, clientId: string, content: DocContent | null) =>
+  const forkForStudent = async (
+    lab: LabRecord,
+    clientId: string,
+    content: DocContent | null,
+    ip: string,
+  ) =>
     createShare(ctx, {
       ownerId: clientId,
+      ip,
       title: content?.title || lab.title,
       language: content?.language,
       files: (content?.files ?? []).map((file) => ({
@@ -203,6 +209,7 @@ export function labRoutes(app: App, ctx: Ctx): void {
           current,
           session.clientId,
           await templateContent(current),
+          session.ip,
         );
         const withStudent = await ctx.stores.labs.addStudent(lab.id, {
           clientId: session.clientId,
@@ -283,7 +290,12 @@ export function labRoutes(app: App, ctx: Ctx): void {
 
         // Every student gets a fresh copy; the previous copy is no longer linked to the lab.
         await mapLimit(lab.students, 4, async (student) => {
-          const { share } = await forkForStudent(lab, student.clientId, content);
+          const { share } = await forkForStudent(
+            lab,
+            student.clientId,
+            content,
+            request.session.ip,
+          );
           await alignLock(
             share,
             await ctx.stores.labs.addStudent(lab.id, { ...student, shareId: share.id }),

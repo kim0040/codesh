@@ -1,7 +1,7 @@
-import { z } from "zod";
 import { nearbyItemSchema, presenceUserSchema } from "./http.js";
 import { clientIdSchema, labIdSchema, shareIdSchema, uploadIdSchema } from "./ids.js";
 import { userRefSchema } from "./user.js";
+import { z } from "./zod.js";
 
 /** SSE events of `GET /api/events` (§9.1): `event: <type>` plus JSON `data`. */
 

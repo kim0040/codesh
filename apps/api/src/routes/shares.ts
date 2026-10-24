@@ -36,7 +36,9 @@ import type { Ctx } from "../ctx.js";
 import { loadDoc, readContent, sendCommand, sharePreview } from "../docs.js";
 import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { attachment, basename, sanitizePath } from "../files.js";
+import { addressKey } from "../net.js";
 import { announceShare, removeNearby } from "../presence.js";
+import { rateLimit } from "../rate.js";
 import { displayName } from "../session.js";
 import { createShare, deleteShare, syncExpiry } from "../shares.js";
 import { type App, limited, mapLimit, OK } from "./types.js";
@@ -78,6 +80,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       });
       const { response } = await createShare(ctx, {
         ownerId: session.clientId,
+        ip: session.ip,
         title: body.title ?? "",
         language: body.language,
         files,
@@ -163,9 +166,30 @@ export function shareRoutes(app: App, ctx: Ctx): void {
         }
         if (share.access.requireApproval) {
           const pendingKey = keys.pending(share.id);
-          const added = await ctx.valkey.hset(pendingKey, session.clientId, displayName(session));
-          await ctx.valkey.expire(pendingKey, PENDING_TTL_SECONDS);
-          if (added === 1) {
+          const added = Number(
+            await ctx.valkey.eval(
+              ADD_PENDING,
+              1,
+              pendingKey,
+              session.clientId,
+              displayName(session),
+              ctx.config.limits.PENDING_MAX_PER_SHARE,
+              PENDING_TTL_SECONDS,
+            ),
+          );
+          if (added === -1)
+            throw new ApiError("rate_limited", "The waiting room is full", { "Retry-After": "60" });
+          let notify = added === 1;
+          if (notify) {
+            try {
+              await rateLimit(ctx, session.ip, `approval:${share.id}`, 10);
+              await rateLimit(ctx, "share", `approval:${share.id}`, 20);
+            } catch (error) {
+              if (!(error instanceof ApiError) || error.code !== "rate_limited") throw error;
+              notify = false;
+            }
+          }
+          if (notify) {
             await ctx.publishUser(share.ownerId, {
               event: "approval-request",
               data: { shareId: share.id, clientId: session.clientId, name: displayName(session) },
@@ -181,9 +205,15 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       const access = await accessOf(ctx, share, session, body.editKey);
       const role = access.role;
       if (role === null) throw forbidden("Not admitted");
+      await ctx.valkey.hset(
+        apiKeys.admittedNetworks(share.id),
+        session.clientId,
+        addressKey(session.ip),
+      );
+      await ctx.valkey.expire(apiKeys.admittedNetworks(share.id), 30 * 24 * 3600);
       await noteActivity(ctx, share);
       await ctx.audit(request, "share.join", share.id);
-      return { token: await mintToken(ctx, share, session, role), role };
+      return { token: await mintToken(ctx, share, session, access), role };
     },
   );
 
@@ -227,7 +257,13 @@ export function shareRoutes(app: App, ctx: Ctx): void {
             askRejoin = true;
           }
         }
-        if (wanted.requireApproval !== undefined) next.requireApproval = wanted.requireApproval;
+        if (wanted.requireApproval !== undefined) {
+          next.requireApproval = wanted.requireApproval;
+          if (wanted.requireApproval && !share.access.requireApproval) {
+            clearGrants = true;
+            askRejoin = true;
+          }
+        }
         if (wanted.nearby !== undefined) next.nearby = wanted.nearby;
         if (wanted.rotateEditKey) {
           next.editKey = randomKey();
@@ -237,6 +273,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
         const pinHash = next.pinHash === undefined ? share.access.pinHash : next.pinHash;
         const approval = next.requireApproval ?? share.access.requireApproval;
         if (pinHash !== null || approval) next.nearby = false;
+        if (askRejoin) next.generation = randomKey();
         patch.access = next;
       }
       if (body.locked !== undefined && body.locked !== share.locked) patch.locked = body.locked;
@@ -244,6 +281,8 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       // Title and language live in the document too; collab writes them (§6.11), so a refusal or
       // an unreachable collab leaves the share untouched.
       if (body.title !== undefined || body.language !== undefined) {
+        if (share.labId && (await accessOf(ctx, share, session)).role === "view")
+          throw forbidden("A locked lab share is read-only");
         await sendCommand(ctx, share.id, {
           kind: "meta",
           ...(body.title !== undefined ? { title: body.title } : {}),
@@ -275,6 +314,8 @@ export function shareRoutes(app: App, ctx: Ctx): void {
         // A client that queued under the old PIN must enter the new one as well.
         await ctx.valkey.del(apiKeys.grants(share.id), keys.pending(share.id));
       }
+      // A new PIN starts a new guessing window, so the owner can undo a lockout of the share.
+      if (body.access?.pin) await ctx.valkey.del(apiKeys.pinFailsShare(share.id));
       if (patch.locked !== undefined) await ctx.publishPerm(share.id, "lock");
       if (askRejoin) await ctx.publishPerm(share.id, "role");
       if (updated.access.nearby && !share.access.nearby) {
@@ -346,6 +387,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       const content = readContent(await loadDoc(ctx, share.id));
       const { response } = await createShare(ctx, {
         ownerId: session.clientId,
+        ip: session.ip,
         title: content.title || share.title,
         language: content.language || share.language,
         files: content.files.map((file) => ({
@@ -395,3 +437,11 @@ export function shareRoutes(app: App, ctx: Ctx): void {
     },
   );
 }
+
+const ADD_PENDING = `
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then return 0 end
+if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then return -1 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return 1
+`;

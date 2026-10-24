@@ -234,11 +234,15 @@ describe.runIf(available)("collab content commands (§6.11)", () => {
       { ok: false, error: COLLAB_COMMAND_ERRORS.invalid },
     ]);
     expect(
-      await harness.command(generateShareId(), {
-        requestId: requestId(),
-        kind: "meta",
-        title: "x",
-      }),
+      await harness.command(
+        generateShareId(),
+        {
+          requestId: requestId(),
+          kind: "meta",
+          title: "x",
+        },
+        200,
+      ),
     ).toEqual([{ ok: false, error: COLLAB_COMMAND_ERRORS.notFound }]);
     expect(client.text.toString()).toBe("untouched");
   });
