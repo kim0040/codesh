@@ -52,6 +52,11 @@ describe.runIf(available)("sweeper", () => {
       expiresAt: new Date(now.getTime() + DAY_MS),
     });
     await stores.files.put({ ...upload, expiresAt: old });
+    const owner = generateClientId();
+    const labels = { folder: "Week 1", tags: ["loops"] };
+    await stores.labels.set(owner, live.id, labels, now);
+    await stores.labels.set(owner, "gone0001", labels, now);
+    await stores.labels.set(generateClientId(), "gone0001", labels, now);
 
     const lock = new ValkeyLock(harness.redis, "sweeper-test", 60_000);
     expect(await sweep(stores, lock, now)).toEqual({ orphans: 1 });
@@ -60,8 +65,19 @@ describe.runIf(available)("sweeper", () => {
     expect(await stores.snapshots.shareIds()).toEqual([live.id]);
     expect((await stores.snapshots.list(live.id, "history")).map((h) => h.seq)).toEqual([1]);
     expect(await stores.files.shareIds()).toEqual([]);
+    expect(await stores.labels.shareIds()).toEqual([live.id]);
+    expect(await stores.labels.get(owner, live.id)).toMatchObject(labels);
     expect(await stores.files.deleteExpired(now)).toBe(0);
     expect(await harness.redis.exists(keys.sweeperLock)).toBe(0);
+  });
+
+  it("removes labels of a share that only has labels left", async () => {
+    const { stores } = harness;
+    const owner = generateClientId();
+    await stores.labels.set(owner, "gone0002", { folder: null, tags: ["a"] }, new Date());
+    const lock = new ValkeyLock(harness.redis, "sweeper-test", 60_000);
+    expect(await sweep(stores, lock)).toEqual({ orphans: 1 });
+    expect(await stores.labels.get(owner, "gone0002")).toBeNull();
   });
 
   it("runs on one instance at a time", async () => {

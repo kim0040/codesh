@@ -98,6 +98,9 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       const shares = (await ctx.stores.shares.listForClient(clientId))
         .filter((share) => !share.expiresAt || share.expiresAt.getTime() > now)
         .slice(0, LIST_LIMIT);
+      const labels = new Map(
+        (await ctx.stores.labels.listForClient(clientId)).map((entry) => [entry.shareId, entry]),
+      );
       const items = await mapLimit(shares, 8, async (share): Promise<ShareListItem | null> => {
         const owner = share.ownerId === clientId;
         // A saved entry must not outlive the access: banned clients lose the share from the list,
@@ -121,6 +124,8 @@ export function shareRoutes(app: App, ctx: Ctx): void {
           updatedAt: share.updatedAt.toISOString(),
           expiresAt: share.expiresAt ? share.expiresAt.toISOString() : null,
           preview: hidden ? "" : await sharePreview(ctx, share).catch(() => ""),
+          folder: labels.get(share.id)?.folder ?? null,
+          tags: labels.get(share.id)?.tags ?? [],
         };
       });
       return items.filter((item) => item !== null);
@@ -320,6 +325,10 @@ export function shareRoutes(app: App, ctx: Ctx): void {
         expiresAt,
       );
       if (unsaved) await syncExpiry(ctx, unsaved);
+      // The share leaves "my shares" unless it is the person's own, and their labels go with it.
+      if (share.ownerId !== request.session.clientId) {
+        await ctx.stores.labels.delete(request.session.clientId, share.id);
+      }
       return OK;
     },
   );
