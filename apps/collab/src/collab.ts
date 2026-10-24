@@ -957,6 +957,16 @@ export class Collab implements Extension<CollabContext> {
 
     let error: CollabCommandError | undefined;
     try {
+      // A missing/invalid doc releases its lock before slower subscribers receive this command.
+      // Keep a short receipt so those subscribers cannot execute or answer the same request twice.
+      const first = await this.deps.redis.set(
+        keys.commandReceipt(shareId, requestId),
+        this.deps.instanceId,
+        "PX",
+        30_000,
+        "NX",
+      );
+      if (first !== "OK") return;
       error = parsed.success
         ? await this.runCommand(shareId, parsed.data)
         : COLLAB_COMMAND_ERRORS.invalid;
