@@ -247,7 +247,7 @@ function FolderField({
       onBlur={(event) => {
         if (!root.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
       }}
-      className="flex flex-col gap-1.5"
+      className="relative flex flex-col gap-1.5"
     >
       <Field
         label={t("myshares.folder.nameLabel")}
@@ -280,7 +280,8 @@ function FolderField({
           id={listId}
           role="listbox"
           aria-label={t("myshares.folder.title")}
-          className="max-h-44 overflow-y-auto rounded-md border border-line bg-panel p-1"
+          // Floats over the fields below, so closing it never moves the buttons under the pointer.
+          className="absolute inset-x-0 top-full z-10 max-h-44 overflow-y-auto rounded-md border border-line bg-overlay p-1 shadow-3"
         >
           {folders.length === 0 && typed === "" ? (
             <p className="px-2 py-1.5 text-caption text-fg-3">

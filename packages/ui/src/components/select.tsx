@@ -115,7 +115,7 @@ export function SelectContent({
       sideOffset={6}
       collisionPadding={8}
       className={cx(
-        "ui-pop z-(--z-dropdown) max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) origin-(--radix-select-content-transform-origin) overflow-hidden rounded-lg border border-line bg-overlay p-1 text-fg shadow-3",
+        "ui-pop z-(--z-toast) max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) origin-(--radix-select-content-transform-origin) overflow-hidden rounded-lg border border-line bg-overlay p-1 text-fg shadow-3",
         className,
       )}
       {...props}
