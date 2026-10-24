@@ -259,7 +259,10 @@ export class DocSession {
         this.retryDelay = RETRY_MIN_MS;
         this.attachPersistence();
         this.patch({ denied: null });
-        if (scope === "readonly" && !this.state.readOnly) this.patch({ readOnly: true });
+        // The latest answer decides, both ways: an earlier provider of this document (a remount,
+        // a pasted key) shares its name on the socket, so its late `readonly` can arrive first.
+        const readOnly = scope === "readonly";
+        if (readOnly !== this.state.readOnly) this.patch({ readOnly });
         // The provider sets `isAuthenticated` after this callback returns.
         queueMicrotask(() => this.refreshStatus());
       },
