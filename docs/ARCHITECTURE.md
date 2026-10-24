@@ -62,10 +62,11 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 | `share_snapshots` | `{shareId, seq, state: Binary, at: Date, kind: 'compact'|'history'}` | `{shareId, seq}` |
 | `labs` | `{_id, title, ownerId, joinCode, templateShareId, locked, students: [{clientId, name, shareId, joinedAt}], createdAt, expiresAt}` | TTL on `expiresAt` |
 | `fs.files` / `fs.chunks` | GridFS bucket `uploads`, metadata `{ownerId, shareId?, expiresAt}` | default + `metadata.expiresAt` |
+| `share_labels` | `{_id: "<clientId>:<shareId>", clientId, shareId, folder: string|null, tags: string[], updatedAt}`: one person's own folder and tags for a share in "my shares"; nobody else sees them | `clientId`, `shareId` |
 | `settings` | single doc `_id: 'global'` (see §10) | |
 | `audit` | `{at, actor: clientId, ip, action, shareId?, detail}` (only when audit enabled) | `{at: -1}`, TTL by retention |
 
-- A sweeper (in `apps/collab`, every 10 min, guarded by a Valkey lock `lock:sweeper`) deletes updates/snapshots/uploads whose share no longer exists.
+- A sweeper (in `apps/collab`, every 10 min, guarded by a Valkey lock `lock:sweeper`) deletes updates/snapshots/uploads/share_labels whose share no longer exists.
 - Expiry: unsaved shares `expiresAt = lastActiveAt + settings.anonymousTtlHours` (default 24). Saving sets `expiresAt = null`.
 
 ## 6. Persistence and concurrency (apps/collab)
@@ -125,7 +126,10 @@ All bodies and responses are zod schemas in `packages/shared`. Errors: `{error: 
 | `PATCH /api/shares/:id` | owner: title, language, access, saved, locked |
 | `DELETE /api/shares/:id` | owner |
 | `POST /api/shares/:id/save` / `DELETE …/save` | any participant: add/remove from "my shares" (`savedBy`), sets `expiresAt=null` while savedBy non-empty |
-| `GET /api/shares` | my shares (owned ∪ saved), newest first, with language + preview |
+| `GET /api/shares` | my shares (owned ∪ saved), newest first, with language + preview + my `folder` and `tags` |
+| `PUT /api/shares/:id/labels` | a share in my shares: `{folder: string|null, tags: string[]}` (folder 1-60 chars, at most 10 tags of 1-30 chars, trimmed, duplicates removed case-insensitively; empty folder and no tags deletes the entry) → the stored labels |
+| `GET /api/templates` | code templates: built-in ones (`packages/shared/src/templates.ts`, `builtin: true`) followed by `settings.templates`, each `{id, name, language, description, files: [{path, language?, content}], builtin}`. The web app creates a share from one with the normal `POST /api/shares` |
+| `GET /api/settings/public` | `{contact, anonymousTtlHours, historyRetentionDays, maxUploadMB, guestAllowed}` for the intro page and help text; no secrets |
 | `GET /api/codes/:code` | → `{id}` or `{labId}` |
 | `POST /api/shares/:id/kick` | owner `{clientId, ban}` |
 | `GET /api/shares/:id/pending` / `POST …/pending/:clientId` | owner: list / `{approve}` |
@@ -150,7 +154,7 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 
 ## 10. Settings (`settings` doc, admin-editable, env provides defaults)
 
-`anonymousTtlHours` 24, `historyRetentionDays` 7, `maxDocBytes` 5 MB (at most 12 MiB, below MongoDB's 16 MiB document limit), `maxUploadMB` 200, `guestAllowed` true, `rooms` [], `subnetPrefixV4` 24, `nearbyDefault` true, `audit.enabled` false, `audit.retentionDays` 90, `secretWarning` true, `auth.oidc` null, `auth.ldap` null, `contact` "".
+`anonymousTtlHours` 24, `historyRetentionDays` 7, `maxDocBytes` 5 MB (at most 12 MiB, below MongoDB's 16 MiB document limit), `maxUploadMB` 200, `guestAllowed` true, `rooms` [], `subnetPrefixV4` 24, `nearbyDefault` true, `audit.enabled` false, `audit.retentionDays` 90, `secretWarning` true, `auth.oidc` null, `auth.ldap` null, `contact` "", `templates` [] (at most 50 `{id, name, language, description, files}`, each template within `maxDocBytes`; ids are unique and never collide with built-in ids, which start with `builtin-`).
 
 ## 11. Web app
 
