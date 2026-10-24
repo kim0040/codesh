@@ -36,6 +36,7 @@ import type { Ctx } from "../ctx.js";
 import { loadDoc, readContent, sendCommand, sharePreview } from "../docs.js";
 import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { attachment, basename, sanitizePath } from "../files.js";
+import { networkKey } from "../net.js";
 import { announceShare, removeNearby } from "../presence.js";
 import { displayName } from "../session.js";
 import { createShare, deleteShare, syncExpiry } from "../shares.js";
@@ -182,6 +183,12 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       const access = await accessOf(ctx, share, session, body.editKey);
       const role = access.role;
       if (role === null) throw forbidden("Not admitted");
+      await ctx.valkey.hset(
+        apiKeys.admittedNetworks(share.id),
+        session.clientId,
+        networkKey(session.ip),
+      );
+      await ctx.valkey.expire(apiKeys.admittedNetworks(share.id), 30 * 24 * 3600);
       await noteActivity(ctx, share);
       await ctx.audit(request, "share.join", share.id);
       return { token: await mintToken(ctx, share, session, access), role };

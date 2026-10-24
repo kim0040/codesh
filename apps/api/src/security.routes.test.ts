@@ -94,6 +94,20 @@ describe.skipIf(!integration)("security resource boundaries", () => {
     ).toBe(200);
   });
 
+  it("L2: a network ban survives a fresh cookie while the owner keeps access", async () => {
+    h = await createHarness();
+    const owner = h.client();
+    const guest = h.client();
+    const { id } = await createShare(owner);
+    await guest.post(`/api/shares/${id}/join`);
+    expect(
+      (await owner.post(`/api/shares/${id}/kick`, { clientId: await guest.clientId(), ban: true }))
+        .statusCode,
+    ).toBe(200);
+    expect((await h.client({ ip: guest.ip }).post(`/api/shares/${id}/join`)).statusCode).toBe(403);
+    expect((await owner.post(`/api/shares/${id}/join`)).statusCode).toBe(200);
+  });
+
   it("M4: caps open SSE streams per client and IPv6 network key, and releases slots", async () => {
     const config = loadConfig({ SSE_MAX_PER_CLIENT: "1", SSE_MAX_PER_IP: "2" });
     h = await createHarness({ config: { limits: config.limits } });
