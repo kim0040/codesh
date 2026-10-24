@@ -190,12 +190,24 @@ async function docText(page: Page): Promise<string> {
   return (await page.locator(".cm-line").allTextContents()).join("\n");
 }
 
-/** Where the caret is: types a "|" there, reads the document, takes the "|" out again. */
+/** The document with a "|" where the caret is; reads the selection, so it never edits the text. */
 async function textWithCaret(page: Page): Promise<string> {
-  await page.keyboard.type("|");
-  const text = await docText(page);
-  await page.keyboard.press("Backspace");
-  return text;
+  return page.evaluate(() => {
+    const lines = [...document.querySelectorAll(".cm-line")];
+    const selection = getSelection();
+    const node = selection?.anchorNode;
+    return lines
+      .map((line) => {
+        const text = line.textContent ?? "";
+        if (!selection || !node || !line.contains(node)) return text;
+        const range = document.createRange();
+        range.setStart(line, 0);
+        range.setEnd(node, selection.anchorOffset);
+        const column = range.toString().length;
+        return `${text.slice(0, column)}|${text.slice(column)}`;
+      })
+      .join("\n");
+  });
 }
 
 /** `text` with a "|" where `caret` ("foo| bar") has it. */
@@ -915,7 +927,10 @@ test.describe("OS-dependent features", () => {
     }
   });
 
-  test("fonts, reduced motion and increased contrast follow the system", async ({ browser }) => {
+  test("fonts, reduced motion and increased contrast follow the system", async ({
+    browser,
+    browserName,
+  }) => {
     const user = await newUser(browser, "Media", { viewport: { width: 1280, height: 800 } });
     try {
       const page = user.page;
@@ -926,7 +941,11 @@ test.describe("OS-dependent features", () => {
       expect(stack).toContain("Segoe UI Emoji");
       expect(stack).toContain("Noto Color Emoji");
 
-      await page.emulateMedia({ reducedMotion: "reduce", contrast: "more" });
+      // Firefox has no `prefers-contrast` to emulate; the rest is checked there too.
+      await page.emulateMedia({
+        reducedMotion: "reduce",
+        ...(browserName === "firefox" ? {} : { contrast: "more" as const }),
+      });
       const tokens = await page.evaluate(() => {
         const style = getComputedStyle(document.documentElement);
         const probe = document.createElement("div");
@@ -941,7 +960,7 @@ test.describe("OS-dependent features", () => {
         return out;
       });
       expect(tokens.duration).toBe("0.01ms");
-      expect(tokens.border).toBe(tokens.control);
+      if (browserName !== "firefox") expect(tokens.border).toBe(tokens.control);
     } finally {
       await closeAll(user);
     }
