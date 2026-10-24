@@ -14,7 +14,7 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 ### 1.2 6자리 참여 코드로 입장
 - 첫 화면의 입력란에 전달받은 6자리 숫자를 입력하고 **입장** 버튼을 누르거나 Enter 키를 누릅니다.
 - 브라우저 주소창에 `/<6자리코드>`를 직접 입력해도 해당 공유로 바로 이동합니다.
-- 참여 코드는 발급 후 24시간 동안 유지되며, 만료되거나 해제된 코드는 재발급 방지를 위해 24시간 동안 사용할 수 없습니다.
+- 참여 코드는 공유가 살아 있는 동안 유지됩니다. 저장하지 않은 공유는 만료될 때 코드도 함께 사라지고, 내 공유에 저장한 공유의 코드는 계속 유지됩니다. 사라진 코드는 다른 공유와 헷갈리지 않도록 24시간 동안 다시 발급되지 않습니다.
 
 ### 1.3 QR 코드 및 전체 화면 보기
 - 상단 바의 **공유** 버튼(단축키 `⌘⌥S` 또는 `Ctrl+Alt+S`)을 누르면 **코드·QR** 탭에 참여 코드와 QR 코드가 표시됩니다.
@@ -68,7 +68,7 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 - 공유의 **소유자**만 상단 바의 **이력** 버튼(단축키 `⌘⌥H` 또는 `Ctrl+Alt+H`)을 열 수 있습니다.
 - 편집 활동 중 약 30초 간격으로 스냅샷이 자동 생성되며 최대 100개 버전까지 타임라인에 기록됩니다(기본 7일 보관).
 - **재생** 버튼을 누르면 코드가 작성되어 온 과정을 1배속, 2배속, 4배속으로 재생할 수 있습니다.
-- **현재와 비교**를 선택하면 특정 시점과 현재 문서 사이의 차이점(diff)을 인라인 또는 나란히 보기로 비교할 수 있습니다.
+- **현재와 비교**를 선택하면 특정 시점과 현재 문서 사이의 차이점(diff)을 한 화면에 겹쳐 보여 줍니다.
 - **버전 복원**을 누르면 문서 전체가 해당 시점의 상태로 되돌아갑니다. 복원은 기존 이력을 지우지 않고 일반 변경 사항으로 추가되므로 안전합니다.
 
 ### 2.6 지운 내용 보호
@@ -102,7 +102,7 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 
 ### 3.3 대기실 (입장 승인)
 - **입장 전에 내가 승인** 옵션을 켜면, 새로 접속을 시도하는 사용자는 "승인을 기다리는 중" 화면에 머무르게 됩니다.
-- 소유자 화면에 입장 요청 알림이 뜨며, 소유자가 **입장 승인**을 눌러야만 입장이 완료됩니다. 거절 시 접속이 차단됩니다.
+- 소유자 화면에 입장 요청 알림이 뜨며, 소유자가 **입장 승인**을 눌러야만 입장이 완료됩니다. 거절되면 그 요청으로는 입장할 수 없고, 다시 요청하면 소유자에게 새 알림이 갑니다.
 - 대기실이 설정된 공유 역시 근처 공유 목록에서 숨겨집니다.
 
 ### 3.4 내보내기 및 차단
@@ -229,7 +229,7 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 - **Real-Time Sync**: Conflict-free concurrent typing powered by Yjs CRDT with remote cursors and selection highlights.
 - **Multiple Files**: Support for up to 100 files and folder paths. Automatic language detection by file extension.
 - **Comments**: Anchor comments to lines or selections (`⌘⌥M` / `Ctrl+Alt+M`). Comments track document edits using relative positions.
-- **History & Restore**: Owners can inspect timeline snapshots, play back edits, compare diffs, and restore previous versions.
+- **History & Restore**: Owners can inspect timeline snapshots, play back edits at 1x/2x/4x, compare a version with the current text, and restore it.
 - **Download**: Download single files with matching extensions or export all files as a `.zip` archive.
 - **Drag & Drop**: Drop files, folders, or `.zip` archives directly into the editor.
 

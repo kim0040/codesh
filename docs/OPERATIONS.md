@@ -10,7 +10,7 @@
 - **런타임 의존성**: Docker Engine 및 Docker Compose 플러그인(`docker compose`)
 - **하드웨어 권장 사양**:
   - 최소: 2 vCPU, 4GB RAM
-  - 권장: 4 vCPU 이상, 8GB RAM 이상 (동시 사용자 100명 이상 기준)
+  - 권장: 4 vCPU, 8GB RAM (부하 테스트에 쓴 사양, 11.1 참고)
   - 디스크: 최소 20GB 이상 (MongoDB 데이터 볼륨 및 Docker 이미지 보관)
 - **네트워크**:
   - 외부 인터넷 연결 불필요 (오프라인 폐쇄망 단독 구동).
@@ -122,7 +122,7 @@ docker compose up -d --scale collab=3
 
 - **문서 라우팅**: Caddy 에지 프록시가 `lb_policy query doc` 규칙을 통해 동일한 문서(`doc=<id>`)에 대한 웹소켓 접속을 동일한 Collab 인스턴스로 자동 집중시킵니다.
 - **인스턴스 간 동기화**: 서로 다른 인스턴스 간 통신은 Valkey Pub/Sub 채널(`perm:<shareId>`, `cmd:<shareId>`) 및 분산 문서 락(`doclock:<id>`), `@hocuspocus/extension-redis` 확장을 통해 실시간으로 처리됩니다.
-- **장애 격리**: 개별 Collab 복제본이 비정상 종료되거나 `/healthz` 응답에 실패하면 Caddy가 5초 이내에 해당 복제본을 업스트림 목록에서 제외합니다.
+- **장애 격리**: 개별 Collab 복제본이 비정상 종료되거나 `/healthz` 응답에 실패하면 Caddy가 5초 간격의 상태 점검에서 이를 감지해 해당 복제본으로 새 연결을 보내지 않습니다.
 
 ---
 
@@ -204,7 +204,7 @@ docker compose up -d --scale collab=3
 
 ### 10.1 상태 점검 엔드포인트
 - `GET /healthz`: Caddy 및 API 서버의 기본 동작 여부 확인 (Valkey ping 응답 검증).
-- `GET /readyz`: Collab 서버의 의존성 준비 완료 상태 확인 (MongoDB 및 Valkey 연결 검증).
+- `GET /readyz`: Collab 서버의 의존성 준비 완료 상태 확인 (MongoDB 및 Valkey 연결 검증). Caddy를 거치지 않으므로 collab 컨테이너의 3002 포트에서 확인합니다(Compose 헬스체크가 사용).
 
 ### 10.2 프로메테우스 메트릭 수집
 Caddy는 보안을 위해 사내 비공개 IP 대역(`private_ranges`)의 요청에 대해서만 메트릭 경로를 개방합니다.
@@ -218,7 +218,7 @@ Caddy는 보안을 위해 사내 비공개 IP 대역(`private_ranges`)의 요청
 
 저장소의 Node 기반 부하 테스트 스크립트(`scripts/load`)를 사용하여 시스템의 동시성 및 동기화 성능을 측정할 수 있습니다.
 ```sh
-pnpm load -- --url http://codesh.corp --shares 20 --writers 2 --viewers 11 --duration 60
+pnpm load -- --url http://codesh.corp --shares 20 --writers 3 --viewers 10 --duration 60
 ```
 > [!NOTE]
 > 단일 머신에서 대규모 부하를 가할 경우 클라이언트 IP 속도 제한에 걸리지 않도록 `.env`의 `RATE_LIMIT_*` 변수들을 사전에 충분히 상향 조정해야 합니다.
@@ -287,7 +287,7 @@ docker compose logs -f valkey    # 캐시/메시징 로그
   - API 서버가 Collab 서버와의 통신(`cmd:<shareId>`) 응답을 5초 이내에 수신하지 못한 경우 발생합니다.
   - Collab 컨테이너 동작 여부 및 Valkey 연결 상태(`docker compose ps`, `docker compose logs collab`)를 확인하십시오.
 - **컨테이너 부팅 실패 (취약한 시크릿 거부)**:
-  - `NODE_ENV=production` 환경에서는 `SESSION_SECRET`, `COLLAB_SECRET`, `MONGO_PASSWORD`, `VALKEY_PASSWORD`가 32자 미만이거나 비어 있으면 기동을 즉시 거부합니다.
+  - `NODE_ENV=production` 환경에서는 `SESSION_SECRET`, `COLLAB_SECRET`이 32자 미만이거나 개발용 기본값이면 기동을 거부합니다. `MONGO_PASSWORD`, `VALKEY_PASSWORD` 등이 비어 있으면 `docker compose`가 시작 전에 멈춥니다.
   - `./generate-secrets.sh .env`를 실행하여 안전한 비밀키를 채워 넣으십시오.
 - **429 `rate_limited` 또는 PIN 차단**:
   - 특정 IP의 분당 요청 수가 `.env` 임계치를 초과했거나 PIN을 5회 연속 잘못 입력한 경우 발생합니다.
