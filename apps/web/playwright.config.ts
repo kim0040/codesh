@@ -16,6 +16,8 @@ import {
  */
 const ENGINES = (process.env.E2E_BROWSERS ?? "chromium,firefox,webkit").split(",");
 const CROSS_OS = /o-cross-os\.spec\.ts$/;
+// Offline copies on Firefox too: its IndexedDB differs (databases(), deletion while open).
+const DEVICE = /r-edit-key-and-device\.spec\.ts$/;
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
 const shared = { MONGO_URL, VALKEY_URL, COLLAB_SECRET: secret, NODE_ENV: "development" };
@@ -38,7 +40,13 @@ export default defineConfig({
       ? [{ name: "chromium", use: { browserName: "chromium" as const } }]
       : []),
     ...(ENGINES.includes("firefox")
-      ? [{ name: "firefox", use: { browserName: "firefox" as const }, testMatch: CROSS_OS }]
+      ? [
+          {
+            name: "firefox",
+            use: { browserName: "firefox" as const },
+            testMatch: [CROSS_OS, DEVICE],
+          },
+        ]
       : []),
     ...(ENGINES.includes("webkit")
       ? [{ name: "webkit", use: { browserName: "webkit" as const }, testMatch: CROSS_OS }]
