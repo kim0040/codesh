@@ -204,6 +204,7 @@ export const en = {
 
   // ── Editor: body ──
   "editor.loading": "Opening the share…",
+  "editor.unsentLost": "Changes that had not reached the server could not be kept.",
   "editor.readOnly": "You can view this share but not edit it",
   "editor.locked": "The owner locked editing. You can still read the code.",
   "editor.preview.title": "Markdown preview",
@@ -390,7 +391,10 @@ export const en = {
   "editor.deviceCopy.skipAction": "Not on this device",
   "toast.forgotten": "Forgotten on this device",
   "toast.forgetFailed":
-    "Some data could not be deleted. Clear this site’s data in the browser settings.",
+    "Some offline copies on this device might remain. To remove them, clear this site’s data in the browser settings.",
+  "settings.unsent.title": "Some changes have not reached the server",
+  "settings.unsent.body": "These changes have not reached the server and will be lost.",
+  "settings.unsent.leaveAction": "Leave anyway",
 
   // ── Status bar and connection ──
   "status.connected": "Connected",

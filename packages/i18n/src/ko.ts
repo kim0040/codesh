@@ -226,6 +226,7 @@ export const ko: KoDictionary = {
 
   // ── Editor: body ──
   "editor.loading": "공유를 여는 중…",
+  "editor.unsentLost": "서버에 전달되지 않은 변경 내용은 보관하지 못했어요.",
   "editor.readOnly": "보기만 할 수 있는 공유예요",
   "editor.locked": "소유자가 편집을 잠갔어요. 코드는 계속 볼 수 있어요.",
   "editor.preview.title": "Markdown 미리보기",
@@ -410,7 +411,10 @@ export const ko: KoDictionary = {
   "editor.deviceCopy.skipAction": "이 기기에는 저장 안 함",
   "toast.forgotten": "이 기기에서 지웠어요",
   "toast.forgetFailed":
-    "일부를 지우지 못했어요. 브라우저의 사이트 데이터 설정에서 직접 지워 주세요.",
+    "이 기기에 오프라인 사본이 남아 있을 수 있어요. 지우려면 브라우저 설정에서 이 사이트의 데이터를 삭제해 주세요.",
+  "settings.unsent.title": "서버에 전달되지 않은 변경 내용이 있어요",
+  "settings.unsent.body": "이 변경 내용은 아직 서버에 전달되지 않았고, 계속하면 사라져요.",
+  "settings.unsent.leaveAction": "그래도 나가기",
 
   // ── Status bar and connection ──
   "status.connected": "연결됨",
