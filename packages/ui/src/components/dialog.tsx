@@ -50,11 +50,11 @@ export interface DialogContentProps
   closeLabel: string;
   /** Buttons row, right-aligned. */
   footer?: ReactNode;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
   container?: HTMLElement | null;
 }
 
-const widths = { sm: "max-w-sm", md: "max-w-md", lg: "max-w-xl" } as const;
+const widths = { sm: "max-w-sm", md: "max-w-md", lg: "max-w-xl", xl: "max-w-4xl" } as const;
 
 /**
  * Modal dialog: focus is trapped, Escape closes, focus returns to the trigger or, when opened from code, to the element that had it. Sized in rem with a
