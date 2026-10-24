@@ -32,6 +32,7 @@ import { usePresence } from "../../lib/events";
 import { formatBytes } from "../../lib/format";
 import { useLocale, useT } from "../../lib/i18n";
 import { TemplatesEditor } from "./TemplatesEditor";
+import { UpdatesPanel, updateQuery } from "./UpdatesPanel";
 
 const TOKEN_KEY = "codesh.admin";
 
@@ -152,6 +153,7 @@ function AdminConsole({ token, onLogout }: { token: string; onLogout: () => void
     queryFn: () => api.admin.settings(token),
     retry: false,
   });
+  const update = useQuery(updateQuery(token));
 
   useEffect(() => {
     if (
@@ -183,6 +185,14 @@ function AdminConsole({ token, onLogout }: { token: string; onLogout: () => void
           <TabsTrigger value="people">{t("admin.nav.people")}</TabsTrigger>
           <TabsTrigger value="audit">{t("admin.nav.audit")}</TabsTrigger>
           <TabsTrigger value="status">{t("admin.nav.status")}</TabsTrigger>
+          <TabsTrigger value="updates" data-testid="admin-nav-updates">
+            {t("admin.nav.updates")}
+            {update.data?.updateAvailable ? (
+              <Badge tone="info" size="sm" data-testid="admin-update-badge">
+                {t("admin.update.badge")}
+              </Badge>
+            ) : null}
+          </TabsTrigger>
         </TabsList>
         <main id="main" className="pt-5">
           <TabsContent value="settings">
@@ -206,6 +216,9 @@ function AdminConsole({ token, onLogout }: { token: string; onLogout: () => void
           </TabsContent>
           <TabsContent value="status">
             <Status token={token} />
+          </TabsContent>
+          <TabsContent value="updates">
+            <UpdatesPanel token={token} />
           </TabsContent>
         </main>
       </Tabs>

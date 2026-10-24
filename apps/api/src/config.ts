@@ -1,3 +1,4 @@
+import { UPDATE_CHANNELS, type UpdateChannel } from "@codesh/shared";
 import { z } from "zod";
 
 const DEV_SECRET = "dev-only-secret-change-me";
@@ -37,6 +38,20 @@ const envSchema = z.object({
   RATE_LIMIT_CODE_PER_MIN: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_CREATE_PER_MIN: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_LOGIN_PER_MIN: z.coerce.number().int().positive().default(10),
+  /** Asks GitHub for the latest release now and then; `off` makes no outbound request at all. */
+  UPDATE_CHECK: z
+    .string()
+    .default("on")
+    .transform((value) => !/^(off|false|0|no)$/i.test(value.trim())),
+  UPDATE_REPO: z
+    .string()
+    .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, "UPDATE_REPO must look like owner/name")
+    .default("kim0040/codesh"),
+  UPDATE_CHANNEL: z.enum(UPDATE_CHANNELS).default("stable"),
+  /** Base URL of the GitHub REST API; replaced in tests. */
+  UPDATE_API_URL: z.url({ protocol: /^https?$/ }).default("https://api.github.com"),
+  /** deploy/state/update.json as mounted into the container; empty when there is none. */
+  UPDATE_STATUS_FILE: z.string().default(""),
 });
 
 export interface RateLimits {
@@ -63,6 +78,14 @@ export interface SecurityLimits {
   BROADCAST_FANOUT_MAX: number;
 }
 
+export interface UpdateConfig {
+  enabled: boolean;
+  repo: string;
+  channel: UpdateChannel;
+  apiUrl: string;
+  statusFile: string;
+}
+
 export interface Config {
   production: boolean;
   host: string;
@@ -77,6 +100,7 @@ export interface Config {
   publicUrl: string;
   rateLimit: RateLimits;
   limits: SecurityLimits;
+  update: UpdateConfig;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -118,6 +142,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       PENDING_MAX_PER_SHARE: parsed.PENDING_MAX_PER_SHARE,
       BROADCASTS_PER_MIN: parsed.BROADCASTS_PER_MIN,
       BROADCAST_FANOUT_MAX: parsed.BROADCAST_FANOUT_MAX,
+    },
+    update: {
+      enabled: parsed.UPDATE_CHECK,
+      repo: parsed.UPDATE_REPO,
+      channel: parsed.UPDATE_CHANNEL,
+      apiUrl: parsed.UPDATE_API_URL.replace(/\/+$/, ""),
+      statusFile: parsed.UPDATE_STATUS_FILE,
     },
     rateLimit: {
       apiPerMinute: parsed.RATE_LIMIT_API_PER_MIN,

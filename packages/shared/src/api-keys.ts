@@ -45,4 +45,10 @@ export const apiKeys = {
   labJoinLock: (labId: string, clientId: string) => `lock:labjoin:${labId}:${clientId}` as const,
   /** Lets one distribute per lab run at a time, so a double click cannot fork everyone twice. */
   labDistributeLock: (labId: string) => `lock:labdistribute:${labId}` as const,
+  /** STRING JSON: what the update check last learned (one per deployment). */
+  updateState: "update:state",
+  /** Held by the one api instance that is asking GitHub right now. */
+  updateLock: "lock:update-check",
+  /** Cooldown of the admin console's "check now". */
+  updateManual: "update:manual",
 } as const;

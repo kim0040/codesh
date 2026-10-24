@@ -14,6 +14,7 @@ import type { LdapAdapter, OidcAdapter } from "../auth/adapters.js";
 import { type Config, loadConfig } from "../config.js";
 import { Hub } from "../hub.js";
 import { createMetrics } from "../metrics.js";
+import type { UpdateTimers } from "../updates.js";
 
 /** Route tests talk to a real Valkey (`pnpm services:up`) and keep MongoDB in memory. */
 export const integration = process.env.CODESH_INTEGRATION === "1";
@@ -41,6 +42,8 @@ export interface HarnessOptions {
   /** `fake` answers `cmd:<shareId>` like collab without touching the stores; `none` stays silent. */
   collab?: "fake" | "none";
   commandTimeoutMs?: number;
+  version?: string;
+  updateTimers?: UpdateTimers;
 }
 
 /** Stands in for apps/collab in route tests: records content commands and answers them (§6.11). */
@@ -299,6 +302,14 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     adminToken: "admin-token-for-tests",
     trustProxy: ["127.0.0.0/8", "::1/128"],
     publicUrl: "",
+    // Tests never ask GitHub; the update tests turn this on against a local server.
+    update: {
+      enabled: false,
+      repo: "kim0040/codesh",
+      channel: "stable",
+      apiUrl: "http://127.0.0.1:9",
+      statusFile: "",
+    },
     rateLimit: {
       apiPerMinute: 100_000,
       codePerMinute: 100_000,
@@ -321,6 +332,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     nearbyCacheMs: options.nearbyCacheMs ?? 0,
     settingsCacheMs: 0,
     commandTimeoutMs: options.commandTimeoutMs,
+    version: options.version,
+    updateTimers: options.updateTimers,
   });
   await app.ready();
 

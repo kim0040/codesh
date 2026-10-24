@@ -30,13 +30,18 @@ upgrade() {
   echo "upgrade: $(env_get CODESH_VERSION) -> $version"
   ./backup.sh ./backups
   docker load -i "$src/images.tar"
-  for file in docker-compose.yml .env.example VERSION lib.sh generate-secrets.sh install.sh upgrade.sh backup.sh restore.sh README.md; do
+  for file in docker-compose.yml .env.example VERSION IMAGES lib.sh generate-secrets.sh install.sh upgrade.sh update.sh backup.sh restore.sh README.md; do
     # A new inode, so the running script is not overwritten in place.
     [ -f "$src/$file" ] && cp "$src/$file" "./$file.new" && mv "./$file.new" "./$file"
   done
   mkdir -p docs && cp "$src"/docs/* docs/ 2>/dev/null || true
   mkdir -p tls && cp -n "$src"/tls/*.example tls/ 2>/dev/null || true
+  mkdir -p state && chmod 755 state
   env_set CODESH_VERSION "$version"
+  # The loaded images carry the bundle's registry in their names.
+  local registry
+  registry="$(sed -n 's/^CODESH_REGISTRY=//p' "$src/.env.example" | tail -n 1)"
+  [ -n "$registry" ] && env_set CODESH_REGISTRY "$registry"
   # Secrets and settings added by the new version are filled in; existing values stay.
   for name in $(sed -n 's/^\([A-Z_]*\)=.*/\1/p' .env.example); do
     grep -q "^$name=" .env || sed -n "s/^$name=.*/&/p" .env.example >>.env

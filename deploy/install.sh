@@ -27,10 +27,14 @@ else
   done
 fi
 env_set CODESH_VERSION "$VERSION"
+# The loaded images carry the bundle's registry in their names.
+REGISTRY="$(sed -n 's/^CODESH_REGISTRY=//p' .env.example | tail -n 1)"
+[ -n "$REGISTRY" ] && env_set CODESH_REGISTRY "$REGISTRY"
+mkdir -p state && chmod 755 state
 ./generate-secrets.sh .env
 
 echo "install: starting"
 docker compose up -d --wait
 wait_healthy 120
 echo "install: codesh $VERSION is running on port $(env_get HTTP_PORT 80)"
-echo "install: back up with ./backup.sh, upgrade with ./upgrade.sh <new bundle>"
+echo "install: back up with ./backup.sh, update with ./update.sh (online) or ./upgrade.sh <new bundle>"

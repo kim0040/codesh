@@ -28,7 +28,13 @@ import { SECURITY_HEADERS } from "./security.js";
 import { clientIp, loadSession } from "./session.js";
 
 /** Paths a visitor without a login may use even when `settings.guestAllowed` is false. */
-const OPEN_WITHOUT_LOGIN = ["/api/session", "/api/auth/", "/api/admin/", "/api/settings/public"];
+const OPEN_WITHOUT_LOGIN = [
+  "/api/session",
+  "/api/auth/",
+  "/api/admin/",
+  "/api/settings/public",
+  "/api/version",
+];
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -104,6 +110,10 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
       reply.elapsedTime / 1000,
     );
   });
+
+  // The update check runs in the background and never delays a request or the start.
+  app.addHook("onReady", async () => ctx.updates.start(app.log));
+  app.addHook("onClose", async () => ctx.updates.stop());
 
   // Open SSE streams never end by themselves and would keep `app.close()` waiting.
   app.addHook("preClose", async () => {

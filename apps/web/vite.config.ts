@@ -1,8 +1,16 @@
+import { readFileSync } from "node:fs";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+// The product version is the root package.json's; open tabs compare it with GET /api/version.
+const { version } = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+) as {
+  version: string;
+};
 
 // Ports are overridable so the end-to-end stack can run next to a normal dev stack.
 const webPort = Number(process.env.WEB_PORT ?? 5173);
@@ -10,17 +18,19 @@ const apiPort = process.env.API_PORT ?? "3001";
 const collabPort = process.env.COLLAB_PORT ?? "3002";
 
 export default defineConfig({
+  define: { "import.meta.env.VITE_APP_VERSION": JSON.stringify(version) },
   plugins: [
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "autoUpdate",
+      // A new build waits for the reload the update prompt offers; it never reloads a tab by itself.
+      registerType: "prompt",
       injectRegister: false,
       manifest: {
         name: "codesh",
         short_name: "codesh",
-        description: "Real-time code sharing on your intranet",
+        description: "Real-time code sharing on your network",
         start_url: "/",
         scope: "/",
         display: "standalone",

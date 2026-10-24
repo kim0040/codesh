@@ -37,6 +37,10 @@ export const ko: KoDictionary = {
   // ── App ──
   "app.name": "codesh",
   "app.tagline": "같은 네트워크에서 실시간으로 코드를 공유하세요",
+  "app.update.title": "새 버전이 있어요",
+  "app.update.body": "새로고침하면 새 버전을 쓸 수 있어요. 편집한 내용은 그대로 남아요.",
+  "app.update.reloadAction": "새로고침",
+  "app.update.laterAction": "나중에",
 
   // ── Common ──
   "common.add": "추가",
@@ -819,6 +823,56 @@ export const ko: KoDictionary = {
   "admin.loading": "불러오는 중…",
   "admin.error.title": "이 화면을 불러오지 못했어요",
   "admin.error.body": "관리자 토큰과 연결 상태를 확인한 뒤 다시 시도해 주세요.",
+
+  // 업데이트 (docs/OPERATIONS.md "업데이트"); 관리자만 봐요.
+  "admin.nav.updates": "업데이트",
+  "admin.update.badge": "새 버전",
+  "admin.update.title": "업데이트",
+  "admin.update.current": "설치된 버전",
+  "admin.update.latest": "최신 릴리스",
+  "admin.update.released": "출시일",
+  "admin.update.checked": "마지막 확인: {time}",
+  "admin.update.checkAction": "지금 확인",
+  "admin.update.checking": "확인하는 중…",
+  "admin.update.available": "새 버전 {version}이 나왔어요",
+  "admin.update.upToDate": "최신 버전을 쓰고 있어요",
+  "admin.update.unreachable": "인터넷에 연결되지 않아 확인할 수 없어요",
+  "admin.update.unreachableHint":
+    "codesh는 평소처럼 동작해요. 서버가 약 12시간 뒤에 다시 확인해요.",
+  "admin.update.disabled": "업데이트 확인이 꺼져 있어요",
+  "admin.update.disabledHint":
+    ".env에서 UPDATE_CHECK=on으로 바꾸고 다시 시작하면 새 릴리스가 여기에 보여요.",
+  "admin.update.pending": "아직 확인하지 않았어요",
+  "admin.update.pendingHint": "서버가 시작되고 몇 분 뒤에 처음 확인해요.",
+  "admin.update.noRelease": "아직 공개된 릴리스가 없어요",
+  "admin.update.rateLimited": "방금 확인했어요. 1분 뒤에 다시 시도해 주세요.",
+  "admin.update.privacy":
+    "확인할 때 GitHub(api.github.com)에 버전 번호만 담긴 요청 하나를 보내요. UPDATE_CHECK=off로 끌 수 있어요.",
+  "admin.update.notes": "릴리스 노트",
+  "admin.update.notesEmpty": "이 릴리스에는 노트가 없어요.",
+  "admin.update.releaseLink": "릴리스 페이지",
+  "admin.update.newTab": "(새 탭에서 열려요)",
+  "admin.update.how.title": "업데이트 방법",
+  "admin.update.how.online": "인터넷이 되는 서버: codesh 폴더에서 실행해요",
+  "admin.update.how.offline":
+    "인터넷이 안 되는 서버: 릴리스 페이지에서 서버에 맞는 번들(linux-amd64 또는 linux-arm64)과 .sha256 파일을 받아 codesh 옆에 복사한 뒤 실행해요",
+  "admin.update.how.safety":
+    "update.sh는 먼저 데이터베이스를 백업하고, 새 버전이 시작되지 않으면 지금 버전으로 되돌려요. upgrade.sh도 먼저 백업해요.",
+  "admin.update.copyAction": "복사",
+  "admin.update.auto.title": "자동 업데이트",
+  "admin.update.auto.on": "켜짐: 매일 {time} 무렵, {policy}",
+  "admin.update.auto.policy.patch": "버그 수정 릴리스만",
+  "admin.update.auto.policy.minor": "기능과 버그 수정 릴리스",
+  "admin.update.auto.off": "꺼져 있어요. 켜려면 서버에서 실행해요:",
+  "admin.update.auto.unknown":
+    "서버의 업데이트 도구 상태를 여기서 볼 수 없어요. install.sh로 설치한 서버에서 보여요.",
+  "admin.update.lastRun": "마지막 실행: {time}",
+  "admin.update.result.updated": "업데이트 완료: {from} → {to}",
+  "admin.update.result.upToDate": "이미 최신 버전이었어요",
+  "admin.update.result.checked": "확인만 했어요",
+  "admin.update.result.refused": "{to} 버전은 적용하지 않았어요. 직접 업데이트해 주세요.",
+  "admin.update.result.failed": "바뀐 것 없이 실패했어요. 서버의 state/update.log를 확인해 주세요.",
+  "admin.update.result.rolledBack": "{to} 버전이 시작되지 않아 {from} 버전으로 되돌렸어요",
 
   // ── Identity ──
   "identity.title": "이름을 정해 주세요",

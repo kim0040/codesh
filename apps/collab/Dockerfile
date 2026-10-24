@@ -4,6 +4,8 @@
 # The workspace packages ship TypeScript source (no build step), so the image runs the sources
 # with tsx. tsx is installed apart from the pnpm deploy so the app keeps its production set.
 ARG NODE_IMAGE=node:22.23.3-slim
+# Release builds pass the tag's version; it must equal the root package.json version.
+ARG CODESH_VERSION=""
 
 FROM ${NODE_IMAGE} AS build
 ENV PNPM_HOME=/pnpm
@@ -13,14 +15,23 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store pnpm fetch --prod
 COPY . .
+ARG CODESH_VERSION
 RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store \
     pnpm install --offline --frozen-lockfile --prod --filter @codesh/collab... \
-    && pnpm --filter @codesh/collab --prod deploy /out
+    && pnpm --filter @codesh/collab --prod deploy /out \
+    && version="$(node -p 'require("./package.json").version')" \
+    && { [ -z "$CODESH_VERSION" ] || [ "$CODESH_VERSION" = "$version" ] \
+      || { echo "CODESH_VERSION=$CODESH_VERSION, package.json has $version" >&2; exit 1; }; } \
+    && printf '%s\n' "$version" > /out/VERSION
 
 FROM ${NODE_IMAGE} AS tsx
 RUN npm install --prefix /opt/tsx --omit=dev --no-audit --no-fund tsx@4.23.15
 
 FROM ${NODE_IMAGE} AS runtime
+ARG CODESH_VERSION
+LABEL org.opencontainers.image.title="codesh-collab" \
+      org.opencontainers.image.source="https://github.com/kim0040/codesh" \
+      org.opencontainers.image.version="${CODESH_VERSION}"
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=tsx /opt/tsx /opt/tsx

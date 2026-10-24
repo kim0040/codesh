@@ -9,6 +9,7 @@ import { TemplatePicker } from "../start/TemplatePicker";
 import { CommandPalette } from "./CommandPalette";
 import { EventToasts } from "./EventToasts";
 import { ShortcutSheet } from "./ShortcutSheet";
+import { UpdatePrompt } from "./UpdatePrompt";
 import "./app.css";
 
 // Set before the first paint: app.css styles scrollbars by platform.
@@ -20,7 +21,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT";
 }
 
-/** App-wide pieces: the event stream, toasts, the command palette and the shortcut sheet. */
+/** App-wide pieces: the event stream, toasts, the update prompt, the command palette and the shortcut sheet. */
 export function AppShell({ children }: { children: ReactNode }) {
   const t = useT();
 
@@ -48,6 +49,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {children}
       <Toaster label={t("a11y.toastRegion")} closeLabel={t("a11y.dismissToast")} />
       <EventToasts />
+      <UpdatePrompt />
       <CommandPalette />
       <ShortcutSheet />
       <TemplatePicker />

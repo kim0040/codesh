@@ -36,4 +36,22 @@ describe("config", () => {
     expect(proxyWarnings(loadConfig({ ...prod, TRUST_PROXY: "10.0.0.0/8" }))).toEqual([]);
     expect(proxyWarnings(loadConfig({}))).toEqual([]);
   });
+
+  it("checks for updates by default and turns the check off with UPDATE_CHECK=off", () => {
+    expect(loadConfig({}).update).toEqual({
+      enabled: true,
+      repo: "kim0040/codesh",
+      channel: "stable",
+      apiUrl: "https://api.github.com",
+      statusFile: "",
+    });
+    for (const value of ["off", "OFF", "false", "0", "no"])
+      expect(loadConfig({ UPDATE_CHECK: value }).update.enabled, value).toBe(false);
+    expect(loadConfig({ UPDATE_CHANNEL: "prerelease" }).update.channel).toBe("prerelease");
+    expect(loadConfig({ UPDATE_API_URL: "http://127.0.0.1:9/" }).update.apiUrl).toBe(
+      "http://127.0.0.1:9",
+    );
+    expect(() => loadConfig({ UPDATE_REPO: "not a repo" })).toThrow(/owner\/name/);
+    expect(() => loadConfig({ UPDATE_API_URL: "file:///etc/passwd" })).toThrow();
+  });
 });

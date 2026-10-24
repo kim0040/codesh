@@ -1,0 +1,199 @@
+# Publishes a release when a version tag is pushed (RELEASING.md):
+#   images of api, collab, web (Caddy) and mdns for linux/amd64 and linux/arm64 on GHCR, with build
+#   provenance; offline bundles for both platforms and the online deploy archive; SHA256SUMS; the
+#   GitHub release with the CHANGELOG.md section as its notes.
+# Everything used is free for public repositories: Actions, GHCR public packages, attestations.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+  DO_NOT_TRACK: "1"
+
+jobs:
+  verify:
+    name: Tag matches the version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      registry: ${{ steps.version.outputs.registry }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          node scripts/release.mjs check "$TAG"
+          version="${TAG#v}"
+          # A pre-release is a version with a suffix (1.2.0-rc.1); update.sh and the API agree.
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "registry=ghcr.io/${OWNER,,}"
+          } >>"$GITHUB_OUTPUT"
+
+  images:
+    name: Image ${{ matrix.name }}
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: api, file: apps/api/Dockerfile, context: . }
+          - { name: collab, file: apps/collab/Dockerfile, context: . }
+          - { name: web, file: deploy/caddy/Dockerfile, context: . }
+          - { name: mdns, file: deploy/mdns/Dockerfile, context: deploy/mdns }
+    env:
+      IMAGE: ${{ needs.verify.outputs.registry }}/codesh-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          # X.Y.Z, X.Y, X and latest; a pre-release gets only its own tag.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          flavor: latest=auto
+          labels: |
+            org.opencontainers.image.title=codesh-${{ matrix.name }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: CODESH_VERSION=${{ needs.verify.outputs.version }}
+          # The GitHub attestation below is the provenance; no extra manifests in the index.
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  bundles:
+    name: Offline bundle linux/${{ matrix.arch }}
+    needs: [verify, images]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A new package stays private until the maintainer makes it public once (RELEASING.md).
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Bundle the pushed images
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          BUNDLE_SOURCE: registry
+          BUNDLE_SUFFIX: -linux-${{ matrix.arch }}
+          CODESH_REGISTRY: ${{ needs.verify.outputs.registry }}
+        run: |
+          bash deploy/bundle.sh "$VERSION"
+          # The deploy archive has no images; one copy is enough.
+          if [ "$ARCH" != amd64 ]; then rm deploy/dist/codesh-deploy-*; fi
+          ls -l deploy/dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: deploy/dist/*.tar.gz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-${{ matrix.arch }}
+          path: deploy/dist/
+          compression-level: 0
+          retention-days: 3
+
+  release:
+    name: GitHub release
+    needs: [verify, bundles]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+          path: dist
+      - name: SHA256SUMS and notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          (cd dist && sha256sum ./*.tar.gz | sed 's| \./| |' >SHA256SUMS && cat SHA256SUMS)
+          node scripts/release.mjs notes "$VERSION" --footer "$REPOSITORY" >notes.md
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          flags=(--latest)
+          if [ "$PRERELEASE" = true ]; then flags=(--prerelease --latest=false); fi
+          gh release create "$TAG" dist/* --verify-tag --title "codesh $VERSION" --notes-file notes.md "${flags[@]}"
