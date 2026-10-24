@@ -99,10 +99,14 @@ export async function createShare(
   return { share, response: { id, code, url: urlOf(ctx, id) } };
 }
 
-/** Everything that belongs to a share, in the order that leaves no orphan visible to users. */
+/**
+ * Everything that belongs to a share, in the order that leaves no orphan visible to users.
+ * The record goes first, so a collab instance that re-reads it after the message finds it gone;
+ * an update flushed after the delete is removed by the sweeper.
+ */
 export async function deleteShare(ctx: Ctx, share: ShareRecord): Promise<void> {
-  await ctx.publishPerm(share.id, "delete");
   await ctx.stores.shares.delete(share.id);
+  await ctx.publishPerm(share.id, "delete");
   await Promise.all([
     ctx.stores.updates.deleteForShare(share.id),
     ctx.stores.snapshots.deleteForShare(share.id),

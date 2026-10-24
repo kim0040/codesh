@@ -409,6 +409,14 @@ describe.skipIf(!integration)("kick and ban", () => {
       clientId: guestId,
     });
     expect((await h.stores.shares.get(id))?.bans).toEqual([]);
+    // Versions are assigned and published in one step, so they arrive in order.
+    await Promise.all([
+      owner.post(`/api/shares/${id}/kick`, { clientId: guestId, ban: false }),
+      owner.post(`/api/shares/${id}/kick`, { clientId: guestId, ban: false }),
+    ]);
+    await eventually(() => perm.messages[2]);
+    const versions = perm.messages.map((m) => (m as { version: number }).version);
+    expect(versions).toEqual([versions[0], versions[0] + 1, versions[0] + 2]);
     // The grant is gone, so the PIN is asked again; the client is not banned.
     expect((await guest.post(`/api/shares/${id}/join`)).statusCode).toBe(401);
     expect((await guest.post(`/api/shares/${id}/join`, { pin: "1357" })).statusCode).toBe(200);

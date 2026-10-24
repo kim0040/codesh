@@ -101,11 +101,16 @@ export class Ctx {
 
   /** Permission change for collab (§6.7). No `clientId` means everyone connected to the share. */
   async publishPerm(shareId: string, kind: PermMessage["kind"], clientId?: string): Promise<void> {
-    const key = apiKeys.permVersion(shareId);
-    const version = await this.valkey.incr(key);
-    if (version === 1) await this.valkey.expire(key, 30 * 24 * 3600);
-    const message: PermMessage = { version, kind, ...(clientId ? { clientId } : {}) };
-    await this.valkey.publish(channels.perm(shareId), JSON.stringify(message));
+    // One script, so two API instances can never publish their versions out of order.
+    const message = JSON.stringify({ kind, ...(clientId ? { clientId } : {}) });
+    await this.valkey.eval(
+      PUBLISH_PERM,
+      1,
+      apiKeys.permVersion(shareId),
+      channels.perm(shareId),
+      message,
+      30 * 24 * 3600,
+    );
   }
 
   /** Writes an audit entry when `settings.audit.enabled`. */
@@ -127,3 +132,13 @@ export class Ctx {
     });
   }
 }
+
+/** INCRs the share's perm version and publishes the message with it in one step (§6.7). */
+const PUBLISH_PERM = `
+local version = redis.call("INCR", KEYS[1])
+if version == 1 then redis.call("EXPIRE", KEYS[1], ARGV[3]) end
+local message = cjson.decode(ARGV[2])
+message.version = version
+redis.call("PUBLISH", ARGV[1], cjson.encode(message))
+return version
+`;
