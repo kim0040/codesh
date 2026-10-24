@@ -24,6 +24,10 @@
   --ix-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --ix-code-size: 13px;
   --ix-header-h: 69px;
+  /* Latin tracks tight at display sizes; Hangul is denser already and needs less. */
+  --ix-track-display: -0.04em;
+  --ix-track-h2: -0.035em;
+  --ix-track-title: -0.02em;
 
   min-height: 100vh;
   /* One static accent glow behind the top of the page; it fades out well before the first panel. */
@@ -50,6 +54,11 @@
   box-sizing: border-box;
 }
 
+.ix:lang(ko) {
+  --ix-track-display: -0.025em;
+  --ix-track-h2: -0.022em;
+  --ix-track-title: -0.012em;
+}
 .ix :lang(ko) {
   word-break: keep-all;
   line-break: strict;
@@ -71,7 +80,7 @@
     padding: 0;
     list-style: none;
   }
-  :where(.ix) :is(h1, h2) {
+  :where(.ix) :is(h1, h2, h3) {
     text-wrap: balance;
   }
   :where(.ix) p {
@@ -89,7 +98,6 @@
 .ix :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 3px;
-  border-radius: 4px;
 }
 
 .ix-sr {
@@ -133,20 +141,35 @@
   font-size: var(--ix-display);
   font-weight: 760;
   line-height: 1.04;
-  letter-spacing: -0.04em;
+  letter-spacing: var(--ix-track-display);
 }
 .ix-h2 {
   max-width: 14em;
   font-size: var(--ix-h2);
   font-weight: 730;
   line-height: 1.1;
-  letter-spacing: -0.035em;
+  letter-spacing: var(--ix-track-h2);
+}
+/* Heading and one-line intro, the same stack at the top of every section. */
+.ix-head {
+  display: grid;
+  gap: clamp(14px, 2vw, 22px);
+  justify-items: start;
 }
 /* The English line is two lines wide from tablet up; keeping the box that tall stops the page
    from jumping when the webfont replaces the fallback and the wrap changes. */
+.ix-h1:lang(en) {
+  font-size: clamp(2.25rem, 0.55rem + 6.6vw, 5.5rem);
+}
 @media (min-width: 640px) {
   .ix-h1:lang(en) {
     min-height: 2.08em;
+  }
+}
+/* From here the English line fits on one row with room to spare, so no second row is held back. */
+@media (min-width: 1360px) {
+  .ix-h1:lang(en) {
+    min-height: 0;
   }
 }
 .ix-lead {
@@ -248,6 +271,10 @@
   font-weight: 800;
   letter-spacing: -0.03em;
   text-decoration: none;
+  transition: opacity 140ms var(--ix-ease);
+}
+.ix-brand:hover {
+  opacity: 0.78;
 }
 .ix-header-controls {
   display: flex;
@@ -264,10 +291,18 @@
 .ix-nav a {
   padding-block: 10px;
   color: var(--fg-2);
-  text-decoration: none;
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 6px;
+  transition:
+    color 140ms var(--ix-ease),
+    text-decoration-color 140ms var(--ix-ease);
 }
 .ix-nav a:hover {
   color: var(--fg);
+  text-decoration-color: var(--accent-text);
+}
+.ix-nav a:active {
+  color: var(--fg-2);
 }
 
 :where(.ix) fieldset {
@@ -293,7 +328,13 @@
   color: var(--fg-2);
   font-size: var(--ix-small);
   font-weight: 560;
-  transition: background-color 140ms var(--ix-ease);
+  transition:
+    background-color 140ms var(--ix-ease),
+    color 140ms var(--ix-ease),
+    transform 140ms var(--ix-ease);
+}
+.ix-seg-control button:active {
+  transform: scale(0.95);
 }
 .ix-seg-control button:hover {
   background: var(--fill-hover);
@@ -315,7 +356,7 @@
 /* ── Hero ── */
 
 .ix-hero {
-  padding-block: clamp(20px, 4vw, 56px) clamp(56px, 8vw, 112px);
+  padding-block: clamp(20px, 4vw, 56px) clamp(32px, 5vw, 72px);
 }
 .ix-hero-lead {
   margin-top: clamp(14px, 2vw, 24px);
@@ -324,11 +365,21 @@
   display: grid;
   gap: 20px;
   margin-top: clamp(28px, 4vw, 52px);
-  align-items: start;
+  align-items: stretch;
 }
 .ix-hero-start,
 .ix-hero-demo {
   min-width: 0;
+}
+/* The start panel gets the same kind of frame as the editor beside it. */
+.ix-hero-start {
+  padding: clamp(18px, 2.4vw, 30px);
+  border-radius: var(--ix-radius);
+  background: var(--panel);
+}
+.ix-hero-demo {
+  display: flex;
+  flex-direction: column;
 }
 @media (min-width: 1000px) {
   .ix-hero-grid {
@@ -371,6 +422,7 @@
 
 .ix-ed {
   display: flex;
+  flex: 1;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -469,8 +521,19 @@ button.ix-ed-tab:hover {
   background: color-mix(in oklab, var(--ed-fg) 10%, transparent);
 }
 .ix-ed-body {
-  height: 272px;
+  flex: 1;
+  min-height: 272px;
   background: var(--ed-bg);
+}
+/* The editor fills whatever height the frame is stretched to (the start panel can be taller). */
+.ix-ed-body {
+  display: flex;
+  flex-direction: column;
+}
+.ix-ed-body .cm-editor {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
 }
 .ix-ed-status {
   min-height: 34px;
@@ -489,10 +552,43 @@ button.ix-ed-tab:hover {
   margin-inline-start: auto;
 }
 .ix-ed-live {
+  position: relative;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--success);
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* A slow ring off the connected dot, and carets that blink like the real thing. */
+  .ix-ed-live::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: inherit;
+    animation: ix-ping 2.6s var(--ix-ease) infinite;
+  }
+  .ix-caret::before {
+    animation: ix-blink 1.1s steps(1, end) infinite;
+  }
+  .ix-caret[data-who="b"]::before {
+    animation-delay: 0.55s;
+  }
+  @keyframes ix-ping {
+    from {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    to {
+      transform: scale(3);
+      opacity: 0;
+    }
+  }
+  @keyframes ix-blink {
+    50% {
+      opacity: 0.2;
+    }
+  }
 }
 
 /* Remote cursors, in the editor and in the drawings */
@@ -619,9 +715,13 @@ button.ix-ed-tab:hover {
   --ix-tile: var(--raised);
 }
 
-/* Scroll reveal: opacity and transform only. Content stays visible without script or with reduced motion. */
+/*
+ * Scroll reveal: opacity and transform only. Nothing is hidden until useScrollReveal has put
+ * data-reveal-ready on the root, so content stays visible without script, with reduced motion,
+ * and when printing.
+ */
 @media (prefers-reduced-motion: no-preference) {
-  .ix [data-reveal] {
+  .ix[data-reveal-ready] [data-reveal] {
     opacity: 0;
     transform: translate3d(0, 22px, 0);
     transition:
@@ -629,7 +729,7 @@ button.ix-ed-tab:hover {
       transform 640ms var(--ix-ease);
     transition-delay: var(--d, 0ms);
   }
-  .ix [data-reveal][data-in] {
+  .ix[data-reveal-ready] [data-reveal][data-in] {
     opacity: 1;
     transform: none;
   }
@@ -672,8 +772,9 @@ button.ix-ed-tab:hover {
 .ix-seg-time {
   font-size: clamp(1.5rem, 1rem + 1.9vw, 2.75rem);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   line-height: 1.25;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--ix-track-title);
 }
 .ix-seg-title {
   font-size: 1.125rem;
@@ -698,7 +799,7 @@ button.ix-ed-tab:hover {
   }
 }
 
-/* ── Intranet: an index with one fixed preview frame ── */
+/* ── Ways in: an index with one fixed preview frame ── */
 
 .ix-fast {
   display: grid;
@@ -720,6 +821,7 @@ button.ix-ed-tab:hover {
 }
 
 .ix-way-btn {
+  position: relative;
   display: block;
   width: 100%;
   padding: 10px 0;
@@ -728,14 +830,41 @@ button.ix-ed-tab:hover {
   color: var(--fg-3);
   font-size: var(--ix-title);
   font-weight: 680;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--ix-track-title);
   line-height: 1.3;
   text-align: start;
   transition: color 180ms var(--ix-ease);
 }
+/* The chosen way gets an accent dot and its label steps right; both are transforms. */
+.ix-way-btn::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateY(-50%) scale(0);
+  transition: transform 220ms var(--ix-ease);
+}
+.ix-way-label {
+  display: block;
+  transition: transform 220ms var(--ix-ease);
+}
 .ix-way-btn:hover,
 .ix-way[data-on] .ix-way-btn {
   color: var(--fg);
+}
+.ix-way[data-on] .ix-way-btn::before {
+  transform: translateY(-50%) scale(1);
+}
+.ix-way[data-on] .ix-way-label {
+  transform: translateX(24px);
+}
+.ix-way-btn:active .ix-way-label {
+  transform: translateX(24px) scale(0.98);
+  transform-origin: left center;
 }
 .ix-stage {
   container-type: inline-size;
@@ -813,7 +942,18 @@ button.ix-ed-tab:hover {
   color: var(--accent-text);
 }
 .ix-art-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   justify-self: start;
+}
+/* A small live dot beside "nearby": shares here are open right now. */
+.ix-live {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
 }
 .ix-cells {
   display: inline-flex;
@@ -922,6 +1062,36 @@ button.ix-ed-tab:hover {
   gap: 4px;
   height: 5px;
 }
+.ix-screen-bar {
+  width: 22px;
+  height: 4px;
+  margin-bottom: 2px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ed-fg) 24%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* The drawing's parts arrive one after another each time the frame swaps. */
+  .ix-stage .ix-row,
+  .ix-stage .ix-screen,
+  .ix-stage .ix-toast {
+    animation: ix-arrive 420ms var(--ix-ease) both;
+    animation-delay: calc(120ms + var(--i, 0) * 70ms);
+  }
+  .ix-stage .ix-live::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: inherit;
+    animation: ix-ping 2.6s var(--ix-ease) infinite;
+  }
+  @keyframes ix-arrive {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 10px, 0) scale(0.98);
+    }
+  }
+}
 
 /* ── Features ── */
 
@@ -950,11 +1120,14 @@ button.ix-ed-tab:hover {
     grid-column: span 5;
   }
 }
+.ix-tile[data-span="12"] {
+  grid-column: span 12;
+}
 .ix-tile-title {
   margin-bottom: 6px;
   font-size: var(--ix-title);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--ix-track-title);
   line-height: 1.3;
 }
 .ix-tile-text p {
@@ -967,6 +1140,65 @@ button.ix-ed-tab:hover {
   min-height: 200px;
   align-content: center;
 }
+.ix-fx-keys {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  margin: 0;
+}
+.ix-keyrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-width: 0;
+  padding: 14px 18px;
+  border-radius: var(--rad-lg);
+  background: var(--raised);
+}
+.ix-keyrow dt {
+  font-size: 0.9375rem;
+  font-weight: 560;
+  color: var(--fg);
+}
+.ix-keyrow dd {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+}
+.ix-kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--bg);
+  box-shadow: inset 0 -2px 0 color-mix(in oklab, var(--fg) 20%, transparent);
+  color: var(--fg);
+  font: 600 0.8125rem / 1 var(--font-ui);
+}
+@media (max-width: 599px) {
+  .ix-fx-keys {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (min-width: 900px) {
+  .ix-tile[data-span="12"] {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: clamp(32px, 5vw, 72px);
+  }
+  .ix-tile[data-span="12"] .ix-tile-text {
+    order: -1;
+    flex: 0 0 34%;
+  }
+  .ix-tile[data-span="12"] .ix-fx-keys {
+    flex: 1;
+  }
+}
 .ix-chips {
   display: flex;
   flex-wrap: wrap;
@@ -976,12 +1208,45 @@ button.ix-ed-tab:hover {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 14px 7px 12px;
+  min-height: 34px;
+  padding: 0 14px 0 12px;
+  border: 0;
   border-radius: 999px;
   background: var(--fill-hover);
   color: var(--fg-2);
   font-size: 0.875rem;
   font-weight: 560;
+  transition:
+    background-color 160ms var(--ix-ease),
+    color 160ms var(--ix-ease),
+    transform 140ms var(--ix-ease);
+}
+@media (hover: hover) {
+  .ix-chip:hover {
+    background: color-mix(in oklab, var(--lc) 16%, var(--fill-hover));
+    color: var(--fg);
+  }
+}
+.ix-chip:active {
+  transform: scale(0.96);
+}
+.ix-chip[aria-pressed="true"] {
+  background: color-mix(in oklab, var(--lc) 24%, transparent);
+  color: var(--fg);
+}
+/* Keeps the tile the same height whichever sample is showing. */
+.ix-fx-highlight .ix-code {
+  min-height: calc(5 * 1.75em + 40px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ix-code-swap {
+    animation: ix-code-in 220ms var(--ix-ease) both;
+  }
+  @keyframes ix-code-in {
+    from {
+      opacity: 0.3;
+    }
+  }
 }
 .ix-chip .ix-dot,
 .ix-filetab .ix-dot,
@@ -1094,13 +1359,17 @@ button.ix-ed-tab:hover {
 .ix-diff-title {
   max-width: 10em;
 }
+.ix-diff-sub {
+  max-width: 20em;
+  font-size: 1.0625rem;
+}
 .ix-claim[data-span="1"] {
   grid-column: span 1;
 }
 .ix-claim-title {
   font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.375rem);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--ix-track-title);
   line-height: 1.3;
 }
 .ix-claim p {
@@ -1163,6 +1432,11 @@ button.ix-ed-tab:hover {
 .ix-faq-item[data-open] {
   background: var(--raised);
 }
+@media (hover: hover) {
+  .ix-faq-item:not([data-open]):hover {
+    background: var(--raised);
+  }
+}
 .ix-faq-item h3 {
   margin: 0;
 }
@@ -1182,6 +1456,10 @@ button.ix-ed-tab:hover {
   letter-spacing: -0.01em;
   line-height: 1.4;
   text-align: start;
+  transition: transform 140ms var(--ix-ease);
+}
+.ix-faq-q:active {
+  transform: scale(0.992);
 }
 .ix-faq-icon {
   flex: none;
@@ -1266,23 +1544,45 @@ button.ix-ed-tab:hover {
 }
 @media (min-width: 800px) {
   .ix-footer-grid {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
     gap: 48px;
   }
+}
+.ix-footer-lead {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.ix-footer-tagline {
+  max-width: 20em;
+  font-size: var(--ix-lead);
+  font-weight: 640;
+  letter-spacing: var(--ix-track-title);
+  line-height: 1.4;
+  text-wrap: balance;
 }
 .ix-footer-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 28px;
+  gap: 4px 28px;
+  align-content: start;
   font-weight: 600;
+}
+@media (min-width: 800px) {
+  .ix-footer-links {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0;
+  }
 }
 .ix-footer-links a {
   padding-block: 8px;
-  text-decoration: none;
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 6px;
+  transition: text-decoration-color 140ms var(--ix-ease);
 }
 .ix-footer-links a:hover {
-  text-decoration: underline;
-  text-underline-offset: 4px;
+  text-decoration-color: var(--accent-text);
 }
 .ix-footer-notes {
   display: grid;
@@ -1378,6 +1678,41 @@ button.ix-ed-tab:hover {
   }
   .ix-ed-ms {
     display: none;
+  }
+}
+
+/* 320px: brand, both switches and the sample code lines all have to fit one row each. */
+@media (max-width: 479px) {
+  .ix-brand {
+    font-size: 1.125rem;
+  }
+  .ix-header-row {
+    gap: 8px;
+  }
+  .ix-header-controls {
+    gap: 4px;
+  }
+  .ix-header .ix-seg-control button {
+    padding-inline: 6px;
+  }
+  .ix-header .ix-seg-icons button {
+    width: 28px;
+  }
+}
+@media (max-width: 399px) {
+  .ix {
+    --ix-code-size: 11px;
+  }
+  .ix .ix-code {
+    padding-inline: 16px;
+  }
+  .ix .ix-tile .ix-code {
+    font-size: var(--ix-code-size);
+  }
+  /* The start panel's six boxes need the full column, so the frame gives way. */
+  .ix-hero-start {
+    padding: 0;
+    background: none;
   }
 }
 

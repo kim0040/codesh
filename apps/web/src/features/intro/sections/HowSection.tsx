@@ -1,5 +1,6 @@
 import { useT } from "../../../lib/i18n";
 import { reveal } from "../reveal";
+import { SectionHead } from "./SectionHead";
 
 const STEPS = [1, 2, 3] as const;
 
@@ -9,9 +10,7 @@ export function HowSection() {
   return (
     <section id="how" className="ix-section" aria-labelledby="ix-how-title">
       <div className="ix-wrap">
-        <h2 id="ix-how-title" className="ix-h2" {...reveal()}>
-          {t("intro.how.title")}
-        </h2>
+        <SectionHead id="ix-how-title" title={t("intro.how.title")} sub={t("intro.how.sub")} />
         <ol className="ix-bar">
           {STEPS.map((step) => (
             <li className="ix-stage-seg" data-step={step} key={step} {...reveal(step * 90)}>

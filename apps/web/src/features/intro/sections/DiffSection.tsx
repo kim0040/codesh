@@ -18,6 +18,7 @@ export function DiffSection() {
             <h2 id="ix-diff-title" className="ix-h2 ix-diff-title">
               {t("intro.diff.title")}
             </h2>
+            <p className="ix-diff-sub">{t("intro.diff.sub")}</p>
           </div>
           {CLAIMS.map(({ key, span }, index) => (
             <div className="ix-claim" data-span={span} key={key} {...reveal((index % 3) * 80)}>

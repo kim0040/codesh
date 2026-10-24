@@ -2,6 +2,7 @@ import { type ComponentType, useState } from "react";
 import { useT } from "../../../lib/i18n";
 import { BroadcastArt, CodeArt, NearbyArt, QrArt, SendArt } from "../art";
 import { reveal } from "../reveal";
+import { SectionHead } from "./SectionHead";
 
 const WAYS = [
   { key: "code", Art: CodeArt },
@@ -20,12 +21,7 @@ export function FastSection() {
     <section id="fast" className="ix-section ix-section-panel" aria-labelledby="ix-fast-title">
       <div className="ix-wrap ix-fast">
         <div className="ix-fast-copy">
-          <h2 id="ix-fast-title" className="ix-h2" {...reveal()}>
-            {t("intro.fast.title")}
-          </h2>
-          <p className="ix-lead" {...reveal(70)}>
-            {t("intro.fast.sub")}
-          </p>
+          <SectionHead id="ix-fast-title" title={t("intro.fast.title")} sub={t("intro.fast.sub")} />
           <ul className="ix-ways" {...reveal(140)}>
             {WAYS.map((way, index) => (
               <li className="ix-way" data-on={index === active ? "" : undefined} key={way.key}>
@@ -39,7 +35,7 @@ export function FastSection() {
                       if (event.pointerType === "mouse") setActive(index);
                     }}
                   >
-                    {t(`intro.fast.${way.key}.title`)}
+                    <span className="ix-way-label">{t(`intro.fast.${way.key}.title`)}</span>
                   </button>
                 </h3>
                 <p className="ix-sr">{t(`intro.fast.${way.key}.body`)}</p>

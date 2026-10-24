@@ -1,7 +1,16 @@
 import type { ComponentType } from "react";
 import { useT } from "../../../lib/i18n";
-import { AccessArt, DownloadArt, FilesArt, HighlightArt, HistoryArt, MergeArt } from "../art";
+import {
+  AccessArt,
+  DownloadArt,
+  FilesArt,
+  HighlightArt,
+  HistoryArt,
+  KeysArt,
+  MergeArt,
+} from "../art";
 import { reveal } from "../reveal";
+import { SectionHead } from "./SectionHead";
 
 const FEATURES = [
   { key: "highlight", span: 7, Art: HighlightArt },
@@ -10,6 +19,7 @@ const FEATURES = [
   { key: "files", span: 7, Art: FilesArt },
   { key: "history", span: 7, Art: HistoryArt },
   { key: "download", span: 5, Art: DownloadArt },
+  { key: "keys", span: 12, Art: KeysArt },
 ] as const satisfies readonly { key: string; span: number; Art: ComponentType }[];
 
 export function FeaturesSection() {
@@ -17,9 +27,11 @@ export function FeaturesSection() {
   return (
     <section id="features" className="ix-section" aria-labelledby="ix-features-title">
       <div className="ix-wrap">
-        <h2 id="ix-features-title" className="ix-h2" {...reveal()}>
-          {t("intro.features.title")}
-        </h2>
+        <SectionHead
+          id="ix-features-title"
+          title={t("intro.features.title")}
+          sub={t("intro.features.sub")}
+        />
         <div className="ix-tiles">
           {FEATURES.map(({ key, span, Art }, index) => (
             <article className="ix-tile" data-span={span} key={key} {...reveal((index % 2) * 90)}>

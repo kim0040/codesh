@@ -1,4 +1,11 @@
-import { type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
 
@@ -80,32 +87,52 @@ export function usePageVisible(): boolean {
 
 /**
  * Scroll reveal: every `[data-reveal]` inside `root` gets `data-in` the first time it nears the
- * viewport. CSS animates opacity and transform only, and shows everything at once when motion is
- * reduced or IntersectionObserver is missing.
+ * viewport. CSS animates opacity and transform only, and only once `data-reveal-ready` is on the
+ * root, so a page whose script never gets this far stays fully visible. Anything already on screen
+ * or scrolled past (a restored scroll position, an anchor jump) is shown at once, and printing
+ * shows everything. Reduced motion and a missing IntersectionObserver show everything too.
  */
 export function useScrollReveal(root: RefObject<HTMLElement | null>, reduced: boolean) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = root.current;
     if (!container) return;
     const targets = Array.from(container.querySelectorAll<HTMLElement>("[data-reveal]"));
+    const show = (node: HTMLElement) => {
+      node.dataset.in = "";
+    };
+    const showAll = () => {
+      for (const node of targets) show(node);
+    };
     if (reduced || typeof IntersectionObserver === "undefined") {
-      for (const node of targets) node.dataset.in = "";
+      showAll();
       return;
     }
+    container.setAttribute("data-reveal-ready", "");
+    // Reading layout here also settles the hidden state before the first paint, so nothing fades out.
+    const fold = window.innerHeight * 0.92;
+    const waiting = targets.filter((node) => {
+      if (node.getBoundingClientRect().top >= fold) return true;
+      show(node);
+      return false;
+    });
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          (entry.target as HTMLElement).dataset.in = "";
+          // Scrolled past without ever intersecting: show it, or it would be blank on the way back.
+          if (!entry.isIntersecting && entry.boundingClientRect.top >= 0) continue;
+          show(entry.target as HTMLElement);
           observer.unobserve(entry.target);
         }
       },
       { rootMargin: "0px 0px -8% 0px", threshold: 0.08 },
     );
-    for (const node of targets) {
-      if (!("in" in node.dataset)) observer.observe(node);
-    }
-    return () => observer.disconnect();
+    for (const node of waiting) observer.observe(node);
+    window.addEventListener("beforeprint", showAll);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("beforeprint", showAll);
+      container.removeAttribute("data-reveal-ready");
+    };
   }, [root, reduced]);
 }
 

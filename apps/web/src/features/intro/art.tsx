@@ -2,9 +2,12 @@
  * Drawings made here in CSS and SVG: no files, no external requests. Every drawing is decorative
  * (aria-hidden); the text that explains it sits next to it in the page.
  */
-import type { CSSProperties, ReactNode } from "react";
+
+import type { MessageKey } from "@codesh/i18n";
+import { type CSSProperties, type ReactNode, useState } from "react";
 import { useT } from "../../lib/i18n";
 import { DownloadIcon, LockIcon } from "./icons";
+import { SAMPLE_IDS, type SampleId, sampleLines } from "./samples";
 import { lang } from "./static-data";
 
 type TokenKind =
@@ -92,7 +95,7 @@ export function Cells({
   );
 }
 
-/* ── Intranet previews ── */
+/* ── Ways in: previews ── */
 
 export function CodeArt() {
   const t = useT();
@@ -104,18 +107,24 @@ export function CodeArt() {
   );
 }
 
-/** A QR-like pattern: three finder squares and a fixed pseudo-random fill. Looks right, encodes nothing. */
+/**
+ * A QR-like pattern at version-3 size: three finder squares, timing lines, one alignment square
+ * and a fixed pseudo-random fill. It looks right and encodes nothing.
+ */
 export function QrArt() {
   const t = useT();
-  const size = 25;
+  const size = 29;
   let seed = 7;
   const modules: string[] = [];
   const inFinder = (x: number, y: number) =>
     (x < 8 && y < 8) || (x > size - 9 && y < 8) || (x < 8 && y > size - 9);
+  const inAlignment = (x: number, y: number) => x >= 20 && x <= 24 && y >= 20 && y <= 24;
+  const timing = (x: number, y: number) => (y === 6 || x === 6) && (x + y) % 2 === 0;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       seed = (seed * 48271) % 2147483647;
-      if (!inFinder(x, y) && seed % 100 < 47) modules.push(`M${x} ${y}h1v1h-1z`);
+      const filled = y === 6 || x === 6 ? timing(x, y) : seed % 100 < 47;
+      if (!inFinder(x, y) && !inAlignment(x, y) && filled) modules.push(`M${x} ${y}h1v1h-1z`);
     }
   }
   const finder = (x: number, y: number) => (
@@ -129,11 +138,15 @@ export function QrArt() {
       {/* biome-ignore lint/a11y/noSvgWithoutTitle: decorative drawing inside an aria-hidden stage */}
       <svg viewBox={`-2 -2 ${size + 4} ${size + 4}`} className="ix-qr" focusable="false">
         <rect x="-2" y="-2" width={size + 4} height={size + 4} fill="#ffffff" />
-        <g fill="#0a0c10">
+        <g fill="#0a0c10" shapeRendering="crispEdges">
           <path d={modules.join("")} />
           {finder(0, 0)}
           {finder(size - 7, 0)}
           {finder(0, size - 7)}
+          <g transform="translate(20 20)">
+            <path d="M0 0h5v5h-5zM1 1v3h3v-3z" fillRule="evenodd" />
+            <rect x="2" y="2" width="1" height="1" />
+          </g>
         </g>
       </svg>
       <span className="ix-art-caption">{t("intro.art.scan")}</span>
@@ -150,10 +163,18 @@ export function NearbyArt() {
   ] as const;
   return (
     <div className="ix-art ix-art-nearby">
-      <span className="ix-art-title">{t("intro.nearby.title")}</span>
+      <span className="ix-art-title">
+        <i className="ix-live" />
+        {t("intro.nearby.title")}
+      </span>
       <ul className="ix-rows">
         {rows.map((row, index) => (
-          <li className="ix-row" data-hot={index === 0 ? "" : undefined} key={row.file}>
+          <li
+            className="ix-row"
+            data-hot={index === 0 ? "" : undefined}
+            key={row.file}
+            style={{ "--i": index } as CSSProperties}
+          >
             <LangDot id={row.id} />
             <span className="ix-row-name">{row.file}</span>
             <span className="ix-row-meta">{lang(row.id).name}</span>
@@ -177,7 +198,12 @@ export function SendArt() {
     <div className="ix-art ix-art-send">
       <ul className="ix-rows">
         {people.map((person, index) => (
-          <li className="ix-row" data-hot={index === 1 ? "" : undefined} key={person.slot}>
+          <li
+            className="ix-row"
+            data-hot={index === 1 ? "" : undefined}
+            key={person.slot}
+            style={{ "--i": index } as CSSProperties}
+          >
             <span
               className="ix-avatar"
               style={
@@ -193,7 +219,7 @@ export function SendArt() {
           </li>
         ))}
       </ul>
-      <div className="ix-toast">
+      <div className="ix-toast" style={{ "--i": 4 } as CSSProperties}>
         <LangDot id="typescript" />
         <span>{t("invite.received.title", { name: t("intro.demo.userA") })}</span>
       </div>
@@ -225,7 +251,8 @@ export function BroadcastArt() {
       <div className="ix-screens">
         {Array.from({ length: 6 }, (_, screen) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: six identical screens by design
-          <div className="ix-screen" key={screen}>
+          <div className="ix-screen" key={screen} style={{ "--i": screen } as CSSProperties}>
+            <span className="ix-screen-bar" />
             {screens.map((line, row) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: static drawing
               <span className="ix-screen-line" key={row}>
@@ -246,56 +273,32 @@ export function BroadcastArt() {
 
 /* ── Feature tiles ── */
 
+/** Pick a language to see the same few lines in its own highlighting. */
 export function HighlightArt() {
+  const t = useT();
+  const [active, setActive] = useState<SampleId>("typescript");
   return (
     <div className="ix-fx ix-fx-highlight">
-      <Code
-        lines={[
-          [["comment", "// total price"]],
-          [
-            ["keyword", "export function "],
-            ["function", "total"],
-            [null, "("],
-            ["variable", "n"],
-            [null, ": "],
-            ["type", "number"],
-            [null, ") {"],
-          ],
-          [
-            [null, "  "],
-            ["keyword", "const "],
-            ["variable", "unit"],
-            ["operator", " = "],
-            ["number", "1200"],
-            [null, ";"],
-          ],
-          [
-            [null, "  "],
-            ["keyword", "return "],
-            ["variable", "n"],
-            ["operator", " > "],
-            ["number", "0"],
-            ["operator", " ? "],
-            ["variable", "n"],
-            ["operator", " * "],
-            ["variable", "unit"],
-            ["operator", " : "],
-            ["string", '"none"'],
-            [null, ";"],
-          ],
-          [[null, "}"]],
-        ]}
-      />
-      <ul className="ix-chips" aria-hidden="true">
-        {["typescript", "python", "go", "rust", "java", "kotlin", "cpp", "swift", "php", "sql"].map(
-          (id) => (
-            <li className="ix-chip" key={id}>
-              <LangDot id={id} />
-              {lang(id).name}
-            </li>
-          ),
-        )}
-      </ul>
+      <Code lines={sampleLines(active)} className="ix-code-swap" key={active} />
+      <fieldset className="ix-chips">
+        <legend className="ix-sr">{t("intro.features.highlight.pick")}</legend>
+        {SAMPLE_IDS.map((id) => (
+          <button
+            type="button"
+            className="ix-chip"
+            key={id}
+            aria-pressed={id === active}
+            style={{ "--lc": lang(id).color } as CSSProperties}
+            onClick={() => setActive(id)}
+            onPointerEnter={(event) => {
+              if (event.pointerType === "mouse") setActive(id);
+            }}
+          >
+            <LangDot id={id} />
+            {lang(id).name}
+          </button>
+        ))}
+      </fieldset>
     </div>
   );
 }
@@ -494,6 +497,38 @@ export function DownloadArt() {
         share.zip
       </span>
     </div>
+  );
+}
+
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const MOD = isMac ? "⌘" : "Ctrl";
+const ALT = isMac ? "⌥" : "Alt";
+
+/** Same shortcuts as the app's shortcut sheet, with the same labels. */
+const SHORTCUTS = [
+  { label: "shortcuts.item.palette", keys: [MOD, "K"] },
+  { label: "shortcuts.item.format", keys: ["Shift", ALT, "F"] },
+  { label: "shortcuts.item.share", keys: [MOD, ALT, "S"] },
+  { label: "shortcuts.item.history", keys: [MOD, ALT, "H"] },
+] as const satisfies readonly { label: MessageKey; keys: readonly string[] }[];
+
+export function KeysArt() {
+  const t = useT();
+  return (
+    <dl className="ix-fx ix-fx-keys">
+      {SHORTCUTS.map((item) => (
+        <div className="ix-keyrow" key={item.label}>
+          <dt>{t(item.label)}</dt>
+          <dd>
+            {item.keys.map((key) => (
+              <kbd className="ix-kbd" key={key}>
+                {key}
+              </kbd>
+            ))}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

@@ -82,6 +82,7 @@ export const en = {
   "intro.how.step3.title": "Edit together",
   "intro.how.step3.time": "From then on",
   "intro.how.step3.body": "Everyone types at once. Changes merge without conflicts.",
+  "intro.how.sub": "Create it, pass on the code, edit together. That's all.",
   "intro.fast.title": "Faster on the same network",
   "intro.fast.sub": "No more copying links into a messenger.",
   "intro.fast.code.title": "Enter a code",
@@ -101,9 +102,11 @@ export const en = {
   "intro.art.people.other": "{count} people",
   "intro.art.userC": "Sam",
   "intro.features.title": "Everything you need",
+  "intro.features.sub": "Only the features that sharing code needs.",
   "intro.features.highlight.title": "Syntax highlighting",
   "intro.features.highlight.body":
     "More than 100 programming languages, each in its own colors. Easy to read on dark and light screens.",
+  "intro.features.highlight.pick": "Choose an example language",
   "intro.features.merge.title": "Conflict-free editing",
   "intro.features.merge.body":
     "Edit the same line together and nothing gets overwritten. If the connection drops, your typing is kept and merged when you're back.",
@@ -119,13 +122,18 @@ export const en = {
   "intro.features.offline.title": "Keeps your changes",
   "intro.features.offline.body":
     "If the connection drops, what you type is kept and merged when you're back.",
+  "intro.features.keys.title": "Quick from the keyboard",
+  "intro.features.keys.body":
+    "Find actions and your shares in the command palette, and tidy code with one shortcut.",
   "intro.diff.title": "Unlike public services",
+  "intro.diff.sub": "What changes when everything runs on this one server.",
   "intro.diff.noAds": "No ads and no tracking",
   "intro.diff.noAdsBody": "No outside scripts, fonts or images. Everything comes from this server.",
   "intro.diff.free": "Everything is free",
   "intro.diff.freeBody": "View-only links and PIN locks are included, with no limits.",
   "intro.diff.offline": "Works without internet",
-  "intro.diff.offlineBody": "You only need to be on the same network as the server. Even fonts and icons are on the server.",
+  "intro.diff.offlineBody":
+    "You only need to be on the same network as the server. Even fonts and icons are on the server.",
   "intro.diff.erased": "Deleted text isn't sent to anyone else",
   "intro.diff.erasedBody":
     "People in a share only receive the current document. History stays on the server, and only the owner can open it.",

@@ -30,15 +30,18 @@ export function Footer({ version, contact }: FooterProps) {
         </div>
         <p className="ix-sr">{t("app.name")}</p>
         <div className="ix-footer-grid">
+          <div className="ix-footer-lead" {...reveal(60)}>
+            <p className="ix-footer-tagline">{t("app.tagline")}</p>
+            <div className="ix-footer-notes">
+              <p>{t("intro.footer.noTracking")}</p>
+              {contact ? <p>{t("intro.footer.contact", { contact })}</p> : null}
+            </div>
+          </div>
           <nav className="ix-footer-links" aria-label={t("a11y.mainNavigation")}>
             <a href="#how">{t("intro.nav.how")}</a>
             <a href="#features">{t("intro.nav.features")}</a>
             <a href="#faq">{t("intro.nav.faq")}</a>
           </nav>
-          <div className="ix-footer-notes">
-            <p>{t("intro.footer.noTracking")}</p>
-            {contact ? <p>{t("intro.footer.contact", { contact })}</p> : null}
-          </div>
         </div>
         <div className="ix-footer-bar">
           <p className="ix-footer-version">{t("intro.footer.version", { version })}</p>
