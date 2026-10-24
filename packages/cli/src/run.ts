@@ -171,9 +171,10 @@ async function resolveTarget(
     throw new CliError(`"${target}" is neither a 6-digit code nor an 8-character share id`);
   }
   const found = await client.json<CodeResponse>("GET", `/api/codes/${target}`);
-  return "labId" in found
-    ? { path: `/lab/${found.labId}`, id: found.labId }
-    : { path: `/${found.id}`, id: found.id };
+  const id = "labId" in found ? found.labId : found.id;
+  if (typeof id !== "string" || !SHARE_ID.test(id) || !/[A-Za-z]/.test(id))
+    throw new CliError("The server returned an invalid share id");
+  return { path: "labId" in found ? `/lab/${id}` : `/${id}`, id };
 }
 
 async function open(args: string[], io: Io): Promise<void> {
@@ -269,10 +270,10 @@ export function openInBrowser(url: string): Promise<void> {
     process.platform === "darwin"
       ? ["open", [url]]
       : process.platform === "win32"
-        ? ["cmd", ["/c", "start", "", url]]
+        ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
         : ["xdg-open", [url]];
   return new Promise((resolveOpen) => {
-    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    const child = spawn(command, args, { stdio: "ignore", detached: true, shell: false });
     // No browser (a server over ssh): the URL was printed already.
     child.on("error", () => resolveOpen());
     child.unref();
