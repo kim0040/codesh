@@ -5,8 +5,8 @@ import {
   MAX_TEMPLATE_DESCRIPTION_LENGTH,
   MAX_TEMPLATE_NAME_LENGTH,
   MAX_TEMPLATES,
+  MAX_TEMPLATES_TOTAL_BYTES,
   type SettingsTemplate,
-  settingsTemplateSchema,
   templateBytes,
 } from "@codesh/shared";
 import {
@@ -24,89 +24,19 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { formatBytes } from "../../lib/format";
 import { useT } from "../../lib/i18n";
-
-interface DraftFile {
-  /** Stable key while the files are edited; the path itself changes. */
-  key: number;
-  path: string;
-  content: string;
-}
-
-interface Draft {
-  id: string;
-  name: string;
-  language: string;
-  description: string;
-  files: DraftFile[];
-}
-
-interface Errors {
-  name?: string;
-  language?: string;
-  description?: string;
-  files?: string;
-  paths: Record<number, string>;
-}
-
-let fileKey = 0;
-const newFile = (path = "", content = ""): DraftFile => ({ key: fileKey++, path, content });
+import {
+  type Draft,
+  type DraftFile,
+  type Errors,
+  newFile,
+  toDraft,
+  validate,
+} from "./template-draft";
 
 const LANGUAGE_OPTIONS = LANGUAGES.map((language) => ({
   value: language.id,
   label: language.name,
 }));
-
-function toDraft(template: SettingsTemplate): Draft {
-  return {
-    id: template.id,
-    name: template.name,
-    language: template.language,
-    description: template.description,
-    files: template.files.map((file) => newFile(file.path, file.content)),
-  };
-}
-
-/** Checks the draft with the schema the server uses, so a refusal there can not surprise. */
-function validate(
-  draft: Draft,
-  maxDocBytes: number,
-  t: ReturnType<typeof useT>,
-): { template: SettingsTemplate } | { errors: Errors } {
-  const candidate = {
-    id: draft.id,
-    name: draft.name,
-    language: draft.language,
-    description: draft.description,
-    files: draft.files.map(({ path, content }) => ({ path: path.trim(), content })),
-  };
-  const parsed = settingsTemplateSchema.safeParse(candidate);
-  const errors: Errors = { paths: {} };
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const [field, index, sub] = issue.path;
-      if (field === "name")
-        errors.name = t("admin.template.error.name", { max: MAX_TEMPLATE_NAME_LENGTH });
-      else if (field === "description") {
-        errors.description = t("admin.template.error.description", {
-          max: MAX_TEMPLATE_DESCRIPTION_LENGTH,
-        });
-      } else if (field === "language") errors.language = t("admin.template.error.language");
-      else if (field === "files" && typeof index === "number" && sub === "path") {
-        errors.paths[index] = t("admin.template.error.path");
-      } else if (field === "files") {
-        errors.files =
-          draft.files.length === 0
-            ? t("admin.template.error.files")
-            : t("admin.template.error.duplicatePath");
-      }
-    }
-  } else if (templateBytes(parsed.data.files) > maxDocBytes) {
-    errors.files = t("admin.template.error.size", { size: formatBytes(maxDocBytes) });
-  } else {
-    return { template: parsed.data };
-  }
-  return { errors };
-}
 
 export interface TemplatesEditorProps {
   templates: readonly SettingsTemplate[];
@@ -121,6 +51,7 @@ export function TemplatesEditor({ templates, maxDocBytes, onChange }: TemplatesE
   const [deleting, setDeleting] = useState<number | null>(null);
   const full = templates.length >= MAX_TEMPLATES;
   const target = deleting === null ? undefined : templates[deleting];
+  const totalBytes = templates.reduce((sum, template) => sum + templateBytes(template.files), 0);
 
   const add = () => {
     const taken = new Set(templates.map((template) => template.id));
@@ -165,7 +96,7 @@ export function TemplatesEditor({ templates, maxDocBytes, onChange }: TemplatesE
                     <span>{t("template.files", { count: template.files.length })}</span>
                   </span>
                   {tooLarge ? (
-                    <span role="alert" className="text-caption text-danger-text">
+                    <span className="text-caption text-danger-text">
                       {t("admin.template.error.size", { size: formatBytes(maxDocBytes) })}
                     </span>
                   ) : null}
@@ -208,6 +139,25 @@ export function TemplatesEditor({ templates, maxDocBytes, onChange }: TemplatesE
           </span>
         ) : null}
       </div>
+      {templates.length > 0 ? (
+        <p
+          className={
+            totalBytes > MAX_TEMPLATES_TOTAL_BYTES
+              ? "text-caption text-danger-text"
+              : "text-caption text-fg-3"
+          }
+          data-testid="templates-total"
+        >
+          {totalBytes > MAX_TEMPLATES_TOTAL_BYTES
+            ? t("admin.setting.templates.totalTooLarge", {
+                max: formatBytes(MAX_TEMPLATES_TOTAL_BYTES),
+              })
+            : t("admin.setting.templates.total", {
+                used: formatBytes(totalBytes),
+                max: formatBytes(MAX_TEMPLATES_TOTAL_BYTES),
+              })}
+        </p>
+      ) : null}
 
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent
@@ -222,6 +172,11 @@ export function TemplatesEditor({ templates, maxDocBytes, onChange }: TemplatesE
               key={editing.draft.id}
               initial={editing.draft}
               maxDocBytes={maxDocBytes}
+              otherBytes={templates.reduce(
+                (sum, template, i) =>
+                  i === editing.index ? sum : sum + templateBytes(template.files),
+                0,
+              )}
               onCancel={() => setEditing(null)}
               onSave={(template) => {
                 onChange(
@@ -268,11 +223,13 @@ export function TemplatesEditor({ templates, maxDocBytes, onChange }: TemplatesE
 function TemplateForm({
   initial,
   maxDocBytes,
+  otherBytes,
   onCancel,
   onSave,
 }: {
   initial: Draft;
   maxDocBytes: number;
+  otherBytes: number;
   onCancel: () => void;
   onSave: (template: SettingsTemplate) => void;
 }) {
@@ -284,7 +241,7 @@ function TemplateForm({
     patch({ files: draft.files.map((file) => (file.key === key ? { ...file, ...next } : file)) });
 
   const submit = () => {
-    const result = validate(draft, maxDocBytes, t);
+    const result = validate(draft, maxDocBytes, otherBytes, t);
     if ("template" in result) onSave(result.template);
     else setErrors(result.errors);
   };
@@ -297,6 +254,11 @@ function TemplateForm({
         submit();
       }}
     >
+      {errors?.form ? (
+        <p role="alert" className="text-caption text-danger-text">
+          {errors.form}
+        </p>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={t("admin.template.nameLabel")} error={errors?.name}>
           <Input

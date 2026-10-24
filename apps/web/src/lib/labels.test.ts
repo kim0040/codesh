@@ -5,6 +5,7 @@ import {
   listFolders,
   listTags,
   matchesLabels,
+  matchesQuery,
   pruneFilters,
   resolveFolderName,
   suggestFolders,
@@ -107,5 +108,24 @@ describe("suggestTags", () => {
     expect(suggestTags(tags, ["JAVA"], "").map((t) => t.name)).toEqual(["loops", "python"]);
     expect(suggestTags(tags, [], "py").map((t) => t.name)).toEqual(["python"]);
     expect(suggestTags(tags, [], "").map((t) => t.name)).toEqual(["java", "loops", "python"]);
+  });
+});
+
+describe("matchesQuery", () => {
+  const item = {
+    id: "AbCd1234",
+    title: "Loops homework",
+    folder: "Week 1",
+    tags: ["Java", "loops"],
+  };
+  it("finds a share by title, code, folder or tag, ignoring case", () => {
+    for (const query of ["homework", "abcd", "WEEK", "java", "  oop "]) {
+      expect(matchesQuery(item, query), query).toBe(true);
+    }
+  });
+  it("matches everything for an empty query and nothing for an unknown word", () => {
+    expect(matchesQuery(item, "  ")).toBe(true);
+    expect(matchesQuery(item, "python")).toBe(false);
+    expect(matchesQuery({ ...item, folder: null, tags: [] }, "week")).toBe(false);
   });
 });

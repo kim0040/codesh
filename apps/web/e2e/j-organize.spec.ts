@@ -122,7 +122,9 @@ test("organize with the keyboard: existing folders and tags are suggested, chips
     await expect(dialog).toBeHidden();
     const nav = user.page.getByTestId("folder-nav");
     await expect(nav.getByRole("button", { name: /^Week 1\s*2$/ })).toBeVisible();
-    await expect(nav.getByRole("button")).toHaveCount(3);
+    // Nothing is left without a folder, so there is no "No folder" pill to click.
+    await expect(nav.getByRole("button")).toHaveCount(2);
+    await expect(nav.getByRole("button", { name: /^No folder/ })).toHaveCount(0);
 
     // First share: a chip is removed with Delete, the last one with Backspace in the empty field.
     const again = await organize(user.page, first);
@@ -177,6 +179,117 @@ test("320px: my shares with folders, tags and the organize dialog fit the screen
     expect((box?.x ?? -1) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
     await dialog.getByTestId("organize-save").scrollIntoViewIfNeeded();
     await expect(dialog.getByTestId("organize-save")).toBeVisible();
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("Escape closes the folder list first and the dialog second, keeping the edits", async ({
+  browser,
+}) => {
+  const user = await newUser(browser, "Esc");
+  try {
+    const id = await create(user, "Escape me");
+    await user.context.request.put(`/api/shares/${id}/labels`, {
+      data: { folder: "Week 1", tags: [] },
+    });
+    const other = await create(user, "Other");
+    await user.page.goto("/me");
+    await expect(user.page.getByTestId("share-list").locator(":scope > li")).toHaveCount(2);
+
+    const dialog = await organize(user.page, other);
+    const folder = dialog.getByTestId("organize-folder");
+    await addTag(dialog, "unsaved");
+    await folder.click();
+    await expect(dialog.getByRole("listbox")).toBeVisible();
+
+    await folder.press("Escape");
+    await expect(dialog.getByRole("listbox")).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("organize-tags")).toContainText("unsaved");
+
+    await folder.press("Escape");
+    await expect(dialog).toBeHidden();
+    // Nothing was saved by closing.
+    await expect(user.page.getByTestId(`share-${other}`).getByTestId("share-tags")).toHaveCount(0);
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("adding the tenth tag keeps the focus in the dialog, and Backspace frees a place", async ({
+  browser,
+}) => {
+  const user = await newUser(browser, "Ten");
+  try {
+    const id = await create(user, "Ten tags");
+    await user.page.goto("/me");
+    const dialog = await organize(user.page, id);
+    const input = dialog.getByTestId("organize-tag-input");
+    await input.click();
+    for (let i = 1; i <= 10; i++) {
+      await user.page.keyboard.type(`tag${i}`);
+      await user.page.keyboard.press("Enter");
+    }
+    await expect(dialog.getByTestId("organize-tags").locator("li")).toHaveCount(10);
+    await expect(dialog.getByText("You can add up to 10 tags.")).toBeVisible();
+    // The input is read-only, not disabled, so it keeps the focus.
+    await expect(input).toBeFocused();
+    await expect(input).toHaveAttribute("readonly", "");
+    await user.page.keyboard.press("Tab");
+    expect(
+      await user.page.evaluate(() => document.activeElement?.closest("[role=dialog]") !== null),
+    ).toBe(true);
+    await input.focus();
+    await user.page.keyboard.press("Backspace");
+    await expect(dialog.getByTestId("organize-tags").locator("li")).toHaveCount(9);
+    await expect(input).not.toHaveAttribute("readonly", "");
+    // Focus moves to the neighbouring chip, as it does for every removed tag.
+    await expect(dialog.getByRole("button", { name: "Remove tag tag9" })).toBeFocused();
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("a tab character gets a message that names the folder or the tag", async ({ browser }) => {
+  const user = await newUser(browser, "Tab");
+  try {
+    const id = await create(user, "Tabs");
+    await user.page.goto("/me");
+    const dialog = await organize(user.page, id);
+
+    await dialog.getByTestId("organize-tag-input").fill("a\tb");
+    await dialog.getByTestId("organize-save").click();
+    await expect(dialog.getByText("Tags can't contain line breaks or tabs.")).toBeVisible();
+    await expect(dialog.getByText("Folder names can't contain")).toHaveCount(0);
+
+    await dialog.getByTestId("organize-tag-input").fill("");
+    await dialog.getByTestId("organize-folder").fill("x\ty");
+    await dialog.getByTestId("organize-save").click();
+    await expect(dialog.getByText("Folder names can't contain line breaks or tabs.")).toBeVisible();
+    await expect(dialog.getByText("Folder names can have up to")).toHaveCount(0);
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("search finds a share by its folder or tag", async ({ browser }) => {
+  const user = await newUser(browser, "Search");
+  try {
+    const labelled = await create(user, "Plain title");
+    await create(user, "Other");
+    await user.context.request.put(`/api/shares/${labelled}/labels`, {
+      data: { folder: "Midterm prep", tags: ["recursion"] },
+    });
+    await user.page.goto("/me");
+    const rows = user.page.getByTestId("share-list").locator(":scope > li");
+    await expect(rows).toHaveCount(2);
+    await user.page.getByTestId("share-search").fill("recurs");
+    await expect(rows).toHaveCount(1);
+    await expect(user.page.getByTestId(`share-${labelled}`)).toBeVisible();
+    await user.page.getByTestId("share-search").fill("midterm");
+    await expect(rows).toHaveCount(1);
+    await expect(user.page.getByTestId(`share-${labelled}`)).toBeVisible();
   } finally {
     await closeAll(user);
   }

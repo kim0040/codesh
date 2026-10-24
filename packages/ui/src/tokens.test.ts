@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { contrastRatio, PARTICIPANT_COLORS } from "@codesh/highlight";
+import { contrastRatio, mix, PARTICIPANT_COLORS } from "@codesh/highlight";
 import { describe, expect, it } from "vitest";
 
 const styles = (file: string) => readFileSync(join(import.meta.dirname, "styles", file), "utf8");
@@ -44,6 +44,34 @@ describe("colour tokens", () => {
     for (const fg of ["fg", "fg-2", "fg-3"]) {
       for (const bg of SURFACES)
         expect(ratio(fg, bg, mode), `${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  // Hover, selected and active rows are `fg` at 6, 8 and 10% over the surface (`--fill-*`).
+  const FILLS = { "fill-hover": 0.06, "fill-selected": 0.08, "fill-active": 0.1 } as const;
+
+  it.each(MODES)("fg and fg-2 hold 4.5:1 on every fill over every surface (%s)", (mode) => {
+    for (const [fill, alpha] of Object.entries(FILLS)) {
+      for (const bg of SURFACES) {
+        const surface = mix(resolve("fg", mode), resolve(bg, mode), alpha);
+        for (const fg of ["fg", "fg-2"]) {
+          expect(
+            contrastRatio(resolve(fg, mode), surface),
+            `${fg} on ${fill} over ${bg}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
+  it.each(MODES)("fg-3 holds 4.5:1 on the hover fill over every surface (%s)", (mode) => {
+    // The selected and active fills are darker still; text on those uses fg-2 (see TemplatePicker).
+    for (const bg of SURFACES) {
+      const surface = mix(resolve("fg", mode), resolve(bg, mode), FILLS["fill-hover"]);
+      expect(
+        contrastRatio(resolve("fg-3", mode), surface),
+        `fg-3 over ${bg}`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_TEMPLATES_TOTAL_BYTES } from "./constants.js";
 import { defaultSettings, settingsSchema } from "./settings.js";
 
 describe("settings defaults", () => {
@@ -98,6 +99,17 @@ describe("settings defaults", () => {
       const big = template("a", { files: [{ path: "a.txt", content: "x".repeat(2000) }] });
       expect(parse([big], { maxDocBytes: 1000 }).success).toBe(false);
       expect(parse([big], { maxDocBytes: 2000 }).success).toBe(true);
+    });
+
+    it("caps all templates together at MAX_TEMPLATES_TOTAL_BYTES", () => {
+      const sized = (id: string, size: number) =>
+        template(id, { files: [{ path: "a.txt", content: "x".repeat(size) }] });
+      const half = MAX_TEMPLATES_TOTAL_BYTES / 2;
+      const within = { maxDocBytes: MAX_TEMPLATES_TOTAL_BYTES };
+      expect(parse([sized("a", half), sized("b", half)], within).success).toBe(true);
+      const over = parse([sized("a", half), sized("b", half + 1)], within);
+      expect(over.success).toBe(false);
+      expect(over.error?.issues.map((issue) => issue.path)).toContainEqual(["templates"]);
     });
 
     it("trims name and description", () => {

@@ -229,6 +229,36 @@ describe.skipIf(!integration)("share labels", () => {
     expect(await labelsOf(other, id)).toEqual({ folder: "O", tags: [] });
   });
 
+  it("does not keep a label that raced with unsave or ban", async () => {
+    const owner = h.client();
+    const guest = h.client();
+    const guestId = await guest.clientId();
+    const { id } = await createShare(owner);
+    await guest.post(`/api/shares/${id}/save`);
+
+    // The person leaves the share, and their labels are deleted, between the membership check and the write.
+    const set = h.stores.labels.set.bind(h.stores.labels);
+    let leave: (() => Promise<unknown>) | null = () => guest.delete(`/api/shares/${id}/save`);
+    h.stores.labels.set = async (...args) => {
+      const run = leave;
+      leave = null;
+      await run?.();
+      return set(...args);
+    };
+    try {
+      expect((await put(guest, id, { folder: "G", tags: ["g"] })).statusCode).toBe(404);
+      expect(await h.stores.labels.get(guestId, id)).toBeNull();
+
+      // The same for a ban by the owner.
+      await guest.post(`/api/shares/${id}/save`);
+      leave = () => owner.post(`/api/shares/${id}/kick`, { clientId: guestId, ban: true });
+      expect((await put(guest, id, { folder: "G", tags: ["g"] })).statusCode).toBe(404);
+      expect(await h.stores.labels.get(guestId, id)).toBeNull();
+    } finally {
+      h.stores.labels.set = set;
+    }
+  });
+
   it("removes every person's labels when the owner deletes the share", async () => {
     const owner = h.client();
     const guest = h.client();
@@ -365,6 +395,21 @@ describe.skipIf(!integration)("templates", () => {
       await expectRefused([orgTemplate("org-a", { files: [file("a.go"), file("a.go")] })]);
       await expectRefused([orgTemplate("org-a", { files: [file("../a.go")] })]);
       await expectRefused([orgTemplate("org-a", { files: [file("/etc/a.go")] })]);
+    });
+
+    it("refuses templates above 2 MiB together, and accepts a body above Fastify's 1 MiB default", async () => {
+      const big = (id: string, size: number) =>
+        orgTemplate(id, { files: [{ path: "a.txt", content: "x".repeat(size) }] });
+      const half = 1024 * 1024 + 1000;
+      // 1.1 MiB in one request used to fail with a bare 413.
+      expect((await putSettings({ templates: [big("org-a", half)] })).statusCode).toBe(200);
+      await putSettings({ templates: [] });
+      // Two of them are 2.2 MiB together: refused by the schema, not by the body limit.
+      await expectRefused([big("org-a", half), big("org-b", half)]);
+      // Far above the cap the body limit answers 413 too_large.
+      const huge = await putSettings({ templates: [big("org-a", 14 * 1024 * 1024)] });
+      expect(huge.statusCode).toBe(413);
+      expect(errorCode(huge)).toBe("too_large");
     });
 
     it("refuses a template larger than maxDocBytes", async () => {

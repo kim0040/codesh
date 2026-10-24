@@ -13,7 +13,7 @@ interface FolderNavProps {
 }
 
 /**
- * Folder filter of "my shares": All, each folder with its count, No folder. A sidebar from `md`,
+ * Folder filter of "my shares": All, each folder with its count, No folder (only while some share has none). A sidebar from `md`,
  * wrapping pills below that so it fits a 320px screen without a horizontal scroll.
  */
 export function FolderNav({ folders, unfiled, total, value, onChange }: FolderNavProps) {
@@ -45,14 +45,16 @@ export function FolderNav({ folders, unfiled, total, value, onChange }: FolderNa
             />
           </li>
         ))}
-        <li className="max-w-full md:w-full">
-          <FolderButton
-            label={t("myshares.folder.none")}
-            count={unfiled}
-            current={value.kind === "none"}
-            onClick={() => onChange({ kind: "none" })}
-          />
-        </li>
+        {unfiled > 0 ? (
+          <li className="max-w-full md:w-full">
+            <FolderButton
+              label={t("myshares.folder.none")}
+              count={unfiled}
+              current={value.kind === "none"}
+              onClick={() => onChange({ kind: "none" })}
+            />
+          </li>
+        ) : null}
       </ul>
     </nav>
   );

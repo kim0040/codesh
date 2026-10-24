@@ -76,6 +76,8 @@ export const MAX_TAG_LENGTH = 30;
 
 // Templates (§10 `templates`)
 export const MAX_TEMPLATES = 50;
+/** All template files together, so the settings document and its request stay small. */
+export const MAX_TEMPLATES_TOTAL_BYTES = 2 * 1024 * 1024;
 export const MAX_TEMPLATE_NAME_LENGTH = 60;
 export const MAX_TEMPLATE_DESCRIPTION_LENGTH = 200;
 export const MAX_TEMPLATE_ID_LENGTH = 40;

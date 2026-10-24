@@ -3,6 +3,7 @@ import {
   auditQuerySchema,
   auditResponseSchema,
   getSettingsResponseSchema,
+  MAX_TEMPLATES_TOTAL_BYTES,
   PRESENCE_USER_TTL_SECONDS,
   putSettingsBodySchema,
   type Settings,
@@ -16,6 +17,12 @@ import { forbidden, invalid, notFound } from "../errors.js";
 import { isValidCidr } from "../net.js";
 import { rateLimit, rateRelease } from "../rate.js";
 import type { App } from "./types.js";
+
+/**
+ * Request size of `PUT /api/admin/settings`: the template files, which JSON escaping can grow to
+ * six bytes per byte (`\u0001`), plus room for the other settings. Fastify's default is 1 MiB.
+ */
+const SETTINGS_BODY_LIMIT = MAX_TEMPLATES_TOTAL_BYTES * 6 + 1024 * 1024;
 
 /** Rejects settings the API could not act on, and normalises the login provider blocks. */
 function validateSettings(settings: Settings): Settings {
@@ -66,6 +73,7 @@ export function adminRoutes(app: App, ctx: Ctx): void {
   app.put(
     "/api/admin/settings",
     {
+      bodyLimit: SETTINGS_BODY_LIMIT,
       preHandler: adminOnly,
       schema: { body: putSettingsBodySchema, response: { 200: getSettingsResponseSchema } },
     },

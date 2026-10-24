@@ -139,46 +139,57 @@ function PickerBody() {
     );
   }
 
-  let lastGroup = "";
-  const renderOption = (item: Item, group: string) => {
-    const header = group !== lastGroup;
-    lastGroup = group;
+  const renderOption = (item: Item) => {
     const selected = item.template.id === active?.template.id;
     return (
-      <div key={item.template.id} role="presentation">
-        {header ? <div className="px-2 pt-2 pb-1 text-caption text-fg-3">{group}</div> : null}
-        <div
-          id={`${listId}-${item.template.id}`}
-          role="option"
-          tabIndex={-1}
-          aria-selected={selected}
-          onClick={() => setActiveId(item.template.id)}
-          onDoubleClick={() => void start(item)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void start(item);
-          }}
-          data-testid={`template-${item.template.id}`}
+      <div
+        key={item.template.id}
+        id={`${listId}-${item.template.id}`}
+        role="option"
+        tabIndex={-1}
+        aria-selected={selected}
+        onClick={() => setActiveId(item.template.id)}
+        onDoubleClick={() => void start(item)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void start(item);
+        }}
+        data-testid={`template-${item.template.id}`}
+        className={cx(
+          "flex cursor-default flex-col gap-0.5 rounded-md px-2 py-1.5 coarse:min-h-11",
+          selected ? "bg-fill-selected" : "hover:bg-fill-hover",
+        )}
+      >
+        <span className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-body-sm font-medium">{item.name}</span>
+        </span>
+        {/* fg-3 on the selected fill is below 4.5:1 in the dark theme. */}
+        <span
           className={cx(
-            "flex cursor-default flex-col gap-0.5 rounded-md px-2 py-1.5 coarse:min-h-11",
-            selected ? "bg-fill-selected" : "hover:bg-fill-hover",
+            "flex min-w-0 items-center gap-2 text-caption",
+            selected ? "text-fg-2" : "text-fg-3",
           )}
         >
-          <span className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-body-sm font-medium">{item.name}</span>
+          <LanguageBadge name={item.languageName} color={item.color} />
+          <span className="shrink-0">
+            {t("template.files", { count: item.template.files.length })}
           </span>
-          <span className="flex min-w-0 items-center gap-2 text-caption text-fg-3">
-            <LanguageBadge name={item.languageName} color={item.color} />
-            <span className="shrink-0">
-              {t("template.files", { count: item.template.files.length })}
-            </span>
-          </span>
-          {item.description ? (
-            <span className="line-clamp-2 text-caption text-fg-2">{item.description}</span>
-          ) : null}
-        </div>
+        </span>
+        {item.description ? (
+          <span className="line-clamp-2 text-caption text-fg-2">{item.description}</span>
+        ) : null}
       </div>
     );
   };
+  const renderGroup = (key: string, label: string, group: readonly Item[]) =>
+    group.length === 0 ? null : (
+      // biome-ignore lint/a11y/useSemanticElements: a <fieldset> is not allowed inside a listbox
+      <div key={key} role="group" aria-labelledby={`${listId}-group-${key}`}>
+        <div id={`${listId}-group-${key}`} className="px-2 pt-2 pb-1 text-caption text-fg-3">
+          {label}
+        </div>
+        {group.map(renderOption)}
+      </div>
+    );
 
   return (
     <div className="flex flex-col gap-3">
@@ -232,8 +243,8 @@ function PickerBody() {
             className="max-h-64 overflow-y-auto md:max-h-[50dvh]"
             data-testid="template-list"
           >
-            {builtin.map((item) => renderOption(item, t("template.group.builtin")))}
-            {organization.map((item) => renderOption(item, t("template.group.org")))}
+            {renderGroup("builtin", t("template.group.builtin"), builtin)}
+            {renderGroup("org", t("template.group.org"), organization)}
           </div>
           {active ? <Preview item={active} /> : null}
         </div>
@@ -281,7 +292,15 @@ function Preview({ item }: { item: Item }) {
         </ul>
       </div>
       {first ? (
-        <pre className="max-h-40 overflow-auto rounded-md bg-bg p-2 font-mono text-[0.6875rem] leading-snug text-fg-2">
+        // biome-ignore lint/a11y/useSemanticElements: a <section> can not wrap the text of a <pre>
+        <pre
+          // Focusable so the keyboard can scroll long lines and many lines.
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must take focus
+          tabIndex={0}
+          role="region"
+          aria-label={t("template.previewCode", { path: first.path })}
+          className="max-h-40 overflow-auto rounded-md bg-bg p-2 font-mono text-[0.6875rem] leading-snug text-fg-2"
+        >
           {firstLines(first.content, PREVIEW_LINES)}
         </pre>
       ) : null}

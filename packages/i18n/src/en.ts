@@ -426,7 +426,7 @@ export const en = {
   "myshares.tab.saved": "Saved",
   "myshares.tab.owned": "Created by me",
   "myshares.searchLabel": "Search my shares",
-  "myshares.searchPlaceholder": "Title or code",
+  "myshares.searchPlaceholder": "Title, code, folder or tag",
   "myshares.saved": "Saved",
   "myshares.expiresIn": "Expires in {time}",
   "myshares.noExpiry": "Doesn't expire",
@@ -457,6 +457,8 @@ export const en = {
   "myshares.organize.folderNone": "No folder",
   "myshares.organize.folderEmpty": "No folders yet. Type a name to create one.",
   "myshares.organize.folderTooLong": "Folder names can have up to {max} characters.",
+  "myshares.organize.folderInvalid": "Folder names can't contain line breaks or tabs.",
+  "myshares.organize.tagInvalid": "Tags can't contain line breaks or tabs.",
   "myshares.organize.tagsLabel": "Tags",
   "myshares.organize.tagPlaceholder": "Add a tag and press Enter",
   "myshares.organize.tagHint": "Up to {max} tags. Backspace removes the last one.",
@@ -724,6 +726,9 @@ export const en = {
   "admin.setting.templates.empty": "No templates of your own yet.",
   "admin.setting.templates.addAction": "Add template",
   "admin.setting.templates.limit": "You can add up to {max} templates.",
+  "admin.setting.templates.total": "{used} of {max} used by all templates together.",
+  "admin.setting.templates.totalTooLarge":
+    "The templates together are larger than {max}. Shorten or delete one to save the settings.",
   "admin.setting.templates.deleteTitle": "Delete “{name}”?",
   "admin.setting.templates.deleteBody":
     "People can no longer start from it. Shares already created from it stay as they are. Save the settings to apply this.",
@@ -745,9 +750,14 @@ export const en = {
   "admin.template.error.description": "The description can have up to {max} characters.",
   "admin.template.error.language": "Choose a language.",
   "admin.template.error.files": "Add at least one file.",
-  "admin.template.error.path": "Use a relative path without “..” or a leading slash.",
+  "admin.template.error.path":
+    "Use a relative path such as src/main.py: no “..”, backslash, drive letter, empty part, leading or trailing slash.",
   "admin.template.error.duplicatePath": "Two files have the same name.",
   "admin.template.error.size": "The files together are larger than the share limit ({size}).",
+  "admin.template.error.total":
+    "The templates together can have up to {size}. Shorten this one or delete another template.",
+  "admin.template.error.id":
+    "This template's ID is not valid, so it can't be saved. Delete it and add it again.",
   "admin.people.title": "People online",
   "admin.people.online.one": "{count} person online",
   "admin.people.online.other": "{count} people online",
@@ -818,7 +828,7 @@ export const en = {
   "template.files.other": "{count} files",
   "template.filesLabel": "Files",
   "template.previewLabel": "Preview of {name}",
-  "template.selectHint": "Select a template to see its files.",
+  "template.previewCode": "Start of {path}",
   "template.createAction": "Create share",
   "template.loading": "Loading templates…",
   "template.error.title": "Couldn't load templates",

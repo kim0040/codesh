@@ -180,6 +180,8 @@ export interface LabelStore {
   deleteForShare(shareId: string): Promise<number>;
   /** Every share id that has at least one entry (used by the sweeper). */
   shareIds(): Promise<string[]>;
+  /** Every client that has at least one entry (used by the sweeper). */
+  clientIds(): Promise<string[]>;
 }
 
 export interface SettingsStore {

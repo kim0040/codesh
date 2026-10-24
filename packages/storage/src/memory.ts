@@ -405,6 +405,10 @@ class MemoryLabelStore implements LabelStore {
   async shareIds() {
     return [...new Set([...this.entries.values()].map((entry) => entry.shareId))];
   }
+
+  async clientIds() {
+    return [...new Set([...this.entries.values()].map((entry) => entry.clientId))];
+  }
 }
 
 class MemorySettingsStore implements SettingsStore {
