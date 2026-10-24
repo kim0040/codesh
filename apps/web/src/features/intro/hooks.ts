@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useState, useSyncExternalStore } from "react";
+import { type RefObject, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
 
@@ -107,4 +107,52 @@ export function useScrollReveal(root: RefObject<HTMLElement | null>, reduced: bo
     }
     return () => observer.disconnect();
   }, [root, reduced]);
+}
+
+/** Scroll distance in one direction before the header hides or returns, so small wobbles do not flicker it. */
+const HEADER_TRAVEL = 8;
+
+/**
+ * Sticky header that slides away when scrolling down and returns on any scroll up. It stays shown
+ * near the top of the page and while focus is inside it. State goes straight onto the element as
+ * `data-hidden` / `data-raised` (CSS does the rest), so scrolling never re-renders React.
+ */
+export function useHidingHeader<T extends HTMLElement>(): RefObject<T | null> {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const header = ref.current;
+    if (!header) return;
+    let lastY = window.scrollY;
+    let travel = 0;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const y = Math.max(0, window.scrollY);
+      const delta = y - lastY;
+      lastY = y;
+      // A direction change restarts the count.
+      if (delta !== 0) travel = Math.sign(delta) === Math.sign(travel) ? travel + delta : delta;
+      let hidden = header.hasAttribute("data-hidden");
+      if (y < header.offsetHeight || header.matches(":focus-within") || travel <= -HEADER_TRAVEL) {
+        hidden = false;
+      } else if (travel >= HEADER_TRAVEL) {
+        hidden = true;
+      }
+      header.toggleAttribute("data-hidden", hidden);
+      header.toggleAttribute("data-raised", y > 0);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    const onFocusIn = () => header.removeAttribute("data-hidden");
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    header.addEventListener("focusin", onFocusIn);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      header.removeEventListener("focusin", onFocusIn);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+  return ref;
 }
