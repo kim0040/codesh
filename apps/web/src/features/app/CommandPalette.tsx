@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, KbdGroup } from "@codesh/ui";
+import { Dialog, DialogContent, isImeKey, KbdGroup } from "@codesh/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Search } from "lucide-react";
@@ -104,7 +104,7 @@ function PaletteBody() {
           }}
           onKeyDown={(event) => {
             // Enter that finishes a Korean (IME) syllable is not a choice yet.
-            if (event.nativeEvent.isComposing) return;
+            if (isImeKey(event.nativeEvent)) return;
             if (event.key === "ArrowDown") {
               event.preventDefault();
               setActive((index) => Math.min(results.length - 1, index + 1));

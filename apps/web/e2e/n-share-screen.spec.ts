@@ -103,7 +103,8 @@ for (const [platform, mod, other] of [
       await expect(menu).not.toContainText(other);
       await page.keyboard.press("Escape");
 
-      await page.keyboard.press("ControlOrMeta+k");
+      // The shortcut key is the one the labels show: ⌘ on a Mac, Ctrl elsewhere.
+      await page.keyboard.press(platform === "MacIntel" ? "Meta+k" : "Control+k");
       const palette = page.getByRole("dialog");
       await expect(palette).toContainText(mod);
       await expect(palette).not.toContainText(other);

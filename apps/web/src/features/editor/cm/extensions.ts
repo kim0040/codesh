@@ -1,24 +1,12 @@
-import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
-import {
-  copyLineDown,
-  defaultKeymap,
-  deleteLine,
-  indentLess,
-  indentMore,
-  moveLineDown,
-  moveLineUp,
-  selectLine,
-  toggleComment,
-} from "@codemirror/commands";
+import { closeBrackets } from "@codemirror/autocomplete";
 import {
   bracketMatching,
   foldGutter,
-  foldKeymap,
   indentOnInput,
   indentUnit,
   type LanguageSupport,
 } from "@codemirror/language";
-import { highlightSelectionMatches, searchKeymap, selectNextOccurrence } from "@codemirror/search";
+import { highlightSelectionMatches } from "@codemirror/search";
 import { EditorState, type Extension } from "@codemirror/state";
 import {
   crosshairCursor,
@@ -32,8 +20,8 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 import { getEditorTheme, type ThemeId } from "@codesh/highlight";
-import { yUndoManagerKeymap } from "y-codemirror.next";
 import type { EditorPrefs, Keymap } from "../../../lib/prefs";
+import { baseKeymap, sublimeKeymap, undoKeymap } from "./keymaps";
 
 /** Pure builders for the editor's reconfigurable parts; EditorPane puts each in a Compartment. */
 
@@ -71,31 +59,11 @@ export function languageExtension(support: LanguageSupport | null): Extension {
   return support ?? [];
 }
 
-const sublimeKeys = [
-  { key: "Mod-d", run: selectNextOccurrence, preventDefault: true },
-  { key: "Mod-Shift-k", run: deleteLine },
-  { key: "Mod-Shift-d", run: copyLineDown },
-  { key: "Mod-l", run: selectLine },
-  { key: "Alt-ArrowUp", run: moveLineUp },
-  { key: "Alt-ArrowDown", run: moveLineDown },
-  { key: "Mod-/", run: toggleComment },
-  { key: "Mod-]", run: indentMore },
-  { key: "Mod-[", run: indentLess },
-];
-
-const baseKeymap = [
-  ...closeBracketsKeymap,
-  ...defaultKeymap,
-  ...searchKeymap,
-  ...foldKeymap,
-  { key: "Tab", run: indentMore, shift: indentLess },
-];
-
-const undoKeys = keymap.of(yUndoManagerKeymap);
+const undoKeys = keymap.of(undoKeymap);
 
 /** The bindings that need no extra chunk; vim and emacs fall back to these until theirs loads. */
 export function plainKeymap(mode: Keymap): Extension {
-  if (mode === "sublime") return [undoKeys, keymap.of([...sublimeKeys, ...baseKeymap])];
+  if (mode === "sublime") return [undoKeys, keymap.of([...sublimeKeymap, ...baseKeymap])];
   return [undoKeys, keymap.of(baseKeymap)];
 }
 
@@ -109,7 +77,7 @@ export async function keymapExtension(mode: Keymap): Promise<Extension> {
     try {
       // `u` and Ctrl-R would call CodeMirror's history, which is not installed.
       const run = (index: number) => (cm: { cm6: EditorView }) => {
-        yUndoManagerKeymap[index]?.run?.(cm.cm6);
+        undoKeymap[index]?.run?.(cm.cm6);
       };
       Vim.defineAction("codeshUndo", run(0) as never);
       Vim.defineAction("codeshRedo", run(1) as never);

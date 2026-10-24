@@ -14,7 +14,13 @@ export async function requestNotificationPermission(): Promise<
   if (!notificationsSupported()) return "unsupported";
   if (Notification.permission !== "default") return Notification.permission;
   try {
-    return await Notification.requestPermission();
+    // Safari before 15 only knows the callback form and returns nothing.
+    return await new Promise<NotificationPermission>((resolve) => {
+      const result = Notification.requestPermission(resolve) as
+        | Promise<NotificationPermission>
+        | undefined;
+      result?.then(resolve, () => resolve(Notification.permission));
+    });
   } catch {
     return Notification.permission;
   }
@@ -35,6 +41,12 @@ export function notifyHidden(
       notification.close();
     };
   } catch {
-    // Some browsers only allow notifications through a service worker; the toast still shows.
+    // Chrome on Android refuses the constructor and only shows notifications through the service
+    // worker. Without one (or with no notification service on the desktop) the toast still shows.
+    void navigator.serviceWorker?.ready
+      .then((registration) =>
+        registration.showNotification(title, { body: options.body, tag: options.tag }),
+      )
+      .catch(() => undefined);
   }
 }

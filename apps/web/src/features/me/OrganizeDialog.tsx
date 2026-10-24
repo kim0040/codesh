@@ -6,7 +6,7 @@ import {
   putLabelsBodySchema,
   type ShareListItem,
 } from "@codesh/shared";
-import { Button, cx, Dialog, DialogContent, Field, Input, toast } from "@codesh/ui";
+import { Button, cx, Dialog, DialogContent, Field, Input, isImeKey, toast } from "@codesh/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, FolderPlus, Plus, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -261,6 +261,8 @@ function FolderField({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Enter that finishes a Korean syllable is not a choice yet.
+    if (isImeKey(event.nativeEvent)) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       if (!open) setOpen(true);
@@ -438,6 +440,7 @@ function TagsField({
             }
           }}
           onKeyDown={(event) => {
+            if (isImeKey(event.nativeEvent)) return;
             if (event.key === "Enter") {
               // Enter confirms the tag; the form is saved with the button or by Enter on an empty field.
               if (text.trim()) {

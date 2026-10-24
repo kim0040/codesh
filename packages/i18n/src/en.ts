@@ -358,6 +358,10 @@ export const en = {
   "settings.uiLanguage.label": "Display language",
   "settings.notifications.label": "Show invites as system notifications",
   "settings.notifications.hint": "Works while codesh is open in a tab or window.",
+  "settings.notifications.blocked":
+    "Notifications are blocked for this site. Allow them in the browser’s site settings and in the system’s notification settings (turn off Focus or Do Not Disturb).",
+  "settings.notifications.unsupported":
+    "This browser cannot show system notifications. On iPhone and iPad, add codesh to the Home Screen first.",
   "settings.install.action": "Install app",
   "settings.resetAction": "Reset to defaults",
 
@@ -905,6 +909,45 @@ export const en = {
   "shortcuts.item.undo": "Undo your last change",
   "shortcuts.item.moveLine": "Move the line up or down",
   "shortcuts.item.leaveEditor": "Leave the editor (press Esc, then Tab)",
+  "shortcuts.group.navigation": "Move and delete",
+  "shortcuts.item.postComment": "Post a comment (in the comment box)",
+  "shortcuts.item.findNext": "Find the next match",
+  "shortcuts.item.replace": "Find and replace",
+  "shortcuts.item.goToLine": "Go to a line number",
+  "shortcuts.item.selectNext": "Select the next match of the word",
+  "shortcuts.item.selectMatches": "Select every match of the word",
+  "shortcuts.item.addCursor": "Add a cursor on the line above or below",
+  "shortcuts.item.addCursorAbove": "Add a cursor on the line above",
+  "shortcuts.item.addCursorBelow": "Add a cursor on the line below",
+  "shortcuts.item.addCursorClick": "Add a cursor where you click",
+  "shortcuts.item.rectangleSelect": "Select a rectangle (drag)",
+  "shortcuts.item.copyLine": "Duplicate the line",
+  "shortcuts.item.deleteLine": "Delete the line",
+  "shortcuts.item.toggleComment": "Comment or uncomment the line",
+  "shortcuts.item.indent": "Indent or outdent",
+  "shortcuts.item.fold": "Fold or unfold the code",
+  "shortcuts.item.redo": "Redo",
+  "shortcuts.item.wordMove": "Move by word",
+  "shortcuts.item.lineEnds": "Go to the start or end of the line",
+  "shortcuts.item.docEnds": "Go to the start or end of the file",
+  "shortcuts.item.deleteWord": "Delete the word before the cursor",
+  "shortcuts.key.click": "click",
+  "shortcuts.key.drag": "drag",
+  "shortcuts.notes.title": "Good to know on this device",
+  "shortcuts.note.mac":
+    "On a Mac the app shortcuts use ⌃⌘ (Control and Command together), because ⌘⌥ belongs to the browser tools and to macOS. Option plus a letter types special characters as usual; only ⇧⌥F formats the code.",
+  "shortcuts.note.macClick": "On a Mac, ⌃-click opens the context menu. Add a cursor with ⌘-click.",
+  "shortcuts.note.ipad": "With a keyboard attached, an iPad takes the ⌘ shortcuts just like a Mac.",
+  "shortcuts.note.windows":
+    "On Windows, characters typed with AltGr never start a shortcut. Ctrl+→ moves to the start of the next word, as in Notepad.",
+  "shortcuts.note.linux":
+    "Many Linux desktops use Alt+drag to move a window and Ctrl+Alt+↑/↓ to switch workspaces. Select a rectangle with Shift+Alt+drag, and add cursors from the command palette (Add a cursor on the line above or below).",
+  "shortcuts.note.firefox":
+    "Some Firefox versions keep Ctrl+Shift+K for their console. Ctrl+Alt+K deletes the line as well.",
+  "shortcuts.note.keymaps":
+    "With the Vim or Emacs key map, browsers on Windows and Linux keep Ctrl+N, Ctrl+T and Ctrl+W, so those commands cannot run. Use the arrow keys instead. While Emacs holds Ctrl+K, open the command palette with F1.",
+  "shortcuts.note.ime":
+    "While you compose Korean, Japanese or Chinese text, shortcuts, Enter and Esc wait until the text is confirmed.",
 
   // ── Empty and loading states ──
   "empty.file.title": "This file is empty",

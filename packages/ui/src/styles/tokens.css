@@ -178,12 +178,16 @@
   --z-tooltip: 60;
 
   /* ── Type ── */
+  /* Hangul and emoji fall back to what each OS ships: Apple SD Gothic Neo / Apple Color Emoji,
+     Malgun Gothic / Segoe UI Emoji, Noto Sans CJK KR / Noto Color Emoji (Linux). */
   --font-ui:
     "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
-    "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+    "Malgun Gothic", "Noto Sans KR", "Noto Sans CJK KR", system-ui, "Apple Color Emoji",
+    "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
   --font-code:
     "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
-    "D2Coding", monospace;
+    "D2Coding", "Noto Sans Mono CJK KR", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
+    monospace;
 }
 
 @media (prefers-reduced-motion: reduce) {

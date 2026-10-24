@@ -3,6 +3,7 @@ import { Dialog as DialogPrimitive, VisuallyHidden } from "radix-ui";
 import type { ComponentProps, ReactNode } from "react";
 import { cx } from "../lib/cx.js";
 import { useFocusReturn } from "../lib/focus-return.js";
+import { isImeKey } from "../lib/ime.js";
 import { IconButton } from "./icon-button.js";
 
 export const Dialog = DialogPrimitive.Root;
@@ -72,6 +73,7 @@ export function DialogContent({
   children,
   onOpenAutoFocus,
   onCloseAutoFocus,
+  onEscapeKeyDown,
   ...props
 }: DialogContentProps) {
   const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
@@ -88,6 +90,11 @@ export function DialogContent({
         {...props}
         onOpenAutoFocus={focusReturn.onOpenAutoFocus}
         onCloseAutoFocus={focusReturn.onCloseAutoFocus}
+        onEscapeKeyDown={(event) => {
+          // Escape cancels an IME composition; it must not also close the panel.
+          if (isImeKey(event)) event.preventDefault();
+          else onEscapeKeyDown?.(event);
+        }}
       >
         <div className="flex flex-col gap-1 px-5 pt-5">
           {hideTitle ? (

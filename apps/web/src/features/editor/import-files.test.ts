@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isJunkFile } from "./dropped-files";
 import { decodeText } from "./import-files";
 
 const bytes = (...values: number[]) => new Uint8Array(values);
@@ -21,5 +22,27 @@ describe("decodeText", () => {
 
   it("skips binary files", () => {
     expect(decodeText(bytes(0x50, 0x4b, 0x03, 0x04, 0x00, 0x00))).toBeNull();
+  });
+});
+
+describe("isJunkFile", () => {
+  it("recognises what Finder, Explorer and Office leave behind", () => {
+    for (const path of [
+      ".DS_Store",
+      "src/.DS_Store",
+      "Thumbs.db",
+      "desktop.ini",
+      "src/._main.c",
+      "~$report.docx",
+      "__MACOSX/src/._main.c",
+    ]) {
+      expect(isJunkFile(path), path).toBe(true);
+    }
+  });
+
+  it("keeps real files, including dot files people write", () => {
+    for (const path of [".gitignore", "src/main.ts", "docs/desktop-notes.md", "a._b"]) {
+      expect(isJunkFile(path), path).toBe(false);
+    }
   });
 });

@@ -17,7 +17,7 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - 참여 코드는 공유가 살아 있는 동안 유지됩니다. 저장하지 않은 공유는 만료될 때 코드도 함께 사라지고, 내 공유에 저장한 공유의 코드는 계속 유지됩니다. 사라진 코드는 다른 공유와 헷갈리지 않도록 24시간 동안 다시 발급되지 않습니다.
 
 ### 1.3 QR 코드 및 전체 화면 보기
-- 상단 바의 **공유** 버튼(단축키 `⌘⌥S` 또는 `Ctrl+Alt+S`)을 누르면 **코드·QR** 탭에 참여 코드와 QR 코드가 표시됩니다.
+- 상단 바의 **공유** 버튼(단축키 Mac `⌃⌘S`, Windows·Linux `Ctrl+Alt+S`)을 누르면 **코드·QR** 탭에 참여 코드와 QR 코드가 표시됩니다.
 - 휴대폰 카메라로 QR 코드를 비추면 모바일 브라우저로 바로 입장할 수 있습니다(단, 휴대폰이 같은 네트워크나 Wi-Fi에 연결되어 있어야 합니다).
 - 회의실이나 강의실에서는 **전체 화면으로 보기**를 눌러 큰 글씨의 6자리 코드와 대형 QR 코드를 프로젝터 화면에 띄울 수 있습니다. `Esc` 키나 닫기 버튼으로 종료합니다.
 
@@ -59,13 +59,13 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - 에디터 내 모든 문법 토큰 색상은 WCAG 2.2 AA 기준(배경 대비 4.5:1 이상)을 충족합니다.
 
 ### 2.4 줄 단위 코멘트
-- 코드의 특정 줄 또는 범위를 선택한 후 단축키 `⌘⌥M` (Windows: `Ctrl+Alt+M`)을 누르거나 상단 바의 **코멘트** 버튼을 누릅니다.
+- 코드의 특정 줄 또는 범위를 선택한 후 단축키 Mac `⌃⌘M`, Windows·Linux `Ctrl+Alt+M`을 누르거나 상단 바의 **코멘트** 버튼을 누릅니다.
 - 코멘트 작성 창에서 내용을 입력하고 **등록**을 누릅니다(최대 2,000자).
 - 코멘트는 문서 내부의 상대 위치로 고정되므로, 다른 사용자가 문서 앞부분에 코드를 추가하거나 삭제해도 본래 위치를 유지합니다.
 - 해결된 대화는 **해결됨으로 표시** 버튼으로 정리할 수 있으며, 필요 시 **다시 열기**가 가능합니다. 패널 상단의 스위치로 해결된 코멘트를 숨기거나 볼 수 있습니다.
 
 ### 2.5 이력 재생과 버전 복원
-- 공유의 **소유자**만 상단 바의 **이력** 버튼(단축키 `⌘⌥H` 또는 `Ctrl+Alt+H`)을 열 수 있습니다.
+- 공유의 **소유자**만 상단 바의 **이력** 버튼(단축키 Mac `⌃⌘H`, Windows·Linux `Ctrl+Alt+H`)을 열 수 있습니다.
 - 편집 활동 중 약 30초 간격으로 스냅샷이 자동 생성되며 최대 100개 버전까지 타임라인에 기록됩니다(기본 7일 보관).
 - **재생** 버튼을 누르면 코드가 작성되어 온 과정을 1배속, 2배속, 4배속으로 재생할 수 있습니다.
 - **현재와 비교**를 선택하면 특정 시점과 현재 문서 사이의 차이점(diff)을 한 화면에 겹쳐 보여 줍니다.
@@ -90,7 +90,7 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - 폴더와 태그는 **나에게만** 보이며 공유 링크를 가진 다른 사람에게는 전달되지 않습니다. 내가 만들지 않은 공유를 **목록에서 제거**하거나, 차단되거나, 공유가 삭제·만료되면 해당 폴더와 태그도 함께 사라집니다. 내가 만든 공유는 목록에서 제거해도 정리 정보가 유지됩니다.
 
 ### 2.10 템플릿으로 시작하기
-- 첫 화면의 **템플릿으로 시작** 버튼 또는 명령 팔레트(`⌘K` / `Ctrl+K`)의 **템플릿으로 새 공유 만들기**로 템플릿 선택 창을 엽니다. 검색창에서 이름이나 언어로 찾고 방향키와 Enter로 고를 수 있으며, 오른쪽(좁은 화면에서는 아래)에서 파일 목록과 미리보기를 확인한 뒤 **공유 만들기**를 누릅니다.
+- 첫 화면의 **템플릿으로 시작** 버튼 또는 명령 팔레트(`⌘K` or `Ctrl+K`)의 **템플릿으로 새 공유 만들기**로 템플릿 선택 창을 엽니다. 검색창에서 이름이나 언어로 찾고 방향키와 Enter로 고를 수 있으며, 오른쪽(좁은 화면에서는 아래)에서 파일 목록과 미리보기를 확인한 뒤 **공유 만들기**를 누릅니다.
 - 기본 제공 템플릿: Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, HTML·CSS·JS 웹 페이지, Markdown, Bash, 여러 파일로 된 Python 패키지.
 - 관리자가 등록한 추가한 템플릿은 **우리 템플릿** 그룹에 함께 표시됩니다. 템플릿을 고르지 않고 만드는 기존 **새 공유 만들기**는 그대로 동작합니다.
 
@@ -175,21 +175,62 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
   - **Emacs**
   - **Sublime**
 
-### 5.4 단축키 목록
+### 5.4 운영체제별 단축키
 
-| 동작 | macOS | Windows / Linux |
+codesh는 접속한 기기의 운영체제를 알아보고 단축키와 안내 표시를 그 기기에 맞춥니다. `?`를 누르면 지금 기기의 키가 담긴 단축키 안내가 열립니다. 아래 표에서 **Mod**는 Mac의 `⌘`, Windows와 Linux의 `Ctrl`입니다. `⌃`은 Mac의 Control 키입니다.
+
+#### 앱 단축키
+
+| 동작 | Mac | Windows / Linux |
 |---|---|---|
-| 명령 팔레트 열기 | `⌘ K` | `Ctrl + K` |
-| 단축키 안내 보기 | `?` | `?` |
-| 공유 창 열기 | `⌘ ⌥ S` | `Ctrl + Alt + S` |
+| 명령 팔레트 열기 | `⌘ K` 또는 `F1` | `Ctrl + K` 또는 `F1` |
+| 단축키 안내 보기 | `?` (입력 칸 밖에서) | `?` (입력 칸 밖에서) |
+| 공유 창 열기 | `⌃ ⌘ S` | `Ctrl + Alt + S` |
 | 에디터 설정 열기 | `⌘ ,` | `Ctrl + ,` |
-| 코멘트 추가 | `⌘ ⌥ M` | `Ctrl + Alt + M` |
-| 이력 열기 | `⌘ ⌥ H` | `Ctrl + Alt + H` |
-| 코드에서 찾기 | `⌘ F` | `Ctrl + F` |
-| 전체 코드 복사 | `⌘ ⌥ C` | `Ctrl + Alt + C` |
-| 코드 정리 (Format) | `Shift + ⌥ + F` | `Shift + Alt + F` |
-| 실행 취소 (내 변경 되돌리기) | `⌘ Z` | `Ctrl + Z` |
+| 코멘트 열기 | `⌃ ⌘ M` | `Ctrl + Alt + M` |
+| 이력 열기 (소유자) | `⌃ ⌘ H` | `Ctrl + Alt + H` |
+| 전체 코드 복사 | `⌃ ⌘ C` | `Ctrl + Alt + C` |
+| 코드 정리 (Format) | `⇧ ⌥ F` | `Shift + Alt + F` |
+| 코멘트 등록 (코멘트 입력 칸) | `⌘ Enter` | `Ctrl + Enter` |
+
+Mac에서 `⌘⌥`는 브라우저 개발자 도구와 macOS(다른 앱 가리기 등)가 쓰기 때문에 `⌃⌘`를 씁니다. Windows와 Linux에서 `Ctrl+Shift+글자`는 Firefox와 Edge의 개발자 도구가 쓰기 때문에 `Ctrl+Alt`를 씁니다.
+
+#### 에디터 편집
+
+| 동작 | Mac | Windows / Linux |
+|---|---|---|
+| 찾기 / 다음 찾기 | `⌘ F` / `⌘ G`, `F3` | `Ctrl + F` / `Ctrl + G`, `F3` |
+| 찾아 바꾸기 | `⌘ ⌥ F` | `Ctrl + H` |
+| 줄로 이동 | `⌃ G` | `Ctrl + Alt + G` |
+| 실행 취소 (내 변경만 되돌리기) | `⌘ Z` | `Ctrl + Z` |
+| 다시 실행 | `⌘ ⇧ Z` | `Ctrl + Y`, `Ctrl + Shift + Z` |
+| 단어 단위 이동 | `⌥ ←` / `⌥ →` | `Ctrl + ←` / `Ctrl + →` (Windows는 다음 단어의 시작으로 이동) |
+| 줄 처음 / 끝 | `⌘ ←` / `⌘ →` | `Home` / `End` |
+| 파일 처음 / 끝 | `⌘ ↑` / `⌘ ↓` | `Ctrl + Home` / `Ctrl + End` |
+| 앞 단어 지우기 | `⌥ Backspace` | `Ctrl + Backspace` |
 | 줄 위아래 이동 | `⌥ ↑` / `⌥ ↓` | `Alt + ↑` / `Alt + ↓` |
+| 줄 복제 | `⇧ ⌥ ↓` | `Shift + Alt + ↓` |
+| 줄 삭제 | `⌘ ⇧ K` | `Ctrl + Shift + K`, `Ctrl + Alt + K` |
+| 줄 주석 켜기 / 끄기 | `⌘ /` | `Ctrl + /` |
+| 들여쓰기 / 내어쓰기 | `Tab` / `⇧ Tab`, `⌘ ]` / `⌘ [` | `Tab` / `Shift + Tab`, `Ctrl + ]` / `Ctrl + [` |
+| 코드 접기 / 펼치기 | `⌘ ⌥ [` / `⌘ ⌥ ]` | `Ctrl + Shift + [` / `Ctrl + Shift + ]` |
+| 같은 단어 다음 항목 선택 | `⌘ D` | `Ctrl + D` |
+| 같은 단어 모두 선택 | `⌘ ⇧ L` | `Ctrl + Shift + L` |
+| 윗줄 / 아랫줄에 커서 추가 | `⌘ ⌥ ↑` / `⌘ ⌥ ↓` | `Ctrl + Alt + ↑` / `Ctrl + Alt + ↓` |
+| 클릭한 곳에 커서 추가 | `⌘ + 클릭` | `Ctrl + 클릭` |
+| 사각형 선택 | `⌥ + 드래그` | `Alt + 드래그` (Linux는 `Shift + Alt + 드래그`) |
+
+#### 운영체제별 유의 사항
+
+- **Mac**: `⌃ + 클릭`은 컨텍스트 메뉴이므로 커서 추가는 `⌘ + 클릭`으로 합니다. `⌥`와 글자 키는 `ƒ`, `©` 같은 특수 문자를 그대로 입력하며, 코드 정리(`⇧⌥F`)만 단축키로 동작합니다. 키보드를 연결한 iPad도 Mac처럼 `⌘` 단축키를 받습니다.
+- **Windows**: AltGr로 입력하는 문자(`Ctrl+Alt`로 보고되는 키)는 단축키로 처리하지 않고 그대로 입력됩니다.
+- **Linux**: 데스크톱 환경이 `Alt + 드래그`를 창 이동에, `Ctrl+Alt+↑/↓`를 작업 공간 전환에 쓰는 경우가 많습니다. 사각형 선택은 `Shift + Alt + 드래그`로 하고, 여러 커서는 명령 팔레트의 **윗줄에 커서 추가**, **아랫줄에 커서 추가**로 만드세요. 마우스 가운데 버튼 붙여넣기(선택한 글자 붙여넣기)는 에디터에서도 그대로 동작합니다.
+- **Firefox**: 일부 버전은 `Ctrl+Shift+K`를 개발자 콘솔에 씁니다. 줄 삭제는 `Ctrl+Alt+K`로도 할 수 있습니다.
+- **Vim · Emacs 키맵**: Windows와 Linux 브라우저는 `Ctrl+N`, `Ctrl+T`, `Ctrl+W`를 먼저 가져가므로 그 명령은 동작하지 않습니다. Emacs 키맵이 `Ctrl+K`를 쓰는 동안에는 `F1`로 명령 팔레트를 엽니다.
+- **한글 · 일본어 · 중국어 입력(IME)**: 글자를 조합하는 중에는 단축키, `Enter`, `Esc`, `Tab`이 동작하지 않습니다. 글자가 확정된 뒤에 눌러 주세요.
+- **복사**: 주소가 `https://`가 아니거나 브라우저가 클립보드 API를 막아도 복사 버튼은 대체 방법으로 동작합니다. 알림은 브라우저가 지원하고 허용한 경우에만 켤 수 있으며, 설정에 지원 여부와 차단 상태가 표시됩니다.
+- **업로드**: 폴더나 `.zip`을 올려도 `.DS_Store`, `Thumbs.db`, `__MACOSX` 같은 운영체제의 부산물은 건너뜁니다. Windows 경로(`\`)와 CRLF 줄바꿈도 자동으로 정리됩니다.
+- **화면**: QR 코드는 벡터라 확대 배율이 125%, 150%인 화면에서도 선명합니다. 시스템의 모션 줄이기, 고대비, 강제 색상(Windows 고대비 모드) 설정을 따릅니다.
 
 ---
 
@@ -231,14 +272,14 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 ### Starting and Joining
 - **Create**: Click **Create a share** on the home page (`/`) to start an instant sharing session. No account required.
 - **Join with Code**: Enter the 6-digit code on the home page or open `/<6-digit-code>` in your browser.
-- **QR Code & Projector**: Use the **Share** dialog (`⌘⌥S` / `Ctrl+Alt+S`) to view the join code and QR code. Use **Projector mode** for large classroom display.
+- **QR Code & Projector**: Use the **Share** dialog (`⌃⌘S` on a Mac, `Ctrl+Alt+S` elsewhere) to view the join code and QR code. Use **Projector mode** for large classroom display.
 - **Nearby Shares**: Shares open on your local network/room appear automatically on the home page.
 - **Send to Person & Broadcast**: Send direct invitations with an optional note (up to 200 chars) or broadcast to the entire room.
 
 ### Collaboration & Editing
 - **Real-Time Sync**: Conflict-free concurrent typing powered by Yjs CRDT with remote cursors and selection highlights.
 - **Multiple Files**: Support for up to 100 files and folder paths. Automatic language detection by file extension.
-- **Comments**: Anchor comments to lines or selections (`⌘⌥M` / `Ctrl+Alt+M`). Comments track document edits using relative positions.
+- **Comments**: Anchor comments to lines or selections (`⌃⌘M` on a Mac, `Ctrl+Alt+M` elsewhere). Comments track document edits using relative positions.
 - **History & Restore**: Owners can inspect timeline snapshots, play back edits at 1x/2x/4x, compare a version with the current text, and restore it.
 - **Download**: Download single files with matching extensions or export all files as a `.zip` archive.
 - **Drag & Drop**: Drop files, folders, or `.zip` archives directly into the editor.
@@ -247,7 +288,7 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - **Folders and tags**: In **My shares**, use the tag icon (**Organize**) on a share to give it one folder (up to 60 characters) and up to 10 tags (30 characters each). Pick an existing folder or type a new name; names match regardless of letter case.
 - **Filtering**: Choose **All shares**, a folder or **No folder** in the folder list (a row of buttons on narrow screens), then narrow further with tag chips and the search box.
 - **Private to you**: Folders and tags are stored per person and never shown to others. They are removed when you unsave a share you do not own, when you are banned, or when the share is deleted or expires.
-- **Templates**: Press **Start from a template** on the home page, or run **New share from template** in the command palette (`⌘K` / `Ctrl+K`). Search, pick with the arrow keys and Enter, check the file list and preview, then **Create share**. Built-in templates cover Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, an HTML + CSS + JS page, Markdown, Bash and a multi-file Python package. Templates added by the administrator appear under **Our templates**.
+- **Templates**: Press **Start from a template** on the home page, or run **New share from template** in the command palette (`⌘K` or `Ctrl+K`). Search, pick with the arrow keys and Enter, check the file list and preview, then **Create share**. Built-in templates cover Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, an HTML + CSS + JS page, Markdown, Bash and a multi-file Python package. Templates added by the administrator appear under **Our templates**.
 
 ### Access Control
 - **View-Only Mode**: Default to read-only access. Share the separate edit link with collaborators who need edit rights.
@@ -256,6 +297,7 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - **Lock / Kick / Ban**: Owners can lock edits across all participants, temporarily kick users, or permanently ban them.
 
 ### Settings & Keymaps
+- **Shortcuts per OS**: Press `?` for the keys of the device you are on. Mac uses `⌃⌘` for app shortcuts (`⌘⌥` belongs to the browser and macOS), Windows and Linux use `Ctrl+Alt`. Section 5.4 lists every key for Mac and Windows / Linux, plus notes on Option and AltGr typing, Linux window-manager grabs, Firefox and IME composition.
 - **Appearance**: Dark and Light app themes; editor themes (Slate, Graphite, Paper, Sand); font size (12–24px).
 - **Keymaps**: Default, Vim, Emacs, and Sublime.
 - **Language**: Switch UI between Korean (default) and English.

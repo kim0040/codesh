@@ -22,5 +22,6 @@ export * from "./components/toast.js";
 export * from "./components/toggle-group.js";
 export * from "./components/tooltip.js";
 export { cx } from "./lib/cx.js";
+export { type ImeKeyEvent, isImeKey } from "./lib/ime.js";
 export { initialsOf } from "./lib/initials.js";
 export * from "./theme.js";

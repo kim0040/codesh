@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cx } from "../lib/cx.js";
+import { isImeKey } from "../lib/ime.js";
 import { useFieldProps } from "./field.js";
 
 export interface InputProps extends Omit<ComponentProps<"input">, "size"> {
@@ -22,6 +23,7 @@ export function Input({
   trailing,
   className,
   frameClassName,
+  onKeyDown,
   ...props
 }: InputProps) {
   const field = useFieldProps();
@@ -44,6 +46,12 @@ export function Input({
       <input
         {...field}
         {...props}
+        onKeyDown={(event) => {
+          // Safari sends the Enter that confirms an IME syllable as a plain key press, which would
+          // submit the surrounding form before the person finished typing.
+          if (event.key === "Enter" && isImeKey(event.nativeEvent)) event.preventDefault();
+          onKeyDown?.(event);
+        }}
         className={cx(
           // 16px on touch screens stops iOS Safari from zooming the page on focus. `w-0` drops the
           // input's intrinsic width (about 276px) so the frame can shrink inside a 320px screen.

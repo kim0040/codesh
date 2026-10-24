@@ -9,6 +9,7 @@ interface NavigatorLike {
 
 export function detectPlatform(nav: NavigatorLike | undefined): Platform {
   // `platform` first: browsers and test runners that fake an OS set it, and it is never empty.
+  // iPadOS reports "MacIntel" (and ⌘ is what its hardware keyboard has), so it lands here too.
   const name = `${nav?.platform ?? ""} ${nav?.userAgentData?.platform ?? ""}`;
   if (/Mac|iPhone|iPad|iPod/i.test(name)) return "mac";
   if (/Win/i.test(name)) return "windows";
@@ -20,18 +21,21 @@ export const PLATFORM: Platform = detectPlatform(
 );
 
 export interface KeyLabels {
+  /** ⌘ on a Mac, Ctrl elsewhere: the key shortcuts are built on. */
   mod: string;
+  /** The Control key itself: ⌃ on a Mac (a different key from ⌘), Ctrl elsewhere. */
+  ctrl: string;
   alt: string;
   shift: string;
 }
 
 export function keyLabelsFor(platform: Platform): KeyLabels {
   return platform === "mac"
-    ? { mod: "⌘", alt: "⌥", shift: "⇧" }
-    : { mod: "Ctrl", alt: "Alt", shift: "Shift" };
+    ? { mod: "⌘", ctrl: "⌃", alt: "⌥", shift: "⇧" }
+    : { mod: "Ctrl", ctrl: "Ctrl", alt: "Alt", shift: "Shift" };
 }
 
-/** Modifier names for shortcut hints: ⌘ ⌥ ⇧ on Apple devices, Ctrl Alt Shift elsewhere. */
+/** Modifier names for shortcut hints: ⌃ ⌥ ⇧ ⌘ on Apple devices, Ctrl Alt Shift elsewhere. */
 export const KEYS: KeyLabels = keyLabelsFor(PLATFORM);
 
 /**

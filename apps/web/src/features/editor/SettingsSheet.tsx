@@ -15,7 +15,7 @@ import { Minus, Plus } from "lucide-react";
 import { useId, useState } from "react";
 import { useLocale, useT } from "../../lib/i18n";
 import { promptInstall, useCanInstall } from "../../lib/install";
-import { requestNotificationPermission } from "../../lib/notify";
+import { notificationPermission, requestNotificationPermission } from "../../lib/notify";
 import {
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
@@ -105,8 +105,17 @@ function SettingsBody() {
     }
     const permission = await requestNotificationPermission();
     if (permission === "granted") setPrefs({ notifications: true });
-    else toast({ title: t("error.forbidden"), tone: "warning" });
+    else toast({ title: t("settings.notifications.blocked"), tone: "warning" });
   };
+
+  // iOS Safari has no Notification API outside an app added to the Home Screen.
+  const permission = notificationPermission();
+  const notificationHint =
+    permission === "unsupported"
+      ? t("settings.notifications.unsupported")
+      : permission === "denied"
+        ? t("settings.notifications.blocked")
+        : t("settings.notifications.hint");
 
   const themes = EDITOR_THEMES;
   const dark = themes.filter((theme) => theme.appearance === "dark");
@@ -240,8 +249,9 @@ function SettingsBody() {
       <Section title={t("settings.section.misc")}>
         <Switch
           label={t("settings.notifications.label")}
-          description={t("settings.notifications.hint")}
-          checked={prefs.notifications}
+          description={notificationHint}
+          disabled={permission === "unsupported"}
+          checked={prefs.notifications && permission !== "denied"}
           onCheckedChange={(on) => void toggleNotifications(on)}
         />
         {canInstall ? (

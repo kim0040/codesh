@@ -23,6 +23,7 @@ import {
   updateComment,
 } from "../../lib/collab/model";
 import { useLocale, useT } from "../../lib/i18n";
+import { shortcutOf } from "../../lib/shortcuts";
 import { commentRange } from "./cm/comments-ext";
 import { labelColorFor } from "./cm/remote-cursors";
 import { useEditor } from "./context";
@@ -166,7 +167,7 @@ function CommentsBody() {
               setMissing(false);
             }}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+              if (shortcutOf(event.nativeEvent, ["postComment"])) {
                 event.preventDefault();
                 post();
               }

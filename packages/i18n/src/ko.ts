@@ -378,6 +378,10 @@ export const ko: KoDictionary = {
   "settings.uiLanguage.label": "화면 언어",
   "settings.notifications.label": "초대를 시스템 알림으로 받기",
   "settings.notifications.hint": "codesh가 탭이나 창에 열려 있는 동안 동작해요.",
+  "settings.notifications.blocked":
+    "이 사이트의 알림이 막혀 있어요. 브라우저의 사이트 설정과 시스템 알림 설정에서 허용하고, 집중 모드나 방해 금지를 꺼 주세요.",
+  "settings.notifications.unsupported":
+    "이 브라우저는 시스템 알림을 지원하지 않아요. iPhone과 iPad에서는 먼저 홈 화면에 codesh를 추가해 주세요.",
   "settings.install.action": "앱 설치",
   "settings.resetAction": "기본값으로 되돌리기",
 
@@ -905,6 +909,45 @@ export const ko: KoDictionary = {
   "shortcuts.item.undo": "내 마지막 변경 되돌리기",
   "shortcuts.item.moveLine": "줄을 위아래로 옮기기",
   "shortcuts.item.leaveEditor": "에디터에서 나가기 (Esc 다음 Tab)",
+  "shortcuts.group.navigation": "이동과 삭제",
+  "shortcuts.item.postComment": "코멘트 등록 (입력창에서)",
+  "shortcuts.item.findNext": "다음 찾기",
+  "shortcuts.item.replace": "찾아 바꾸기",
+  "shortcuts.item.goToLine": "줄 번호로 이동",
+  "shortcuts.item.selectNext": "같은 단어를 하나씩 더 선택",
+  "shortcuts.item.selectMatches": "같은 단어를 모두 선택",
+  "shortcuts.item.addCursor": "위·아래 줄에 커서 추가",
+  "shortcuts.item.addCursorAbove": "윗줄에 커서 추가",
+  "shortcuts.item.addCursorBelow": "아랫줄에 커서 추가",
+  "shortcuts.item.addCursorClick": "클릭한 곳에 커서 추가",
+  "shortcuts.item.rectangleSelect": "사각형으로 선택 (드래그)",
+  "shortcuts.item.copyLine": "줄 복제",
+  "shortcuts.item.deleteLine": "줄 삭제",
+  "shortcuts.item.toggleComment": "주석 켜고 끄기",
+  "shortcuts.item.indent": "들여쓰기 · 내어쓰기",
+  "shortcuts.item.fold": "코드 접기 · 펼치기",
+  "shortcuts.item.redo": "다시 실행",
+  "shortcuts.item.wordMove": "단어 단위로 이동",
+  "shortcuts.item.lineEnds": "줄 처음 · 끝으로 이동",
+  "shortcuts.item.docEnds": "파일 처음 · 끝으로 이동",
+  "shortcuts.item.deleteWord": "앞 단어 지우기",
+  "shortcuts.key.click": "클릭",
+  "shortcuts.key.drag": "드래그",
+  "shortcuts.notes.title": "이 기기에서 알아둘 점",
+  "shortcuts.note.mac":
+    "Mac에서는 앱 단축키에 ⌃⌘(Control과 Command)를 써요. ⌘⌥는 브라우저 개발자 도구와 macOS가 쓰기 때문이에요. ⌥와 글자 키는 평소처럼 특수 문자를 입력하고, ⇧⌥F만 코드 정리예요.",
+  "shortcuts.note.macClick": "Mac에서 ⌃-클릭은 컨텍스트 메뉴예요. 커서는 ⌘-클릭으로 추가해요.",
+  "shortcuts.note.ipad": "키보드를 연결한 iPad도 ⌘ 단축키를 Mac처럼 받아요.",
+  "shortcuts.note.windows":
+    "Windows에서 AltGr로 입력하는 문자는 단축키로 처리하지 않아요. Ctrl+→는 메모장처럼 다음 단어의 시작으로 이동해요.",
+  "shortcuts.note.linux":
+    "Linux 데스크톱은 Alt+드래그를 창 이동에, Ctrl+Alt+↑/↓를 작업 공간 전환에 쓰는 경우가 많아요. 사각형 선택은 Shift+Alt+드래그로, 여러 커서는 명령 팔레트의 ‘윗줄에 커서 추가’와 ‘아랫줄에 커서 추가’로 하세요.",
+  "shortcuts.note.firefox":
+    "Firefox 일부 버전은 Ctrl+Shift+K를 개발자 콘솔에 써요. 줄 삭제는 Ctrl+Alt+K로도 할 수 있어요.",
+  "shortcuts.note.keymaps":
+    "Vim · Emacs 키맵에서는 Windows와 Linux 브라우저가 Ctrl+N, Ctrl+T, Ctrl+W를 먼저 가져가서 그 명령이 동작하지 않아요. 방향키로 대신하세요. Emacs가 Ctrl+K를 쓰는 동안에는 F1로 명령 팔레트를 열어요.",
+  "shortcuts.note.ime":
+    "한글 · 일본어 · 중국어를 입력하는 중에는 글자가 확정될 때까지 단축키, Enter, Esc가 동작하지 않아요.",
 
   // ── Empty and loading states ──
   "empty.file.title": "비어 있는 파일이에요",
