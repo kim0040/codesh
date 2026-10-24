@@ -101,6 +101,63 @@ for (const { locale, scheme, width } of CONFIGS) {
   });
   await page.waitForTimeout(900);
   await page.screenshot({ path: `${out}/${label}-${tag}.png`, fullPage: true });
+  // WCAG contrast of every visible text node against the first opaque background behind it.
+  const low = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    const toRgba = (value) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = value;
+      context.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+      return [r, g, b, a / 255];
+    };
+    const luminance = ([r, g, b]) => {
+      const channel = (v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    };
+    const backdrop = (node) => {
+      for (let el = node; el; el = el.parentElement) {
+        const [r, g, b, a] = toRgba(getComputedStyle(el).backgroundColor);
+        if (a > 0.95) return [r, g, b];
+      }
+      return toRgba(getComputedStyle(document.body).backgroundColor).slice(0, 3);
+    };
+    const out = [];
+    let checked = 0;
+    const walker = document.createTreeWalker(document.querySelector(".ix"), NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      if (!text.textContent.trim()) continue;
+      const el = text.parentElement;
+      if (el.closest(".cm-editor, [aria-hidden=true] .ix-qr") || el.closest(".ix-sr")) continue;
+      const style = getComputedStyle(el);
+      if (style.visibility === "hidden" || style.display === "none") continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      checked++;
+      const [fr, fg, fb, fa] = toRgba(style.color);
+      const back = backdrop(el);
+      const mix = [fr, fg, fb].map((v, i) => v * fa + back[i] * (1 - fa));
+      const l1 = luminance(mix);
+      const l2 = luminance(back);
+      const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      const size = Number.parseFloat(style.fontSize);
+      const large = size >= 24 || (size >= 18.66 && Number(style.fontWeight) >= 700);
+      if (ratio < (large ? 3 : 4.5)) {
+        out.push(
+          `${ratio.toFixed(2)} "${text.textContent.trim().slice(0, 28)}" <${el.className.toString().slice(0, 24)}>`,
+        );
+      }
+    }
+    out.unshift(`checked ${checked} text nodes`);
+    return out;
+  });
+  console.log(`${tag}: ${low.shift()}`);
+  for (const entry of low) note(`[${tag}] low contrast ${entry}`);
   if (tag === "ko-dark-1440") {
     // Each way in, as drawn in the fixed preview frame.
     await page.locator("#fast").scrollIntoViewIfNeeded();
