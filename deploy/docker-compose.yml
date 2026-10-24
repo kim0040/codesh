@@ -22,7 +22,8 @@ x-hardening: &hardening
 
 x-app-env: &app-env
   NODE_ENV: production
-  MONGO_URL: mongodb://${MONGO_APP_USER:-codesh}:${MONGO_APP_PASSWORD:-${MONGO_PASSWORD:?run ./generate-secrets.sh}}@mongo:27017/codesh?authSource=${MONGO_APP_AUTH_DB:-admin}
+  # readWrite on database codesh only (mongo-users); the root user stays inside the mongo containers.
+  MONGO_URL: mongodb://codesh_app:${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}@mongo:27017/codesh?authSource=codesh
   VALKEY_URL: redis://:${VALKEY_PASSWORD:?run ./generate-secrets.sh}@valkey:6379
   COLLAB_SECRET: ${COLLAB_SECRET:?run ./generate-secrets.sh}
 
@@ -77,8 +78,8 @@ services:
       QUOTA_BYTES_PER_CLIENT: ${QUOTA_BYTES_PER_CLIENT:-536870912}
       QUOTA_BYTES_PER_IP: ${QUOTA_BYTES_PER_IP:-2147483648}
       UPLOAD_STORAGE_MAX_BYTES: ${UPLOAD_STORAGE_MAX_BYTES:-10737418240}
-      SSE_MAX_PER_CLIENT: ${SSE_MAX_PER_CLIENT:-5}
-      SSE_MAX_PER_IP: ${SSE_MAX_PER_IP:-100}
+      SSE_MAX_PER_CLIENT: ${SSE_MAX_PER_CLIENT:-20}
+      SSE_MAX_PER_IP: ${SSE_MAX_PER_IP:-200}
       PRESENCE_MAX_PER_NET: ${PRESENCE_MAX_PER_NET:-500}
       PENDING_MAX_PER_SHARE: ${PENDING_MAX_PER_SHARE:-100}
       BROADCASTS_PER_MIN: ${BROADCASTS_PER_MIN:-5}
@@ -86,8 +87,8 @@ services:
     expose: ["3001"]
     stop_grace_period: 20s
     depends_on:
-      mongo:
-        condition: service_healthy
+      mongo-users:
+        condition: service_completed_successfully
       valkey:
         condition: service_healthy
 
@@ -113,8 +114,8 @@ services:
     deploy:
       replicas: ${COLLAB_REPLICAS:-1}
     depends_on:
-      mongo:
-        condition: service_healthy
+      mongo-users:
+        condition: service_completed_successfully
       valkey:
         condition: service_healthy
 
@@ -126,37 +127,72 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: codesh
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?run ./generate-secrets.sh}
-      MONGO_APP_USER: ${MONGO_APP_USER:-codesh}
-      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:-}
     ulimits:
       nofile:
         soft: 64000
         hard: 64000
     volumes:
       - mongo-data:/data/db
-      - ./mongo:/opt/codesh:ro
-      - ./mongo/init-app-user.js:/docker-entrypoint-initdb.d/10-app-user.js:ro
     stop_grace_period: 30s
+    # Through the network address: while a new volume is initialised, a temporary mongod listens on
+    # loopback only, and a loopback ping would report healthy before others can connect.
     healthcheck:
       test:
         - CMD-SHELL
-        - mongosh --quiet --eval "db.adminCommand('ping').ok" | grep -q 1
+        - mongosh --quiet --host "$$(hostname)" --eval "db.adminCommand('ping').ok" | grep -q 1
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 15s
 
+  # One-shot on every start: creates the application user, or resets its password and role, so new
+  # and existing volumes (installed before this user existed) both run without the root user.
+  mongo-users:
+    <<: *hardening
+    restart: "no"
+    image: mongo:8.0.34
+    environment:
+      HOME: /tmp
+      MONGO_ROOT_PASSWORD: ${MONGO_PASSWORD:?run ./generate-secrets.sh}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}
+    # Passwords come from the environment, never from command arguments.
+    entrypoint:
+      - mongosh
+      - --quiet
+      - --host
+      - mongo
+      - --eval
+      - >-
+        db.getSiblingDB("admin").auth("codesh", process.env.MONGO_ROOT_PASSWORD);
+        const app = db.getSiblingDB("codesh");
+        const spec = { pwd: process.env.MONGO_APP_PASSWORD, roles: [{ role: "readWrite", db: "codesh" }] };
+        if (app.getUser("codesh_app")) app.updateUser("codesh_app", spec);
+        else app.createUser({ user: "codesh_app", ...spec });
+        print("mongo-users: codesh_app has readWrite on codesh");
+    depends_on:
+      mongo:
+        condition: service_healthy
+
   valkey:
     <<: *hardening
     cap_drop: []
     image: valkey/valkey:8.1.10
-    entrypoint: ["/bin/sh", "/opt/codesh/valkey-start.sh"]
+    # The password reaches valkey-server through a private config file: the arguments of the
+    # container's init process are visible to every user of the host in `ps`.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        conf="$$(mktemp)"
+        printf 'requirepass "%s"\n' "$$(printf '%s' "$$VALKEY_PASSWORD" | sed 's/[\\"]/\\&/g')" >"$$conf"
+        chown valkey:valkey "$$conf"
+        exec docker-entrypoint.sh valkey-server "$$conf" --appendonly yes --maxmemory "$$VALKEY_MAXMEMORY" --maxmemory-policy noeviction
     environment:
-      VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?run ./generate-secrets.sh}
       VALKEY_MAXMEMORY: ${VALKEY_MAXMEMORY:-1gb}
     volumes:
       - valkey-data:/data
-      - ./valkey/start.sh:/opt/codesh/valkey-start.sh:ro
     healthcheck:
       test: ["CMD-SHELL", 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
       interval: 5s

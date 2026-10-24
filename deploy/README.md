@@ -45,12 +45,17 @@ deploy/bundle.sh [version]        # -> deploy/dist/codesh-<version>.tar.gz (+ .s
 The archive includes a verified content checksum manifest and holds all images (`docker save`), `docker-compose.yml` without build sections, `.env.example` and the scripts. On the target host (docker + compose plugin, no internet):
 
 ```sh
+sha256sum -c codesh-<version>.tar.gz.sha256     # compare the value with one received over a trusted channel
 tar xzf codesh-<version>.tar.gz && cd codesh-<version>
 PUBLIC_URL=http://codesh.corp ./install.sh      # loads images, writes .env with new secrets, starts, waits for /healthz
 ./backup.sh                                     # mongodump -> ./backups/codesh-<time>.archive.gz
 ./restore.sh backups/codesh-<time>.archive.gz   # stops api+collab, mongorestore --drop, starts them
-./upgrade.sh ../codesh-<newer>.tar.gz           # backup, load images, keep .env, up -d, wait for /healthz
+./upgrade.sh ../codesh-<newer>.tar.gz           # checksums, backup, load images, keep .env, up -d, wait for /healthz
 ```
+
+`install.sh` checks `SHA256SUMS` inside the bundle; `upgrade.sh` needs `<bundle>.sha256` next to the bundle and checks it before extracting, then `SHA256SUMS` before loading images. A checksum is not a signature: it only detects a changed or damaged bundle when the value itself arrives over a trusted channel.
+
+api and collab connect as `codesh_app` (readWrite on database `codesh` only). The one-shot service `mongo-users` creates that user, or resets its password and role, as root on every start, so an installation from before this user existed switches over on its next upgrade without a manual step. Upgrading from such a version runs the old `upgrade.sh`: it finishes, then prints `tmp: unbound variable` and exits 1 because of a bug in its cleanup trap (fixed since), and leaves the extracted bundle in `/tmp/tmp.*`; check `docker compose ps` and remove that directory. `deploy/verify-deploy.sh` runs the whole path (fresh install, backup, restore, refused and accepted upgrades, HTTPS, an old installation) on a docker host.
 
 Valkey holds join codes, presence, grants, network bans and quota counters; it is not part of the Mongo backup. Keep its volume and do not flush it in production. See the operator security checklist in `docs/OPERATIONS.md`.
 

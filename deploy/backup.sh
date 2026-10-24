@@ -3,7 +3,8 @@
 #
 #   ./backup.sh [dir]        default dir: ./backups
 #
-# Valkey only holds join codes, presence and caches; it is not part of the backup.
+# Valkey (join codes, presence, grants, bans, counters) is not part of the backup. The archive holds
+# edit keys, PIN hashes and addresses: it is written 0600 into a directory created 0700.
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
@@ -11,13 +12,12 @@ cd "$(dirname "$0")"
 need_docker
 
 DIR="${1:-./backups}"
-mkdir -p "$DIR"
-chmod 700 "$DIR"
+[ -d "$DIR" ] || mkdir -p -m 700 "$DIR"
 FILE="$DIR/codesh-$(date +%Y%m%d-%H%M%S).archive.gz"
 
 PART="$(mktemp "$DIR/.backup.XXXXXX")"
 trap 'rm -f "$PART"' EXIT
-docker compose exec -T mongo sh /opt/codesh/transfer.sh dump >"$PART"
+mongo_transfer dump >"$PART"
 [ -s "$PART" ] || { rm -f "$PART"; die "mongodump produced no data"; }
 chmod 600 "$PART"
 mv "$PART" "$FILE"

@@ -34,13 +34,7 @@ upgrade() {
     # A new inode, so the running script is not overwritten in place.
     [ -f "$src/$file" ] && cp "$src/$file" "./$file.new" && mv "./$file.new" "./$file"
   done
-  # Keep existing volumes on their existing user until the operator runs the documented migration.
-  grep -q '^MONGO_APP_USER=' .env || env_set MONGO_APP_USER codesh
-  grep -q '^MONGO_APP_AUTH_DB=' .env || env_set MONGO_APP_AUTH_DB admin
-  mkdir -p mongo valkey docs
-  cp "$src"/mongo/* mongo/
-  cp "$src"/valkey/* valkey/
-  cp "$src"/docs/* docs/
+  mkdir -p docs && cp "$src"/docs/* docs/ 2>/dev/null || true
   mkdir -p tls && cp -n "$src"/tls/*.example tls/ 2>/dev/null || true
   env_set CODESH_VERSION "$version"
   # Secrets and settings added by the new version are filled in; existing values stay.
