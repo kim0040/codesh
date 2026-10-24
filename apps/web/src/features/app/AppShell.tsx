@@ -4,6 +4,7 @@ import { retainEvents } from "../../lib/events";
 import { useT } from "../../lib/i18n";
 import { openPalette, openShortcuts } from "../../lib/overlays";
 import { PLATFORM } from "../../lib/platform";
+import { useWindowShortcuts } from "../../lib/use-shortcuts";
 import { TemplatePicker } from "../start/TemplatePicker";
 import { CommandPalette } from "./CommandPalette";
 import { EventToasts } from "./EventToasts";
@@ -25,23 +26,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => retainEvents(), []);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      // `code` as well as `key`: with a Korean input method active the key can arrive as "ㅏ".
-      const k = event.key.toLowerCase() === "k" || event.code === "KeyK";
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && k) {
-        event.preventDefault();
-        openPalette();
-        return;
-      }
-      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !isTypingTarget(event.target)) {
-        event.preventDefault();
-        openShortcuts();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useWindowShortcuts(["palette", "shortcuts"], (id, event) => {
+    if (id === "palette") {
+      openPalette();
+      return true;
+    }
+    // "?" is a character: let it through where it is being typed.
+    if (isTypingTarget(event.target)) return false;
+    openShortcuts();
+    return true;
+  });
 
   return (
     <>

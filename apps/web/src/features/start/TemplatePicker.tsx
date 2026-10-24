@@ -1,7 +1,16 @@
 import { getLanguage } from "@codesh/highlight";
 import type { MessageKey, TFunction } from "@codesh/i18n";
 import type { Template } from "@codesh/shared";
-import { Button, cx, Dialog, DialogContent, EmptyState, LanguageBadge, Skeleton } from "@codesh/ui";
+import {
+  Button,
+  cx,
+  Dialog,
+  DialogContent,
+  EmptyState,
+  isImeKey,
+  LanguageBadge,
+  Skeleton,
+} from "@codesh/ui";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Search, SearchX, TriangleAlert } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
@@ -210,6 +219,8 @@ function PickerBody() {
             setActiveId(null);
           }}
           onKeyDown={(event) => {
+            // Enter that finishes a Korean syllable is not a choice yet.
+            if (isImeKey(event.nativeEvent)) return;
             if (event.key === "ArrowDown") {
               event.preventDefault();
               move(1);

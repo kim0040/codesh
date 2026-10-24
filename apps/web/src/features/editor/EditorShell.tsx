@@ -1,19 +1,26 @@
+import type { EditorView } from "@codemirror/view";
 import { detectLanguage, getLanguage, PLAIN_TEXT_ID } from "@codesh/highlight";
 import { Button, EmptyState, Sheet, SheetContent, toast } from "@codesh/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
   Bookmark,
   Copy,
   Download,
   FileArchive,
   GitFork,
+  Hash,
   History,
   Keyboard,
   MessageSquare,
   Presentation,
+  Replace,
+  Search,
   Settings,
   Share2,
+  TextSelect,
   Upload,
   UserRound,
   Wand2,
@@ -25,12 +32,14 @@ import { setFileLanguage } from "../../lib/collab/model";
 import { type Command, registerCommands } from "../../lib/commands";
 import { useT } from "../../lib/i18n";
 import { openShortcuts } from "../../lib/overlays";
-import { isAltGraph, KEYS } from "../../lib/platform";
 import { getPrefs } from "../../lib/prefs";
+import { shortcutKeys } from "../../lib/shortcuts";
 import { useStore } from "../../lib/store";
+import { useWindowShortcuts } from "../../lib/use-shortcuts";
 import { copyAll, downloadFile, downloadZip, looksLikeSecret } from "./actions";
 import { EditorBanners } from "./banners";
 import { CommentsPanel } from "./CommentsPanel";
+import { editorCommands } from "./cm/keymaps";
 import { useEditor } from "./context";
 import { showAloneHint } from "./doc-info";
 import { collectDroppedFiles } from "./dropped-files";
@@ -87,6 +96,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
   const [treeOpen, setTreeOpen] = useState(ctx.files.length > 1);
   const [secretWarning, setSecretWarning] = useState(false);
   const language = ctx.activeFile.language;
+  const { viewRef } = ctx;
 
   // ── actions ──────────────────────────────────────────────────────
   const actions = useRef({
@@ -173,45 +183,49 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
   topActionsRef.current = topActions;
 
   // ── keyboard shortcuts ───────────────────────────────────────────
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      // AltGr (Ctrl+Alt on Windows) types characters; it is never one of these shortcuts.
-      if (isAltGraph(event)) return;
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.altKey && event.code === "KeyS") {
-        event.preventDefault();
+  useWindowShortcuts(["share", "settings", "history", "comments", "copyAll", "format"], (id) => {
+    switch (id) {
+      case "share":
         ctx.openPanel("share");
-      } else if (mod && !event.altKey && !event.shiftKey && event.key === ",") {
-        event.preventDefault();
+        return true;
+      case "settings":
         ctx.openPanel("settings");
-      } else if (mod && event.altKey && event.code === "KeyH" && ctx.isOwner) {
-        event.preventDefault();
+        return true;
+      case "history":
+        // Only the owner has a history: for everyone else the key keeps its browser meaning.
+        if (!ctx.isOwner) return false;
         ctx.openPanel("history");
-      } else if (mod && event.altKey && event.code === "KeyM") {
-        event.preventDefault();
+        return true;
+      case "comments":
         ctx.openPanel("comments");
-      } else if (mod && event.altKey && event.code === "KeyC") {
-        event.preventDefault();
+        return true;
+      case "copyAll":
         topActionsRef.current.copyAll();
-      } else if (event.shiftKey && event.altKey && !mod && event.code === "KeyF") {
-        event.preventDefault();
+        return true;
+      case "format":
         topActionsRef.current.format();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [ctx.isOwner, ctx.openPanel]);
+        return true;
+    }
+  });
 
   // ── command palette entries ──────────────────────────────────────
   useEffect(() => {
     const group = t("editor.top.menu");
+    // The palette is also how Linux desktops that keep Ctrl+Alt+↑/↓ (workspace switching) reach
+    // the multi-cursor commands. Focus goes back to the editor first, then the command runs.
+    const inEditor = (command: (view: EditorView) => boolean) => () => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.focus();
+      command(view);
+    };
     const commands: Command[] = [
       {
         id: "share",
         label: t("editor.top.shareAction"),
         group,
         icon: <Share2 />,
-        shortcut: [KEYS.mod, KEYS.alt, "S"],
+        shortcut: shortcutKeys("share"),
         run: () => ctx.openPanel("share"),
       },
       {
@@ -219,7 +233,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.settingsAction"),
         group,
         icon: <Settings />,
-        shortcut: [KEYS.mod, ","],
+        shortcut: shortcutKeys("settings"),
         run: () => ctx.openPanel("settings"),
       },
       {
@@ -227,7 +241,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.commentsAction"),
         group,
         icon: <MessageSquare />,
-        shortcut: [KEYS.mod, KEYS.alt, "M"],
+        shortcut: shortcutKeys("comments"),
         run: () => ctx.openPanel("comments"),
       },
       {
@@ -236,7 +250,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         group,
         icon: <History />,
         disabled: !ctx.isOwner,
-        shortcut: [KEYS.mod, KEYS.alt, "H"],
+        shortcut: shortcutKeys("history"),
         run: () => ctx.openPanel("history"),
       },
       {
@@ -244,7 +258,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.copyAllAction"),
         group,
         icon: <Copy />,
-        shortcut: [KEYS.mod, KEYS.alt, "C"],
+        shortcut: shortcutKeys("copyAll"),
         run: () => topActionsRef.current.copyAll(),
       },
       {
@@ -268,8 +282,59 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         group,
         icon: <Wand2 />,
         disabled: ctx.readOnly || !canFormat(language),
-        shortcut: [KEYS.shift, KEYS.alt, "F"],
+        shortcut: shortcutKeys("format"),
         run: () => topActionsRef.current.format(),
+      },
+      {
+        id: "find",
+        label: t("shortcuts.item.find"),
+        group,
+        icon: <Search />,
+        shortcut: shortcutKeys("find"),
+        run: inEditor(editorCommands.find),
+      },
+      {
+        id: "replace",
+        label: t("shortcuts.item.replace"),
+        group,
+        icon: <Replace />,
+        disabled: ctx.readOnly,
+        shortcut: shortcutKeys("replace"),
+        run: inEditor(editorCommands.replace),
+      },
+      {
+        id: "go-to-line",
+        label: t("shortcuts.item.goToLine"),
+        group,
+        icon: <Hash />,
+        shortcut: shortcutKeys("goToLine"),
+        run: inEditor(editorCommands.goToLine),
+      },
+      {
+        id: "add-cursor-above",
+        label: t("shortcuts.item.addCursorAbove"),
+        group,
+        icon: <ArrowUpToLine />,
+        disabled: ctx.readOnly,
+        shortcut: shortcutKeys("addCursorAbove"),
+        run: inEditor(editorCommands.addCursorAbove),
+      },
+      {
+        id: "add-cursor-below",
+        label: t("shortcuts.item.addCursorBelow"),
+        group,
+        icon: <ArrowDownToLine />,
+        disabled: ctx.readOnly,
+        shortcut: shortcutKeys("addCursorBelow"),
+        run: inEditor(editorCommands.addCursorBelow),
+      },
+      {
+        id: "select-matches",
+        label: t("shortcuts.item.selectMatches"),
+        group,
+        icon: <TextSelect />,
+        shortcut: shortcutKeys("selectMatches"),
+        run: inEditor(editorCommands.selectMatches),
       },
       {
         id: "save",
@@ -313,7 +378,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("editor.top.shortcutsAction"),
         group,
         icon: <Keyboard />,
-        shortcut: ["?"],
+        shortcut: shortcutKeys("shortcuts"),
         run: openShortcuts,
       },
     ];
@@ -328,6 +393,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
     language,
     ctx.openPanel,
     ctx.setPresenting,
+    viewRef,
   ]);
 
   // ── paste: detect the language of an empty file, warn about secrets ─

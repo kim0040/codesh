@@ -14,8 +14,21 @@ interface FsEntry {
   };
 }
 
+const JUNK_NAME = /^(\.DS_Store|Thumbs\.db|desktop\.ini|\.localized|\._.*|~\$.*)$/i;
+const JUNK_FOLDER = /(^|\/)(__MACOSX|\.Spotlight-V100|\.Trashes|\$RECYCLE\.BIN)(\/|$)/i;
+
+/**
+ * Files a file manager adds on its own (Finder's .DS_Store and ._ copies, Explorer's Thumbs.db and
+ * desktop.ini, Office lock files). They would only show up as unreadable "binary" skips.
+ */
+export function isJunkFile(path: string): boolean {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  return JUNK_NAME.test(name) || JUNK_FOLDER.test(path);
+}
+
 async function readAll(entry: FsEntry): Promise<File[]> {
   if (entry.isFile && entry.file) {
+    if (isJunkFile(entry.fullPath)) return [];
     const file = await new Promise<File>((resolve, reject) => entry.file?.(resolve, reject));
     (file as File & { codeshPath?: string }).codeshPath = entry.fullPath.replace(/^\//, "");
     return [file];

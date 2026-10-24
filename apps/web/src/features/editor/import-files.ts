@@ -12,6 +12,7 @@ import {
   uniquePath,
 } from "../../lib/collab/model";
 import { baseName } from "../../lib/format";
+import { isJunkFile } from "./dropped-files";
 
 /** Reads dropped or picked files as text and puts them into the open share. */
 
@@ -61,6 +62,7 @@ async function expand(files: readonly File[]): Promise<{ items: Incoming[]; skip
   const items: Incoming[] = [];
   let skipped = 0;
   const take = (path: string, bytes: Uint8Array) => {
+    if (isJunkFile(path.replace(/\\/g, "/"))) return;
     const content = bytes.length > MAX_FILE_BYTES ? null : decodeText(bytes);
     if (content === null) {
       skipped++;
@@ -75,7 +77,7 @@ async function expand(files: readonly File[]): Promise<{ items: Incoming[]; skip
       try {
         const entries = unzipSync(bytes);
         for (const [path, data] of Object.entries(entries)) {
-          if (/[/\\]$/.test(path) || path.startsWith("__MACOSX/")) continue;
+          if (/[/\\]$/.test(path)) continue;
           take(path, data);
         }
         continue;

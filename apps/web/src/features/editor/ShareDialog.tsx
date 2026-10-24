@@ -15,6 +15,7 @@ import {
   Field,
   IconButton,
   Input,
+  isImeKey,
   Spinner,
   Switch,
   Tabs,
@@ -31,6 +32,12 @@ import { removeAwarenessStates } from "y-protocols/awareness";
 import { api } from "../../lib/api";
 import { usePresence } from "../../lib/events";
 import { copyText, groupCode, shareUrl } from "../../lib/format";
+import {
+  exitFullscreen,
+  FULLSCREEN_CHANGE_EVENTS,
+  fullscreenElement,
+  requestFullscreen,
+} from "../../lib/fullscreen";
 import { useLocale, useT } from "../../lib/i18n";
 import { useSession } from "../../lib/session";
 import { labelColorFor } from "./cm/remote-cursors";
@@ -87,18 +94,23 @@ export function ShareDialog() {
   );
 }
 
+/**
+ * The join QR as vector art: every module stays a sharp square at 125 % or 150 % display scaling
+ * and on a projector, where a bitmap scaled by a fraction blurs and gets harder to scan.
+ */
 function useQr(url: string, size: number): string | null {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    QRCode.toDataURL(url, {
+    QRCode.toString(url, {
+      type: "svg",
       margin: 1,
       width: size,
       errorCorrectionLevel: "M",
       color: { dark: "#000000", light: "#ffffff" },
     })
-      .then((data) => {
-        if (!cancelled) setSrc(data);
+      .then((svg) => {
+        if (!cancelled) setSrc(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
       })
       .catch(() => {
         if (!cancelled) setSrc(null);
@@ -260,19 +272,22 @@ function Projector({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     const element = root.current;
     element?.focus();
-    void element?.requestFullscreen?.().catch(() => undefined);
+    if (element) void requestFullscreen(element);
+    // Esc leaves element fullscreen on its own (browsers do not pass that key to the page there),
+    // and ⌘⌃F or F11 only changes the window, which the overlay already fills.
     const onChange = () => {
-      if (!document.fullscreenElement) onExit();
+      if (!fullscreenElement()) onExit();
     };
-    document.addEventListener("fullscreenchange", onChange);
+    for (const name of FULLSCREEN_CHANGE_EVENTS) document.addEventListener(name, onChange);
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onExit();
+      // Escape that cancels an IME composition is not a request to leave.
+      if (event.key === "Escape" && !isImeKey(event)) onExit();
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("fullscreenchange", onChange);
+      for (const name of FULLSCREEN_CHANGE_EVENTS) document.removeEventListener(name, onChange);
       window.removeEventListener("keydown", onKey);
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+      if (fullscreenElement()) void exitFullscreen();
     };
   }, [onExit]);
 

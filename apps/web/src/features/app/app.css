@@ -10,6 +10,14 @@
   scrollbar-color: color-mix(in oklab, var(--fg-3) 60%, transparent) transparent;
 }
 
+/* "Increase contrast" (macOS, iOS, Windows 11 contrast themes' lighter sibling): hairlines become the 3:1 control border. */
+@media (prefers-contrast: more) {
+  :root:root {
+    --border: var(--border-control);
+    --border-strong: var(--border-control);
+  }
+}
+
 /* Windows High Contrast (forced colours): keep focus, state, selection and carets visible. */
 @media (forced-colors: active) {
   /* Buttons without a border of their own would otherwise read as loose text and icons. */

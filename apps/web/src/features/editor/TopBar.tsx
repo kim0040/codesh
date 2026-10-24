@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   IconButton,
+  isImeKey,
   Tooltip,
 } from "@codesh/ui";
 import { Link } from "@tanstack/react-router";
@@ -37,7 +38,7 @@ import { type Participant, useComments } from "../../lib/collab/hooks";
 import { setTitle } from "../../lib/collab/model";
 import { useT } from "../../lib/i18n";
 import { openPalette, openShortcuts } from "../../lib/overlays";
-import { KEYS } from "../../lib/platform";
+import { shortcutKeys } from "../../lib/shortcuts";
 import { labelColorFor } from "./cm/remote-cursors";
 import { useEditor } from "./context";
 import { canFormat } from "./format-code";
@@ -84,7 +85,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
       <div className="ms-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
         <People />
 
-        <Tooltip content={t("editor.top.commentsAction")} shortcut={[KEYS.mod, KEYS.alt, "M"]}>
+        <Tooltip content={t("editor.top.commentsAction")} shortcut={shortcutKeys("comments")}>
           <span className="relative inline-flex">
             <IconButton
               aria-label={t("editor.top.commentsAction")}
@@ -108,7 +109,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
         </Tooltip>
 
         {ctx.isOwner ? (
-          <Tooltip content={t("editor.top.historyAction")} shortcut={[KEYS.mod, KEYS.alt, "H"]}>
+          <Tooltip content={t("editor.top.historyAction")} shortcut={shortcutKeys("history")}>
             <IconButton
               aria-label={t("editor.top.historyAction")}
               pressed={ctx.panel.name === "history"}
@@ -123,7 +124,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
           </Tooltip>
         ) : null}
 
-        <Tooltip content={t("editor.top.settingsAction")} shortcut={[KEYS.mod, ","]}>
+        <Tooltip content={t("editor.top.settingsAction")} shortcut={shortcutKeys("settings")}>
           <IconButton
             aria-label={t("editor.top.settingsAction")}
             onClick={() => ctx.openPanel("settings")}
@@ -154,7 +155,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
           <DropdownMenuContent align="end">
             <DropdownMenuItem
               icon={<CommandIcon />}
-              shortcut={[KEYS.mod, "K"]}
+              shortcut={shortcutKeys("palette")}
               onSelect={openPalette}
             >
               {t("editor.top.commandAction")}
@@ -162,7 +163,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               icon={<Copy />}
-              shortcut={[KEYS.mod, KEYS.alt, "C"]}
+              shortcut={shortcutKeys("copyAll")}
               onSelect={actions.copyAll}
             >
               {t("editor.top.copyAllAction")}
@@ -178,7 +179,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             {formattable ? (
               <DropdownMenuItem
                 icon={<Wand2 />}
-                shortcut={[KEYS.shift, KEYS.alt, "F"]}
+                shortcut={shortcutKeys("format")}
                 onSelect={actions.format}
               >
                 {t("editor.top.formatAction")}
@@ -205,7 +206,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               icon={<Settings />}
-              shortcut={[KEYS.mod, ","]}
+              shortcut={shortcutKeys("settings")}
               onSelect={() => ctx.openPanel("settings")}
             >
               {t("editor.top.settingsAction")}
@@ -213,7 +214,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             {ctx.isOwner ? (
               <DropdownMenuItem
                 icon={<History />}
-                shortcut={[KEYS.mod, KEYS.alt, "H"]}
+                shortcut={shortcutKeys("history")}
                 onSelect={() => ctx.openPanel("history")}
               >
                 {t("editor.top.historyAction")}
@@ -222,7 +223,11 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
             <DropdownMenuItem icon={<UserRound />} onSelect={() => ctx.openPanel("identity")}>
               {t("identity.editAction")}
             </DropdownMenuItem>
-            <DropdownMenuItem icon={<Keyboard />} shortcut={["?"]} onSelect={openShortcuts}>
+            <DropdownMenuItem
+              icon={<Keyboard />}
+              shortcut={shortcutKeys("shortcuts")}
+              onSelect={openShortcuts}
+            >
               {t("editor.top.shortcutsAction")}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -274,7 +279,7 @@ function TitleField() {
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return;
+          if (isImeKey(event.nativeEvent)) return;
           if (event.key === "Enter") {
             event.preventDefault();
             event.currentTarget.blur();
