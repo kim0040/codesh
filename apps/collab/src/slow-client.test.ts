@@ -37,6 +37,15 @@ describe("slow client guard", () => {
     expect(reported).toBe(1);
   });
 
+  it("reports the size of every message it sends", () => {
+    const socket = fakeSocket();
+    const sizes: number[] = [];
+    guardSlowClient(socket as never, 1000, undefined, (bytes) => sizes.push(bytes));
+    socket.send(new Uint8Array(3) as never);
+    socket.send(new Uint8Array(5) as never);
+    expect(sizes).toEqual([3, 5]);
+  });
+
   it("wraps a socket once even when several documents share it", () => {
     const socket = fakeSocket();
     guardSlowClient(socket as never, 1000);

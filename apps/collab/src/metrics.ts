@@ -7,6 +7,9 @@ export interface CollabMetrics {
   updates: Counter<"origin">;
   slowClients: Counter;
   refusedTooLarge: Counter;
+  messagesSent: Counter;
+  bytesSent: Counter;
+  awarenessDropped: Counter;
 }
 
 /** Prometheus metrics of one collab instance; counts are read from Hocuspocus at scrape time. */
@@ -56,6 +59,21 @@ export function createMetrics(counts: () => { connections: number; documents: nu
     refusedTooLarge: new Counter({
       name: "codesh_collab_refused_too_large_total",
       help: "Updates refused because the document would exceed maxDocBytes",
+      registers: [registry],
+    }),
+    messagesSent: new Counter({
+      name: "codesh_collab_ws_messages_sent_total",
+      help: "WebSocket messages sent to clients",
+      registers: [registry],
+    }),
+    bytesSent: new Counter({
+      name: "codesh_collab_ws_bytes_sent_total",
+      help: "Bytes of the WebSocket messages sent to clients",
+      registers: [registry],
+    }),
+    awarenessDropped: new Counter({
+      name: "codesh_collab_awareness_dropped_total",
+      help: "Awareness updates from clients dropped by the per-connection rate limit",
       registers: [registry],
     }),
   } satisfies CollabMetrics;

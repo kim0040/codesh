@@ -56,3 +56,18 @@ export function metricValue(text: string, name: string): number | undefined {
   }
   return total;
 }
+
+/**
+ * Increase of a counter over a series of snapshots. A value lower than the one before is a
+ * restarted process counting from zero again, as in Prometheus' `increase()`.
+ */
+export function increase(series: (Record<string, number> | null)[], name: string): number | null {
+  const values = series.map((s) => s?.[name]).filter((v) => v !== undefined);
+  if (values.length < 2) return null;
+  let total = 0;
+  for (let i = 1; i < values.length; i++) {
+    const [a, b] = [values[i - 1] as number, values[i] as number];
+    total += b >= a ? b - a : b;
+  }
+  return total;
+}

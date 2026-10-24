@@ -43,6 +43,57 @@
   font-style: italic;
 }
 
+/* ── Smooth typing (cm/smooth-caret.ts) ────────────────────────── */
+
+/*
+ * Its own layer draws the main cursor; CodeMirror's stays for the other selections. Vim's block
+ * cursor (`cm-fat-cursor`) is not a `cm-cursor`.
+ */
+.cm-editor[data-smooth-typing] .cm-cursor.cm-cursor-primary {
+  visibility: hidden;
+}
+
+.cm-smooth-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  /* Only transform animates, on the compositor: no layout, no paint of the text. */
+  transition: transform 90ms cubic-bezier(0.25, 0.8, 0.3, 1);
+}
+
+/* Vim draws its own block cursor and hides the other cursor layers. */
+.cm-scroller.cm-vimMode > .cm-smooth-caret-layer {
+  display: none;
+}
+
+/* As CodeMirror's `.cm-cursorLayer`: shown and blinking only while the editor has focus. */
+.cm-editor.cm-focused > .cm-scroller > .cm-smooth-caret-layer {
+  animation: steps(1) cm-smooth-blink 1.2s infinite;
+}
+
+.cm-editor.cm-focused > .cm-scroller > .cm-smooth-caret-layer .cm-smooth-caret {
+  display: block;
+}
+
+@keyframes cm-smooth-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes cm-smooth-blink2 {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-smooth-caret {
+    transition: none;
+  }
+}
+
 /* ── Remote cursors ─────────────────────────────────────────────── */
 
 .cm-remote-carets,
@@ -98,11 +149,27 @@
   border-radius: 0 4px 4px 4px;
 }
 
-.cm-remote-caret.is-moving .cm-remote-caret-flag {
-  animation: cm-remote-flag 3s ease-out both;
+/*
+ * remote-cursors.ts restarts the flag by switching between two animation names (a/b), which needs
+ * no reflow; a flag that is still shown restarts from opaque instead of fading in again.
+ */
+.cm-remote-caret[data-flag="a"] .cm-remote-caret-flag {
+  animation: cm-remote-flag-a 3s ease-out both;
 }
 
-@keyframes cm-remote-flag {
+.cm-remote-caret[data-flag="b"] .cm-remote-caret-flag {
+  animation: cm-remote-flag-b 3s ease-out both;
+}
+
+.cm-remote-caret[data-flag="a"][data-flag-from="shown"] .cm-remote-caret-flag {
+  animation-name: cm-remote-flag-hold-a;
+}
+
+.cm-remote-caret[data-flag="b"][data-flag-from="shown"] .cm-remote-caret-flag {
+  animation-name: cm-remote-flag-hold-b;
+}
+
+@keyframes cm-remote-flag-a {
   0% {
     opacity: 0;
     transform: translateY(2px);
@@ -119,12 +186,49 @@
   }
 }
 
+@keyframes cm-remote-flag-b {
+  0% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  6% {
+    opacity: 1;
+    transform: none;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes cm-remote-flag-hold-a {
+  0%,
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes cm-remote-flag-hold-b {
+  0%,
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cm-remote-caret {
     transition: none;
   }
 
-  .cm-remote-caret.is-moving .cm-remote-caret-flag {
+  .cm-remote-caret[data-flag] .cm-remote-caret-flag {
     animation: none;
     opacity: 1;
   }

@@ -30,15 +30,24 @@ describe("sanitizePrefs", () => {
       editorTheme: "neon",
       wrap: "yes",
       lineNumbers: 0,
+      smoothTyping: "off",
     });
     expect(result.keymap).toBe("default");
     expect(result.editorTheme).toBe("auto");
     expect(result.wrap).toBe(DEFAULT_PREFS.wrap);
     expect(result.lineNumbers).toBe(DEFAULT_PREFS.lineNumbers);
+    expect(result.smoothTyping).toBe(true);
   });
 
   it("keeps valid values", () => {
-    const stored = { ...DEFAULT_PREFS, keymap: "vim", wrap: false, fontSize: 18, tabSize: 4 };
+    const stored = {
+      ...DEFAULT_PREFS,
+      keymap: "vim",
+      wrap: false,
+      fontSize: 18,
+      tabSize: 4,
+      smoothTyping: false,
+    };
     expect(sanitizePrefs(stored)).toEqual(stored);
   });
 });

@@ -2,13 +2,17 @@ import { Agent, request } from "undici";
 
 /** One browser: its own `codesh_sid` cookie, talking to the API through a shared connection pool. */
 export class ApiClient {
-  private cookie = "";
+  /** `codesh_sid=...`, so another thread can act as the same person. */
+  cookie = "";
 
   constructor(
     private readonly base: string,
     private readonly agent: Agent,
     private readonly onRateLimited: () => void,
-  ) {}
+    cookie = "",
+  ) {
+    this.cookie = cookie;
+  }
 
   async call<T = unknown>(
     method: "GET" | "POST" | "PATCH" | "DELETE",

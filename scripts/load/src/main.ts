@@ -1,40 +1,40 @@
-// Load test for the collab path (docs/PLAN.md 4.2). No k6 (AGPL): plain Node clients.
+// Load test for the collab path (docs/PLAN.md 4.2, docs/OPERATIONS.md §11). No k6 (AGPL): plain
+// Node clients.
 //
+//   pnpm load -- --scenario single-share-50 --url http://host --docker-project codesh
 //   pnpm load -- --shares 100 --writers 5 --viewers 20 --duration 60 --url http://host
 //
-// Per share: the owner and (writers - 1) editors type markers at a fixed rate, viewers only read.
-// Latency is measured per delivery, from the moment a writer inserts a marker to the moment another
-// client's Y.Text observes it (one process, one clock). At the end every client of a share must hold
-// the same text containing every marker that was typed.
+// Writers type markers at a fixed rate and move their cursor with every keystroke, like the editor;
+// viewers move their cursor. Edit latency is measured per delivery, from the moment a writer
+// inserts a marker to the moment another client's Y.Text observes it; awareness latency from the
+// moment a client publishes a cursor to the moment another client sees it. The clients run in
+// worker threads (worker.ts) that share one clock. At the end every client of a share must hold the
+// same text with every typed marker exactly once, and the latest cursor of everyone else.
+import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
-import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
-import WebSocket from "ws";
-import * as Y from "yjs";
+import { Worker } from "node:worker_threads";
 import { ApiClient, createAgent } from "./api.js";
-import { type Options, parseOptions, USAGE } from "./args.js";
-import { marker, markersIn, metricValue, summarize } from "./stats.js";
+import { type Options, parseOptions, planOf, USAGE } from "./args.js";
+import {
+  type ClientJob,
+  type FromWorker,
+  now,
+  type Replica,
+  type ToWorker,
+  type WorkerConfig,
+  type WorkerResults,
+} from "./protocol.js";
+import { startResourceSampler } from "./resources.js";
+import { clientCount, type LabGroup, type ShareGroup } from "./scenarios.js";
+import { increase, metricValue, summarize } from "./stats.js";
 
 interface Share {
-  index: number;
+  group: string;
   id: string;
-  editKey: string;
+  /** Deletes the share afterwards. */
   owner: ApiClient;
-  clients: Client[];
-  /** `<writer>:<seq>` -> performance.now() when it was typed. */
-  sent: Map<string, number>;
-}
-
-interface Client {
-  share: Share;
-  /** Index among the share's writers, or null for a viewer. */
-  writer: number | null;
-  doc: Y.Doc;
-  text: Y.Text;
-  provider?: HocuspocusProvider;
-  socket?: HocuspocusProviderWebsocket;
-  synced: boolean;
-  nextSeq: number;
 }
 
 const options = parseOptions(process.argv.slice(2));
@@ -43,15 +43,17 @@ if (!options) {
   process.exit(0);
 }
 const opts: Options = options;
+const plan = planOf(opts);
 
-const wsBase = opts.url.replace(/^http/, "ws");
+const totalClients = plan.groups.reduce((n, g) => n + clientCount(g), 0);
 const agent = createAgent(Math.min(256, opts.concurrency * 2));
-const counters = { rateLimited: 0, deliveries: 0, expectedDeliveries: 0 };
+const counters = { rateLimited: 0, clients: 0 };
 const failures = new Map<string, number>();
-const latencies: number[] = [];
-const connectTimes: number[] = [];
+const shares: Share[] = [];
+const jobs: ClientJob[] = [];
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const fail = (reason: string) => failures.set(reason, (failures.get(reason) ?? 0) + 1);
+const fail = (reason: string, count = 1) =>
+  failures.set(reason, (failures.get(reason) ?? 0) + count);
 const newApi = () =>
   new ApiClient(opts.url, agent, () => {
     counters.rateLimited++;
@@ -86,9 +88,14 @@ const METRICS = {
     "codesh_collab_flush_errors_total",
     "codesh_collab_slow_client_closes_total",
     "codesh_collab_refused_too_large_total",
+    "codesh_collab_ws_messages_sent_total",
+    "codesh_collab_ws_bytes_sent_total",
+    "codesh_collab_awareness_dropped_total",
     "codesh_collab_process_cpu_seconds_total",
     "codesh_collab_process_resident_memory_bytes",
+    "codesh_collab_nodejs_heap_size_used_bytes",
     "codesh_collab_nodejs_eventloop_lag_p99_seconds",
+    "codesh_collab_nodejs_eventloop_lag_max_seconds",
   ],
 } as const;
 
@@ -125,13 +132,21 @@ const snapshot = async (): Promise<Snapshot> => ({
 
 // --- setup -----------------------------------------------------------------------------------
 
-async function createShare(index: number, stamp: string): Promise<Share | null> {
+async function startSession(api: ApiClient): Promise<void> {
+  const session = await api.call("GET", "/api/session");
+  if (session.status !== 200) throw new Error(`session ${session.status}`);
+}
+
+function addJob(job: Omit<ClientJob, "key">) {
+  jobs.push({ key: `c${counters.clients++}`, ...job });
+}
+
+async function createShare(group: ShareGroup, index: number, stamp: string): Promise<void> {
   const owner = newApi();
   try {
-    const session = await owner.call("GET", "/api/session");
-    if (session.status !== 200) throw new Error(`session ${session.status}`);
+    await startSession(owner);
     const created = await owner.call<{ id: string }>("POST", "/api/shares", {
-      title: `load-${stamp}-${index}`,
+      title: `load-${stamp}-${group.name}-${index}`,
       files: [{ path: "main.txt", content: "// codesh load test\n" }],
     });
     if (created.status !== 200) throw new Error(`create ${created.status}`);
@@ -142,283 +157,581 @@ async function createShare(index: number, stamp: string): Promise<Share | null> 
     const view = await owner.call<{ access?: { editKey: string } }>("GET", `/api/shares/${id}`);
     const editKey = view.json.access?.editKey;
     if (!editKey) throw new Error("no edit key");
-    return { index, id, editKey, owner, clients: [], sent: new Map() };
+    const shareIndex = shares.length;
+    shares.push({ group: group.name, id, owner });
+    const base = { group: group.name, shareId: id, shareIndex, socketKey: null };
+    for (let k = 0; k < group.writers; k++) {
+      addJob({
+        ...base,
+        writer: k,
+        cookie: k === 0 ? owner.cookie : null,
+        body: k === 0 ? {} : { editKey },
+        roles: [k === 0 ? "owner" : "edit"],
+        perSecond: group.typeRate,
+      });
+    }
+    for (let k = 0; k < group.viewers; k++) {
+      addJob({
+        ...base,
+        writer: null,
+        cookie: null,
+        body: {},
+        roles: ["view"],
+        perSecond: group.cursorRate,
+      });
+    }
   } catch (error) {
     fail(`create share: ${(error as Error).message}`);
-    return null;
   }
 }
 
-function observe(client: Client) {
-  client.text.observe((event) => {
-    if (event.transaction.local) return;
-    const now = performance.now();
-    for (const op of event.delta) {
-      if (typeof op.insert !== "string") continue;
-      for (const [writer, seq] of markersIn(op.insert)) {
-        const sentAt = client.share.sent.get(`${writer}:${seq}`);
-        if (sentAt === undefined) continue;
-        latencies.push(now - sentAt);
-        counters.deliveries++;
+/** A lab: the teacher creates it, every student joins and gets a copy the teacher watches. */
+async function createLab(group: LabGroup, stamp: string): Promise<void> {
+  const teacher = newApi();
+  try {
+    await startSession(teacher);
+    const created = await teacher.call<{ id: string }>("POST", "/api/labs", {
+      title: `load-${stamp}-${group.name}`,
+    });
+    if (created.status !== 200) throw new Error(`create lab ${created.status}`);
+    const labId = created.json.id;
+    const students = Array.from({ length: group.students }, (_, i) => i);
+    await pool(students, opts.concurrency, async (i) => {
+      const student = newApi();
+      try {
+        await startSession(student);
+        const joined = await student.call<{ shareId: string }>("POST", `/api/labs/${labId}/join`, {
+          name: `student ${i + 1}`,
+        });
+        if (joined.status !== 200) throw new Error(`join lab ${joined.status}`);
+        const id = joined.json.shareId;
+        const shareIndex = shares.length;
+        shares.push({ group: group.name, id, owner: student });
+        const base = { group: group.name, shareId: id, shareIndex, body: {} };
+        addJob({
+          ...base,
+          writer: 0,
+          cookie: student.cookie,
+          roles: ["owner", "edit"],
+          socketKey: null,
+          perSecond: group.typeRate,
+        });
+        // The teacher's grid: one tab, one socket, every copy multiplexed over it.
+        addJob({
+          ...base,
+          writer: null,
+          cookie: teacher.cookie,
+          roles: [],
+          socketKey: `teacher:${labId}`,
+          perSecond: 0,
+        });
+      } catch (error) {
+        fail(`lab student: ${(error as Error).message}`);
+      }
+    });
+  } catch (error) {
+    fail(`lab: ${(error as Error).message}`);
+  }
+}
+
+// --- client threads --------------------------------------------------------------------------
+
+class ClientThread {
+  readonly worker: Worker;
+  private readonly waiting = new Map<string, (message: FromWorker) => void>();
+
+  constructor(config: WorkerConfig) {
+    this.worker = new Worker(new URL("./worker.ts", import.meta.url), { workerData: config });
+    this.worker.on("message", (message: FromWorker) => {
+      const resolve = this.waiting.get(message.type);
+      this.waiting.delete(message.type);
+      resolve?.(message);
+    });
+    this.worker.on("error", (error) => {
+      console.error("load: client thread failed", error);
+      process.exit(2);
+    });
+  }
+
+  /** Sends `message` and resolves with the thread's answer of type `reply`. */
+  ask<T extends FromWorker["type"]>(
+    message: ToWorker,
+    reply: T,
+  ): Promise<Extract<FromWorker, { type: T }>> {
+    return new Promise((resolve) => {
+      this.waiting.set(reply, resolve as (message: FromWorker) => void);
+      this.worker.postMessage(message);
+    });
+  }
+}
+
+/** Spreads every share over the threads; clients on one shared socket stay in one thread. */
+function assign(count: number): ClientJob[][] {
+  const out: ClientJob[][] = Array.from({ length: count }, () => []);
+  const bySocket = new Map<string, number>();
+  let next = 0;
+  for (const job of jobs) {
+    let index = job.socketKey === null ? undefined : bySocket.get(job.socketKey);
+    if (index === undefined) {
+      index = next++ % count;
+      if (job.socketKey !== null) bySocket.set(job.socketKey, index);
+    }
+    out[index]?.push(job);
+  }
+  return out;
+}
+
+// --- checks ----------------------------------------------------------------------------------
+
+interface Convergence {
+  converged: number;
+  complete: number;
+  missing: number;
+  duplicated: number;
+  cursorGaps: number;
+  bad: string[];
+}
+
+function convergence(replicas: Replica[], list: number[] = shares.map((_, i) => i)): Convergence {
+  const byShare = new Map<number, Replica[]>();
+  for (const replica of replicas) {
+    const entry = byShare.get(replica.shareIndex) ?? [];
+    entry.push(replica);
+    byShare.set(replica.shareIndex, entry);
+  }
+  const out: Convergence = {
+    converged: 0,
+    complete: 0,
+    missing: 0,
+    duplicated: 0,
+    cursorGaps: 0,
+    bad: [],
+  };
+  for (const index of list) {
+    const live = (byShare.get(index) ?? []).filter((r) => r.synced);
+    const same = live.length > 0 && new Set(live.map((r) => r.hash)).size === 1;
+    const first = live[0];
+    out.missing += first?.missing ?? 0;
+    out.duplicated += first?.duplicated ?? 0;
+    if (same) out.converged++;
+    if (same && first && first.missing === 0 && first.duplicated === 0) out.complete++;
+    else out.bad.push(shares[index]?.id ?? String(index));
+    // Every live receiver holds the latest cursor of every live sender.
+    for (const receiver of live) {
+      const seen = new Map(receiver.seen);
+      for (const sender of live) {
+        if (sender === receiver || sender.awarenessLast < 0) continue;
+        if ((seen.get(sender.key) ?? -1) !== sender.awarenessLast) out.cursorGaps++;
       }
     }
-  });
+  }
+  return out;
 }
 
-async function connect(share: Share, writer: number | null, isOwner: boolean): Promise<void> {
-  const started = performance.now();
-  const doc = new Y.Doc();
-  const client: Client = {
-    share,
-    writer,
-    doc,
-    text: doc.getText("file:main"),
-    synced: false,
-    nextSeq: 0,
-  };
-  share.clients.push(client);
-  try {
-    const api = isOwner ? share.owner : newApi();
-    if (!isOwner) {
-      const session = await api.call("GET", "/api/session");
-      if (session.status !== 200) throw new Error(`session ${session.status}`);
-    }
-    const joined = await api.call<{ token: string; role: string }>(
-      "POST",
-      `/api/shares/${share.id}/join`,
-      writer !== null && !isOwner ? { editKey: share.editKey } : {},
-    );
-    if (joined.status !== 200) throw new Error(`join ${joined.status}`);
-    const wantRole = writer === null ? "view" : isOwner ? "owner" : "edit";
-    if (joined.json.role !== wantRole) throw new Error(`role ${joined.json.role}`);
-
-    let resolveSynced!: () => void;
-    let rejectSynced!: (error: Error) => void;
-    const synced = new Promise<void>((resolve, reject) => {
-      resolveSynced = resolve;
-      rejectSynced = reject;
+function runCommand(command: string): Promise<{ exitCode: number; ms: number }> {
+  const started = now();
+  return new Promise((resolve) => {
+    execFile("sh", ["-c", command], { timeout: 120_000 }, (error) => {
+      if (error) fail(`restart command: ${error.message.split("\n")[0]}`);
+      const exitCode = error ? Number((error as { code?: number }).code ?? 1) : 0;
+      resolve({ exitCode, ms: now() - started });
     });
-    observe(client);
-    const socket = new HocuspocusProviderWebsocket({
-      url: `${wsBase}/collab?doc=${share.id}`,
-      WebSocketPolyfill: WebSocket,
-    });
-    const provider = new HocuspocusProvider({
-      websocketProvider: socket,
-      name: share.id,
-      document: doc,
-      token: joined.json.token,
-      onSynced: () => {
-        client.synced = true;
-        resolveSynced();
-      },
-      onAuthenticationFailed: ({ reason }) => rejectSynced(new Error(`auth ${reason}`)),
-      onDisconnect: () => {
-        client.synced = false;
-      },
-    });
-    provider.attach();
-    client.provider = provider;
-    client.socket = socket;
-    await Promise.race([
-      synced,
-      sleep(opts.connectTimeoutS * 1000).then(() => {
-        throw new Error("sync timeout");
-      }),
-    ]);
-    connectTimes.push(performance.now() - started);
-  } catch (error) {
-    fail(`connect: ${(error as Error).message}`);
-  }
+  });
 }
 
 // --- run -------------------------------------------------------------------------------------
 
-function tokensSent(share: Share) {
-  return share.sent.size;
-}
-
-function convergence(shares: Share[]) {
-  let converged = 0;
-  let complete = 0;
-  const bad: string[] = [];
-  for (const share of shares) {
-    const live = share.clients.filter((client) => client.synced);
-    const texts = new Set(live.map((client) => client.text.toString()));
-    const same = live.length > 0 && texts.size === 1;
-    let all = false;
-    if (same) {
-      const present = new Set(markersIn([...texts][0] as string).map(([w, s]) => `${w}:${s}`));
-      all = [...share.sent.keys()].every((key) => present.has(key));
-    }
-    if (same) converged++;
-    if (same && all) complete++;
-    else bad.push(share.id);
-  }
-  return { converged, complete, bad };
-}
-
 async function main() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const startedAt = new Date().toISOString();
+  const groupsText = plan.groups
+    .map((g) =>
+      g.kind === "lab"
+        ? `${g.name}: lab of ${g.students} students at ${g.typeRate}/s`
+        : `${g.name}: ${g.shares} x (${g.writers} writers at ${g.typeRate}/s + ${g.viewers} viewers moving ${g.cursorRate}/s)`,
+    )
+    .join("; ");
+  const threadCount = Math.max(1, Math.min(opts.threads ?? availableParallelism(), totalClients));
   console.log(
-    `load: ${opts.shares} shares x (${opts.writers} writers + ${opts.viewers} viewers) for ${opts.durationS}s at ${opts.rate}/s against ${opts.url}`,
+    `load: ${plan.scenario} [${opts.label}] ${groupsText}; ${plan.durationS}s against ${opts.url}, ${threadCount} client threads`,
   );
   const before = await snapshot();
 
-  const indexes = Array.from({ length: opts.shares }, (_, i) => i);
-  const created: Share[] = [];
-  await pool(indexes, opts.concurrency, async (index) => {
-    const share = await createShare(index, stamp);
-    if (share) created.push(share);
-  });
-  created.sort((a, b) => a.index - b.index);
-  console.log(`load: created ${created.length}/${opts.shares} shares`);
-
-  const jobs = created.flatMap((share) => [
-    ...Array.from({ length: opts.writers }, (_, k) => ({ share, writer: k, owner: k === 0 })),
-    ...Array.from({ length: opts.viewers }, () => ({ share, writer: null, owner: false })),
-  ]);
-  const attempted = jobs.length;
-  await pool(jobs, opts.concurrency, (job) => connect(job.share, job.writer, job.owner));
-  const connected = created.reduce((n, s) => n + s.clients.filter((c) => c.synced).length, 0);
-  console.log(`load: ${connected}/${attempted} clients synced; typing for ${opts.durationS}s`);
-
-  // Typing.
-  const samples: Snapshot[] = [];
-  const timers: NodeJS.Timeout[] = [];
-  const typingStart = performance.now();
-  let typing = true;
-  const interval = 1000 / opts.rate;
-  for (const share of created) {
-    for (const client of share.clients) {
-      if (client.writer === null || !client.synced) continue;
-      const writer = client.writer;
-      const startTimer = setTimeout(() => {
-        const timer = setInterval(() => {
-          if (!typing || !client.synced) return;
-          const seq = client.nextSeq++;
-          const token = marker(writer, seq);
-          share.sent.set(`${writer}:${seq}`, performance.now());
-          client.doc.transact(() => client.text.insert(client.text.length, token));
-        }, interval);
-        timers.push(timer);
-      }, Math.random() * interval);
-      timers.push(startTimer);
+  for (const group of plan.groups) {
+    if (group.kind === "share") {
+      const indexes = Array.from({ length: group.shares }, (_, i) => i);
+      await pool(indexes, opts.concurrency, (index) => createShare(group, index, stamp));
+    } else {
+      await createLab(group, stamp);
     }
   }
+  console.log(`load: ${shares.length} shares ready`);
+
+  const config: WorkerConfig = {
+    url: opts.url,
+    connectTimeoutS: opts.connectTimeoutS,
+    concurrency: Math.max(1, Math.ceil(opts.concurrency / threadCount)),
+  };
+  const threads = Array.from({ length: threadCount }, () => new ClientThread(config));
+  const parts = assign(threadCount);
+  const connected = await Promise.all(
+    threads.map((t, i) => t.ask({ type: "connect", jobs: parts[i] ?? [] }, "connected")),
+  );
+  const attempted = jobs.length;
+  const syncedAtStart = connected.reduce((n, c) => n + c.synced, 0);
+  const connectLatency = summarize(connected.flatMap((c) => c.connectMs));
+  console.log(`load: ${syncedAtStart}/${attempted} clients synced; typing for ${plan.durationS}s`);
+
+  // Typing and cursor moves.
+  const samples: Snapshot[] = [];
+  const resources = startResourceSampler(opts.dockerProject ?? null, opts.sampleS);
+  const atStart = await snapshot();
+  const cpuBefore = process.cpuUsage();
+  const typingStart = now();
+  await Promise.all(threads.map((t) => t.ask({ type: "start" }, "started")));
   const sampler = setInterval(() => {
     void snapshot().then((s) => samples.push(s));
   }, opts.sampleS * 1000);
-  await sleep(opts.durationS * 1000);
-  typing = false;
-  for (const timer of timers) {
-    clearTimeout(timer);
-    clearInterval(timer);
-  }
-  clearInterval(sampler);
-  const typingMs = performance.now() - typingStart;
 
-  // Convergence.
-  const settleDeadline = performance.now() + opts.settleS * 1000;
-  let result = convergence(created);
-  while (result.complete < created.length && performance.now() < settleDeadline) {
-    await sleep(250);
-    result = convergence(created);
+  let stormAt: number | null = null;
+  let command: { exitCode: number; ms: number } | null = null;
+  if (plan.storm) {
+    const { storm } = plan;
+    await sleep(storm.atS * 1000);
+    stormAt = now();
+    console.log(`load: storm (${storm.kind}) at ${storm.atS}s`);
+    const at = stormAt;
+    await Promise.all(
+      threads.map((t) => t.ask({ type: "storm", kind: storm.kind, at }, "stormed")),
+    );
+    if (storm.kind === "restart") command = await runCommand(storm.command ?? "true");
+    await sleep(Math.max(0, plan.durationS * 1000 - (now() - typingStart)));
+  } else {
+    await sleep(plan.durationS * 1000);
   }
-  for (const share of created) {
-    const live = share.clients.filter((client) => client.synced).length;
-    counters.expectedDeliveries += Math.max(0, live - 1) * tokensSent(share);
+  const stopped = await Promise.all(threads.map((t) => t.ask({ type: "stop" }, "stopped")));
+  clearInterval(sampler);
+  const typingMs = now() - typingStart;
+  const cpu = process.cpuUsage(cpuBefore);
+  const typed = Object.assign({}, ...stopped.map((s) => s.typed)) as Record<string, number>;
+
+  // Convergence of text and cursors.
+  const check = async () =>
+    (await Promise.all(threads.map((t) => t.ask({ type: "check", typed }, "checked")))).flatMap(
+      (c) => c.replicas,
+    );
+  const settleDeadline = now() + opts.settleS * 1000;
+  let replicas = await check();
+  let result = convergence(replicas);
+  while ((result.complete < shares.length || result.cursorGaps > 0) && now() < settleDeadline) {
+    await sleep(250);
+    replicas = await check();
+    result = convergence(replicas);
   }
   const after = await snapshot();
+  const resourceReport = await resources.stop();
+  const outputs: WorkerResults[] = (
+    await Promise.all(threads.map((t) => t.ask({ type: "results" }, "results")))
+  ).map((r) => r.results);
 
-  // Report.
-  const latency = summarize(latencies);
-  const connectLatency = summarize(connectTimes);
-  const syncedClients = created.reduce((n, s) => n + s.clients.filter((c) => c.synced).length, 0);
+  // Latencies: deliveries joined with the writers' typing times.
+  const typedAt = new Map<string, Float64Array>();
+  for (const output of outputs) {
+    for (const [key, times] of Object.entries(output.typed)) typedAt.set(key, times);
+    for (const [reason, count] of output.failures) fail(reason, count);
+    counters.rateLimited += output.rateLimited;
+  }
+  let stormReport: Record<string, unknown> | null = null;
+  let stormEnd = Number.POSITIVE_INFINITY;
+  if (plan.storm && stormAt !== null) {
+    const start = stormAt;
+    const affected = outputs.flatMap((o) => o.storm).filter((r) => r.wasSynced);
+    // A client that kept its connection (a Valkey or MongoDB blip) counts as resynced at once.
+    const times = affected
+      .filter((r) => r.resyncedAt !== null || r.lostAt === null)
+      .map((r) => (r.resyncedAt === null ? 0 : r.resyncedAt - start));
+    stormEnd = times.length === affected.length ? start + Math.max(0, ...times) : now();
+    stormReport = {
+      kind: plan.storm.kind,
+      atS: plan.storm.atS,
+      command: plan.storm.command ?? null,
+      commandExit: command?.exitCode ?? null,
+      commandMs: command ? Math.round(command.ms) : null,
+      clients: affected.length,
+      lost: affected.filter((r) => r.lostAt !== null).length,
+      resynced: times.length,
+      within5s: times.filter((t) => t <= 5000).length,
+      reconnectMs: summarize(times),
+    };
+  }
+
+  const shareGroup = shares.map((s) => s.group);
+  type Samples = { steady: number[]; storm: number[]; awareness: number[]; published: number };
+  const perGroup = new Map<string, Samples>();
+  const groupEntry = (name: string) => {
+    let entry = perGroup.get(name);
+    if (!entry) {
+      entry = { steady: [], storm: [], awareness: [], published: 0 };
+      perGroup.set(name, entry);
+    }
+    return entry;
+  };
+  for (const output of outputs) {
+    for (let i = 0; i < output.rxAt.length; i++) {
+      const shareIndex = output.rxShare[i] as number;
+      const times = typedAt.get(`${shareIndex}:${output.rxWriter[i]}`);
+      const sentAt = times?.[output.rxSeq[i] as number];
+      if (sentAt === undefined) continue;
+      const entry = groupEntry(shareGroup[shareIndex] ?? "?");
+      const ms = (output.rxAt[i] as number) - sentAt;
+      if (stormAt !== null && sentAt >= stormAt && sentAt <= stormEnd) entry.storm.push(ms);
+      else entry.steady.push(ms);
+    }
+    for (const [name, group] of Object.entries(output.groups)) {
+      const entry = groupEntry(name);
+      for (const ms of group.awarenessMs) entry.awareness.push(ms);
+      entry.published += group.awarenessPublished;
+    }
+  }
+
+  const groups: Record<string, unknown> = {};
+  let allEdits: number[] = [];
+  let allAwareness: number[] = [];
+  let stormEdits: number[] = [];
+  let typedTotal = 0;
+  let expectedTotal = 0;
+  for (const group of plan.groups) {
+    const entry = groupEntry(group.name);
+    const indexes = shares.flatMap((s, i) => (s.group === group.name ? [i] : []));
+    let typedInGroup = 0;
+    let expected = 0;
+    for (const index of indexes) {
+      const markers = Object.entries(typed)
+        .filter(([key]) => key.startsWith(`${index}:`))
+        .reduce((n, [, count]) => n + count, 0);
+      const live = replicas.filter((r) => r.shareIndex === index && r.synced).length;
+      typedInGroup += markers;
+      expected += Math.max(0, live - 1) * markers;
+    }
+    typedTotal += typedInGroup;
+    expectedTotal += expected;
+    // Hundreds of thousands of samples: too many for spread arguments.
+    allEdits = allEdits.concat(entry.steady);
+    allAwareness = allAwareness.concat(entry.awareness);
+    stormEdits = stormEdits.concat(entry.storm);
+    groups[group.name] = {
+      kind: group.kind,
+      shares: indexes.length,
+      clients: jobs.filter((j) => j.group === group.name).length,
+      markersTyped: typedInGroup,
+      deliveries: { expected, received: entry.steady.length + entry.storm.length },
+      editLatencyMs: summarize(entry.steady),
+      awarenessPublished: entry.published,
+      awarenessReceived: entry.awareness.length,
+      awarenessLatencyMs: summarize(entry.awareness),
+      convergence: convergence(replicas, indexes),
+    };
+  }
+
+  const syncedClients = replicas.filter((r) => r.synced).length;
   const errorCount = [...failures.values()].reduce((a, b) => a + b, 0);
-  const ok =
-    result.complete === created.length && created.length === opts.shares && errorCount === 0;
+  const editLatency = summarize(allEdits);
+  const awarenessLatency = summarize(allAwareness);
+  const seconds = typingMs / 1000;
+  const generator = {
+    threads: threadCount,
+    cpuCores: Math.round(((cpu.user + cpu.system) / 1e3 / typingMs) * 100) / 100,
+    eventLoopLagMs: {
+      p50: Math.max(...outputs.map((o) => o.lagMs.p50)),
+      p99: Math.max(...outputs.map((o) => o.lagMs.p99)),
+      max: Math.max(...outputs.map((o) => o.lagMs.max)),
+    },
+  };
+  const peak = (name: string) =>
+    Math.max(0, ...[...samples, after].map((s) => s.collab?.[name] ?? 0));
+  const series = [atStart, ...samples, after];
+  const perSecond = (value: number | null) =>
+    value === null ? null : Math.round((value / seconds) * 10) / 10;
+  const collabRate = (name: string) =>
+    perSecond(
+      increase(
+        series.map((x) => x.collab),
+        name,
+      ),
+    );
+  const server = {
+    collabCpuCores: collabRate("codesh_collab_process_cpu_seconds_total"),
+    apiCpuCores: perSecond(
+      increase(
+        series.map((x) => x.api),
+        "codesh_api_process_cpu_seconds_total",
+      ),
+    ),
+    updatesPerS: collabRate("codesh_collab_updates_total"),
+    wsMessagesPerS: collabRate("codesh_collab_ws_messages_sent_total"),
+    wsBytesPerS: collabRate("codesh_collab_ws_bytes_sent_total"),
+    flushesPerS: collabRate("codesh_collab_flush_seconds_count"),
+    awarenessDropped: increase(
+      series.map((x) => x.collab),
+      "codesh_collab_awareness_dropped_total",
+    ),
+    collabLagP99Ms: Math.round(peak("codesh_collab_nodejs_eventloop_lag_p99_seconds") * 1e4) / 10,
+    collabLagMaxMs: Math.round(peak("codesh_collab_nodejs_eventloop_lag_max_seconds") * 1e4) / 10,
+    collabRssPeakMiB:
+      Math.round((peak("codesh_collab_process_resident_memory_bytes") / 1024 ** 2) * 10) / 10,
+    collabHeapPeakMiB:
+      Math.round((peak("codesh_collab_nodejs_heap_size_used_bytes") / 1024 ** 2) * 10) / 10,
+  };
+
+  const targets = {
+    editP95Ms: { limit: 100, value: editLatency.p95, ok: editLatency.p95 < 100 },
+    editP99Ms: { limit: 250, value: editLatency.p99, ok: editLatency.p99 < 250 },
+    awarenessP95Ms: { limit: 100, value: awarenessLatency.p95, ok: awarenessLatency.p95 <= 100 },
+    lostEdits: { limit: 0, value: result.missing, ok: result.missing === 0 },
+    duplicatedEdits: { limit: 0, value: result.duplicated, ok: result.duplicated === 0 },
+    converged: {
+      limit: shares.length,
+      value: result.complete,
+      ok: result.complete === shares.length && shares.length > 0,
+    },
+    cursorsConverged: { limit: 0, value: result.cursorGaps, ok: result.cursorGaps === 0 },
+    errors: { limit: 0, value: errorCount, ok: errorCount === 0 },
+    ...(stormReport
+      ? {
+          resyncedWithin5s: {
+            limit: stormReport.clients as number,
+            value: stormReport.within5s as number,
+            ok: stormReport.within5s === stormReport.clients,
+          },
+        }
+      : {}),
+  };
+  const ok = Object.values(targets).every((t) => t.ok) && syncedClients === attempted;
 
   const report = {
+    scenario: plan.scenario,
+    label: opts.label,
     startedAt,
-    options: opts,
-    typingSeconds: typingMs / 1000,
-    shares: { requested: opts.shares, created: created.length },
+    url: opts.url,
+    plan,
+    typingSeconds: seconds,
     clients: { attempted, synced: syncedClients, successRate: syncedClients / attempted },
     connectMs: connectLatency,
-    markersTyped: created.reduce((n, s) => n + tokensSent(s), 0),
+    markersTyped: typedTotal,
     deliveries: {
-      expected: counters.expectedDeliveries,
-      received: counters.deliveries,
-      ratio:
-        counters.expectedDeliveries === 0 ? 1 : counters.deliveries / counters.expectedDeliveries,
+      expected: expectedTotal,
+      received: allEdits.length + stormEdits.length,
+      ratio: expectedTotal === 0 ? 1 : (allEdits.length + stormEdits.length) / expectedTotal,
     },
-    latencyMs: latency,
+    latencyMs: editLatency,
+    stormEditLatencyMs: stormReport ? summarize(stormEdits) : null,
+    awarenessLatencyMs: awarenessLatency,
+    groups,
     convergence: {
-      shares: created.length,
+      shares: shares.length,
       converged: result.converged,
       complete: result.complete,
+      missingMarkers: result.missing,
+      duplicatedMarkers: result.duplicated,
+      cursorGaps: result.cursorGaps,
       notConverged: result.bad,
-      ok: result.complete === created.length,
+      ok: result.complete === shares.length,
     },
+    storm: stormReport,
     errors: {
       total: errorCount,
       byReason: Object.fromEntries(failures),
       rateLimitedRetries: counters.rateLimited,
     },
-    metrics: { before, samples, after },
+    generator,
+    server,
+    resources: resourceReport,
+    metrics: { before, atStart, samples, after },
+    targets,
     ok,
   };
 
-  const outDir = opts.outDir ?? fileURLToPath(new URL("../../../.box-out/", import.meta.url));
+  const outDir = opts.outDir ?? fileURLToPath(new URL("../../../.box-out/perf/", import.meta.url));
   await mkdir(outDir, { recursive: true });
-  const file = `${outDir.replace(/\/$/, "")}/load-${stamp}.json`;
+  const file = `${outDir.replace(/\/$/, "")}/${plan.scenario}-${opts.label}-${stamp}.json`;
   await writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
 
-  const f = (n: number) => n.toFixed(1);
+  const f = (n: number | null | undefined) => (n === null || n === undefined ? "-" : n.toFixed(1));
   const rows: [string, string][] = [
-    ["shares created", `${created.length}/${opts.shares}`],
+    ["shares", String(shares.length)],
     [
       "clients synced",
       `${syncedClients}/${attempted} (${(report.clients.successRate * 100).toFixed(2)}%)`,
     ],
     ["connect+sync p50/p95 ms", `${f(connectLatency.p50)} / ${f(connectLatency.p95)}`],
-    ["markers typed", String(report.markersTyped)],
+    ["markers typed", String(typedTotal)],
     [
       "deliveries",
-      `${counters.deliveries}/${counters.expectedDeliveries} (${(report.deliveries.ratio * 100).toFixed(2)}%)`,
+      `${report.deliveries.received}/${expectedTotal} (${(report.deliveries.ratio * 100).toFixed(2)}%)`,
     ],
-    ["latency p50 ms", f(latency.p50)],
-    ["latency p95 ms", f(latency.p95)],
-    ["latency p99 ms", f(latency.p99)],
-    ["latency max ms", f(latency.max)],
+    [
+      "edit p50/p95/p99/max ms",
+      `${f(editLatency.p50)} / ${f(editLatency.p95)} / ${f(editLatency.p99)} / ${f(editLatency.max)}`,
+    ],
+    [
+      "cursor p50/p95/p99 ms",
+      `${f(awarenessLatency.p50)} / ${f(awarenessLatency.p95)} / ${f(awarenessLatency.p99)} (${awarenessLatency.count} seen)`,
+    ],
     [
       "convergence",
-      `${result.complete}/${created.length} shares ${report.convergence.ok ? "ok" : "FAILED"}`,
+      `${result.complete}/${shares.length} shares, missing ${result.missing}, duplicated ${result.duplicated}, cursor gaps ${result.cursorGaps}`,
     ],
     ["errors", String(errorCount)],
     ["rate-limited retries", String(counters.rateLimited)],
+    [
+      "generator cpu / lag p99",
+      `${generator.cpuCores} cores in ${threadCount} threads / ${generator.eventLoopLagMs.p99} ms`,
+    ],
+    [
+      "collab cpu / lag p99 / rss",
+      `${f(server.collabCpuCores)} cores / ${f(server.collabLagP99Ms)} ms / ${f(server.collabRssPeakMiB)} MiB`,
+    ],
+    [
+      "collab ws msgs/s / KiB/s",
+      `${f(server.wsMessagesPerS)} / ${f((server.wsBytesPerS ?? 0) / 1024)}`,
+    ],
   ];
-  const peak = Math.max(
-    ...[before, ...samples, after].map((s) => s.collab?.codesh_collab_connections ?? 0),
-  );
-  if (after.collab) rows.push(["collab connections (peak)", String(peak)]);
+  if (stormReport) {
+    const r = stormReport.reconnectMs as ReturnType<typeof summarize>;
+    rows.push([
+      "storm resynced (<=5s) / p95 / max ms",
+      `${stormReport.resynced}/${stormReport.clients} (${stormReport.within5s}) / ${f(r.p95)} / ${f(r.max)}`,
+    ]);
+    const s = report.stormEditLatencyMs;
+    if (s) {
+      rows.push(["edits typed in the storm p95/max ms", `${f(s.p95)} / ${f(s.max)} (${s.count})`]);
+    }
+  }
+  for (const [name, usage] of Object.entries(resourceReport.services)) {
+    rows.push([
+      `docker ${name} cpu avg/peak %, mem peak`,
+      `${usage.cpuAvg} / ${usage.cpuPeak}, ${usage.memPeakMiB} MiB`,
+    ]);
+  }
+  if (resourceReport.host) {
+    const host = resourceReport.host;
+    rows.push(["host cpu avg/peak %", `${host.cpuAvg} / ${host.cpuPeak} of ${host.cores} cores`]);
+  }
   const width = Math.max(...rows.map(([k]) => k.length));
   console.log("");
   for (const [key, value] of rows) console.log(`${key.padEnd(width)}  ${value}`);
   for (const [reason, count] of failures) console.log(`  error x${count}: ${reason}`);
+  for (const [name, target] of Object.entries(targets)) {
+    if (!target.ok)
+      console.log(`  target missed: ${name} = ${target.value} (limit ${target.limit})`);
+  }
   console.log(`\nresult: ${ok ? "OK" : "FAILED"}  (${file})`);
 
   // Cleanup.
-  for (const share of created) {
-    for (const client of share.clients) {
-      client.provider?.destroy();
-      client.socket?.destroy();
-    }
-  }
+  await Promise.all(threads.map((t) => t.ask({ type: "close" }, "closed")));
+  await Promise.all(threads.map((t) => t.worker.terminate()));
   if (!opts.keep) {
-    await pool(created, opts.concurrency, async (share) => {
+    await pool(shares, opts.concurrency, async (share) => {
       await share.owner.call("DELETE", `/api/shares/${share.id}`).catch(() => undefined);
     });
   }

@@ -373,6 +373,9 @@ export const ko: KoDictionary = {
   "settings.indent.tabs": "탭",
   "settings.wrap.label": "긴 줄 바꿈",
   "settings.lineNumbers.label": "줄 번호 표시",
+  "settings.smoothTyping.label": "부드러운 타이핑",
+  "settings.smoothTyping.hint":
+    "입력할 때 커서가 부드럽게 움직여요. 기기에서 동작 줄이기를 켜면 꺼져요.",
   "settings.keymap.label": "키맵",
   "settings.keymap.default": "기본",
   "settings.keymap.vim": "Vim",
