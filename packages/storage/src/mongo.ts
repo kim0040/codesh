@@ -377,11 +377,13 @@ class MongoFileStore implements FileStore {
     });
     const target = this.bucket.openUploadStream(name, { metadata });
     let size = 0;
+    let tooLarge = false;
     const limit = new Transform({
       transform(chunk: Uint8Array, _encoding, done) {
         size += chunk.byteLength;
-        if (maxBytes !== undefined && size > maxBytes) done(new FileTooLargeError(maxBytes));
-        else done(null, chunk);
+        if (maxBytes !== undefined && size > maxBytes) tooLarge = true;
+        // Past the limit the rest is drained, not written; the caller bounds the request size.
+        done(null, tooLarge ? undefined : chunk);
       },
     });
     try {
@@ -390,6 +392,11 @@ class MongoFileStore implements FileStore {
       // Drops the chunks written so far; the file document is only written when the stream ends.
       await target.abort().catch(() => undefined);
       throw error;
+    }
+    if (tooLarge) {
+      // The upload finished cleanly, so no chunk insert is still in flight when it is deleted.
+      await this.bucket.delete(target.id as ObjectId);
+      throw new FileTooLargeError(maxBytes as number);
     }
     return this.toRecord(target.id as ObjectId, name, size, metadata);
   }
