@@ -2,9 +2,9 @@
 
 # codesh
 
-> Self-hosted, real-time code sharing for one network.
+> Self-hosted, real-time code sharing for your own network.
 
-codesh lets everyone on the same network share code and edit it together in the browser. There are no accounts to create, no cloud services, no analytics and no CDN: every font, icon and script is served from your own server, so it runs fully offline or in an air-gapped environment. Edits merge without conflicts (Yjs CRDT), every language gets syntax highlighting, and a lab mode gives a teacher a live grid of every student's editor.
+codesh lets everyone on the same network share and edit code together directly in the browser. There are no accounts to create, no external cloud services, no tracking analytics, and no CDNs: every font, icon, and script is served from your own server, so it runs completely offline or in an air-gapped environment. Edits merge without conflicts using Yjs CRDTs, syntax highlighting supports over 200 languages, and a lab mode provides teachers with a real-time grid of every student's editor.
 
 ![codesh in the dark theme: four people editing one TypeScript file, each with a named cursor](docs/images/editor-dark.png)
 
@@ -17,63 +17,63 @@ codesh lets everyone on the same network share code and edit it together in the 
 | ![Lab mode: a live grid of eight students' editors](docs/images/lab.png) | ![Admin console, Updates tab](docs/images/admin.png) |
 | ![The same share in the light theme](docs/images/editor-light.png) | ![The editor on a 320 px wide screen](docs/images/mobile.png) |
 
-## What you can do
+## Features
 
 ### Share and join
-- **Instant shares**: one click creates a share with an 8-character address (`/<id>`) and a 6-digit join code (`/<code>`). No sign-up.
-- **Join your way**: type the 6-digit code, open the link, or scan the QR code (drawn in the browser, with a full-screen mode for a projector).
-- **Nearby shares**: shares that are open on your subnet, or in a room the administrator defined, are listed on the start page.
-- **Send and broadcast**: send a share to someone who is online with a note of up to 200 characters, or show an invitation to the whole room.
+- **Instant shares**: Create a share in one click with an 8-character address (`/<id>`) and a 6-digit join code (`/<code>`). No sign-up required.
+- **Join your way**: Enter the 6-digit code, open the direct link, or scan the in-browser QR code (includes a full-screen mode for projectors).
+- **Nearby shares**: Discover shares open on your subnet, or in a room defined by the administrator, right on the start page.
+- **Send and broadcast**: Send a share invitation with a note of up to 200 characters to an online participant, or display an invitation to the entire room.
 
-### Edit together
-- **Conflict-free editing**: concurrent typing is merged by Yjs and Hocuspocus; offline edits merge when the connection comes back.
-- **Cursors and following**: everyone's cursor and selection carry a colour and a name; click a participant to follow their view.
-- **Several files and folders**: up to 100 files per share, folders by path (`src/index.ts`), language detected from the file name.
-- **200+ languages**: syntax highlighting with four editor themes (Slate, Graphite, Paper, Sand) whose token colours are checked for WCAG 2.2 AA contrast. Default, Vim, Emacs and Sublime keymaps.
-- **Anchored comments**: attach a discussion to a line or range; it keeps its place while the text moves.
-- **Uploads and downloads**: drop files, folders or `.zip` archives into the window; download one file or the whole share as a `.zip`.
-- **Organise and start fast**: personal folders and up to 10 tags per share in My shares, 16 built-in templates and templates added by the administrator.
+### Collaborative editing
+- **Conflict-free sync**: Concurrent typing merges automatically with Yjs and Hocuspocus; offline edits merge cleanly when the connection returns.
+- **Presence and following**: Every cursor and selection shows a distinct colour and name; click any participant to follow their view in real time.
+- **Multi-file workspaces**: Organize up to 100 files per share in folder paths (`src/index.ts`), with automatic language detection from file names.
+- **200+ languages and accessible themes**: Syntax highlighting for 200+ languages across four editor themes (Slate, Graphite, Paper, Sand) with token colours verified for WCAG 2.2 AA contrast. Keymaps include Default, Vim, Emacs, and Sublime.
+- **Anchored comments**: Attach discussions to a line or range; comments hold their place as surrounding code moves.
+- **File import and export**: Drag and drop files, folders, or `.zip` archives directly into the window; download a single file or export the whole share as a `.zip`.
+- **Organization and quick start**: Group projects with custom folders and up to 10 tags in My shares; start quickly with 16 built-in templates or custom templates added by the administrator.
 
 ### History
-- **Automatic snapshots**: about every 30 seconds of activity, at most 100 per share, kept 7 days by default.
-- **Playback and diff**: play a share back at 1×, 2× or 4×, and compare any version with the previous one or the current text.
-- **Safe restore**: restoring a version is a normal edit, so the history stays intact.
-- **Deleted text stays private**: participants only ever receive the current state of the document. What was deleted stays on the server and only the owner can see it in the history.
+- **Automatic snapshots**: Captured roughly every 30 seconds of activity, saving up to 100 snapshots per share (retained for 7 days by default).
+- **Playback and diff**: Play back editing history at 1×, 2×, or 4× speed, and compare any revision against the previous version or the current text.
+- **Safe restore**: Restoring an earlier version applies as a new edit, preserving the entire revision history.
+- **Deleted text stays private**: Participants only ever receive the current document state. Deleted text stays on the server and is visible only to the owner in the history view.
 
 ### Classroom and lab
-- **Lab sessions**: `/lab/new` creates a lab with a 6-digit code; every student gets a personal copy.
-- **Live grid**: the teacher sees every student's online state and code at once, can zoom into one tile or step into that editor.
-- **Hand out examples**: send one of your shares to every student's workspace in one click.
-- **Edit lock**: freeze every student editor while you explain.
+- **Lab sessions**: Create a session at `/lab/new` with a 6-digit code; each student automatically receives an independent personal copy.
+- **Live grid**: Teachers can view every student's online status and editor at once, zoom in on a single tile, or jump into that workspace to help.
+- **Distribute code**: Push an example share to every student workspace in one click.
+- **Edit lock**: Freeze all student editors during explanations.
 
 ### Control and privacy
-- **View-only by default, if you want it**: share a view-only link and give the separate edit link only to people you trust. The edit link ends in `#key=…`; browsers never send the fragment to a server, and codesh removes it from the address bar at once. Old `?key=` links still work and are cleaned the same way.
-- **PIN lock**: a 4–32 character PIN, stored as a scrypt hash; 5 wrong tries lock the address out for 10 minutes.
-- **Waiting room**: you approve every newcomer before they get in.
-- **Kick and ban**: remove someone, or ban them by client and network address.
-- **Offline copy you control**: the editor keeps an offline copy in the browser so edits survive a lost connection. On a shared computer, turn it off in Settings (it deletes what is stored for that share) or use **Forget on this device**, which removes this share's copy and saved edit key from every open tab. Removal, a ban, a refused authorisation, a deleted share, signing out and switching accounts delete the copies automatically.
-- **Nothing leaves the network at runtime**: no external fonts, CDNs, analytics or widgets. The one optional request is the update check described below, and you can turn it off.
+- **View-only by default**: Share a view-only link freely and provide the separate edit link only to trusted collaborators. The edit link carries `#key=…` in the URL fragment, which browsers never send to the server; codesh removes it from the address bar immediately. Legacy `?key=` links continue to work and are cleaned the same way.
+- **PIN lock**: Protect shares with a 4–32 character PIN stored as a scrypt hash; 5 wrong attempts lock out the client address for 10 minutes.
+- **Waiting room**: Review and approve each newcomer before granting entry.
+- **Kick and ban**: Remove a participant immediately, or ban them by client and network address.
+- **Offline copy you control**: The editor caches an offline copy in browser storage so edits survive a dropped connection. On shared computers, turn this off in Settings (which purges stored data for that share) or click **Forget on this device** to clear local copies and saved edit keys across all open tabs. Removal, bans, refused authorization, deleted shares, signing out, or switching accounts clear stored copies automatically.
+- **Nothing leaves the network at runtime**: No external fonts, CDNs, analytics, or third-party widgets. The single optional outbound request is the release check described below, which can be disabled.
 
 ### Terminal CLI
-The CLI lives in `packages/cli` and is built from this repository (`pnpm --filter @codesh/cli build`).
-- `codesh push <file…>`: share files, folders or standard input; prints the URL, the join code and a QR code.
-- `codesh open <code|id>`: open a share in the browser.
-- `codesh pull <code|id>`: download a share as files or a `.zip`, with `--pin` for locked shares.
+The CLI lives in `packages/cli` and is built directly from this repository (`pnpm --filter @codesh/cli build`).
+- `codesh push <file…>`: Share files, folders, or standard input; outputs the URL, join code, and QR code.
+- `codesh open <code|id>`: Open a share in the browser.
+- `codesh pull <code|id>`: Download a share as individual files or a `.zip`, with `--pin` for locked shares.
 
 ### Admin
-- **Console** (`/admin`, admin token): settings such as share lifetime, history retention, upload size and guest access; rooms for nearby shares; custom templates.
-- **Optional sign-in**: OIDC or LDAP, while guests can stay allowed.
-- **Audit log, people, status and updates** tabs.
+- **Console** (`/admin`, admin token): Manage share lifetimes, history retention, upload size limits, guest access, rooms for nearby shares, and custom templates.
+- **Optional sign-in**: Connect OIDC or LDAP authentication, while keeping guest access enabled if desired.
+- **Administrative views**: Dedicated tabs for audit log, people, status, and updates.
 
 ## How to use
 
-1. **Start**: open the home page and press **New share**, or **Start from a template**.
-2. **Invite**: press **Share** (`⌃⌘S` on a Mac, `Ctrl+Alt+S` elsewhere) to copy the link, read out the 6-digit code or show the QR code.
-3. **Join**: type the code on the home page, or open `/<code>` or `/<id>`.
-4. **Edit together** with live cursors, highlighting and comments (`⌃⌘M` / `Ctrl+Alt+M`).
-5. **Manage files**: add files and folders from the file panel, or drop files and `.zip` archives into the window.
-6. **Review history** as the owner with **History** (`⌃⌘H` / `Ctrl+Alt+H`).
-7. **Export**: download a file, or the whole share as a `.zip`.
+1. **Start**: Open the home page and click **New share**, or select **Start from a template**.
+2. **Invite**: Click **Share** (`⌃⌘S` on a Mac, `Ctrl+Alt+S` elsewhere) to copy the link, read out the 6-digit code or show the QR code.
+3. **Join**: Type the code on the home page, or open `/<code>` or `/<id>`.
+4. **Edit together**: Collaborate in real time with live cursors, highlighting and comments (`⌃⌘M` / `Ctrl+Alt+M`).
+5. **Manage files**: Add files and folders from the file panel, or drop files and `.zip` archives into the window.
+6. **Review history**: As the owner, open **History** (`⌃⌘H` / `Ctrl+Alt+H`) to inspect revisions and diffs.
+7. **Export**: Download a file, or the whole share as a `.zip`.
 
 Press `?` outside a text field for the shortcuts of your operating system. The full list is in the [User guide](docs/USER-GUIDE.md) (written in Korean, with an English quick reference at the end).
 

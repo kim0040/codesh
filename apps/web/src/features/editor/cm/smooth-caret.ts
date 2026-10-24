@@ -12,7 +12,8 @@ import {
  * It is drawn in its own layer and moved with a CSS transform, so the compositor animates it and
  * layout never reruns; CodeMirror's own main cursor is hidden while this is on (editor.css). Typing,
  * deleting and keyboard moves glide; clicks, pastes, undo, remote edits, resizes and jumps of more
- * than a few lines snap. Under `prefers-reduced-motion` the CSS drops the transition. The layer is
+ * than a few lines snap. So does everything while an IME composes: the caret must not animate under
+ * a candidate window. Under `prefers-reduced-motion` the CSS drops the transition. The layer is
  * not a `.cm-cursorLayer`, so `.cm-cursorLayer .cm-cursor` still counts the selections; editor.css
  * shows and blinks it the way CodeMirror does its own.
  */
@@ -24,6 +25,7 @@ const GLIDE_MAX_LINES = 3;
 function glides(tr: Transaction): boolean {
   if (tr.isUserEvent("input.paste") || tr.isUserEvent("input.drop")) return false;
   if (tr.isUserEvent("select.pointer")) return false;
+  if (tr.isUserEvent("input.type.compose")) return false;
   return tr.isUserEvent("input") || tr.isUserEvent("delete") || tr.isUserEvent("select");
 }
 
@@ -81,6 +83,7 @@ export function smoothCaret(): Extension {
     update(update: ViewUpdate, dom: HTMLElement) {
       glide =
         update.transactions.length > 0 &&
+        !update.view.composing &&
         update.transactions.every(glides) &&
         !(update.geometryChanged && !update.docChanged);
       // Like CodeMirror's own cursor: a move restarts the blink, visible, by switching animations.

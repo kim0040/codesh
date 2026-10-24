@@ -40,6 +40,9 @@ for name in "${SECRETS[@]}"; do
 done
 cat "$TMP" >"$FILE"
 chmod 600 "$FILE"
+# The legacy upgrader calls this helper before starting Compose, but does not copy state/.
+# Create the status mount as the operator so Docker cannot create a root-owned directory.
+mkdir -p state && chmod 755 state
 if [ "${#filled[@]}" -gt 0 ]; then
   echo "generate-secrets: wrote ${filled[*]} to $FILE"
 else

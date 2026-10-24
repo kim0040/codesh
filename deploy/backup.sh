@@ -10,15 +10,10 @@ umask 077
 cd "$(dirname "$0")"
 . ./lib.sh
 need_docker
+install_lock
+trap install_unlock EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-DIR="${1:-./backups}"
-[ -d "$DIR" ] || mkdir -p -m 700 "$DIR"
-FILE="$DIR/codesh-$(date +%Y%m%d-%H%M%S).archive.gz"
-
-PART="$(mktemp "$DIR/.backup.XXXXXX")"
-trap 'rm -f "$PART"' EXIT
-mongo_transfer dump >"$PART"
-[ -s "$PART" ] || { rm -f "$PART"; die "mongodump produced no data"; }
-chmod 600 "$PART"
-mv "$PART" "$FILE"
-echo "backup: $FILE ($(wc -c <"$FILE" | tr -d ' ') bytes)"
+mongo_backup "${1:-./backups}"

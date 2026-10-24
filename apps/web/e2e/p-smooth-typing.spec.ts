@@ -87,7 +87,7 @@ test("smooth typing has no animation under reduced motion", async ({ browser }) 
   }
 });
 
-test("a Hangul composition shows one cursor, where the text ends", async ({
+test("a Hangul composition shows one cursor, where the text ends, without gliding", async ({
   browser,
   browserName,
 }) => {
@@ -101,6 +101,15 @@ test("a Hangul composition shows one cursor, where the text ends", async ({
     const page = owner.page;
     await page.locator(".cm-content").click();
     await page.keyboard.press("Control+End");
+    // Every transition the gliding cursor starts; composing must start none.
+    await page.evaluate(() => {
+      const w = window as unknown as { __glides: number };
+      w.__glides = 0;
+      document.addEventListener("transitionrun", (event) => {
+        if ((event.target as HTMLElement).classList.contains("cm-smooth-caret")) w.__glides++;
+      });
+    });
+    const glides = () => page.evaluate(() => (window as unknown as { __glides: number }).__glides);
     const cdp = await owner.context.newCDPSession(page);
     const compose = (text: string) =>
       cdp.send("Input.imeSetComposition", {
@@ -132,6 +141,11 @@ test("a Hangul composition shows one cursor, where the text ends", async ({
     await expect(page.locator(".cm-content")).toContainText("한글");
     expect(await visibleMainCursors(page)).toBe(1);
     expect(await offset()).toBeLessThan(1.5);
+    // Not one glide while composing, though the cursor moved with every step...
+    expect(await glides()).toBe(0);
+    // ...and ordinary typing afterwards glides again.
+    await page.keyboard.type("x");
+    await expect.poll(glides).toBeGreaterThan(0);
   } finally {
     await closeAll(owner);
   }
