@@ -3,6 +3,7 @@ import { Dialog as DialogPrimitive, VisuallyHidden } from "radix-ui";
 import type { ComponentProps, ReactNode } from "react";
 import { cx } from "../lib/cx.js";
 import { useFocusReturn } from "../lib/focus-return.js";
+import { isImeKey } from "../lib/ime.js";
 import { DialogDescription, DialogOverlay, DialogTitle } from "./dialog.js";
 import { IconButton } from "./icon-button.js";
 
@@ -45,6 +46,7 @@ export function SheetContent({
   children,
   onOpenAutoFocus,
   onCloseAutoFocus,
+  onEscapeKeyDown,
   ...props
 }: SheetContentProps) {
   const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
@@ -61,6 +63,11 @@ export function SheetContent({
         {...props}
         onOpenAutoFocus={focusReturn.onOpenAutoFocus}
         onCloseAutoFocus={focusReturn.onCloseAutoFocus}
+        onEscapeKeyDown={(event) => {
+          // Escape cancels an IME composition; it must not also close the panel.
+          if (isImeKey(event)) event.preventDefault();
+          else onEscapeKeyDown?.(event);
+        }}
       >
         {side === "bottom" ? (
           <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 rounded-full bg-line-strong" />

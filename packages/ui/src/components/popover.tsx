@@ -1,6 +1,7 @@
 import { Popover as PopoverPrimitive } from "radix-ui";
 import type { ComponentProps } from "react";
 import { cx } from "../lib/cx.js";
+import { isImeKey } from "../lib/ime.js";
 
 export const Popover = PopoverPrimitive.Root;
 export const PopoverTrigger = PopoverPrimitive.Trigger;
@@ -18,6 +19,7 @@ export function PopoverContent({
   collisionPadding = 8,
   container,
   className,
+  onEscapeKeyDown,
   ...props
 }: PopoverContentProps) {
   return (
@@ -31,6 +33,10 @@ export function PopoverContent({
           className,
         )}
         {...props}
+        onEscapeKeyDown={(event) => {
+          if (isImeKey(event)) event.preventDefault();
+          else onEscapeKeyDown?.(event);
+        }}
       />
     </PopoverPrimitive.Portal>
   );
