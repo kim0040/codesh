@@ -16,6 +16,8 @@ import type { Config } from "./config.js";
 import type { Hub } from "./hub.js";
 import type { Metrics } from "./metrics.js";
 import { type Cidr, parseCidrs } from "./net.js";
+import { DEFAULT_UPDATE_TIMERS, UpdateChecker, type UpdateTimers } from "./updates.js";
+import { VERSION } from "./version.js";
 
 export interface Deps {
   config: Config;
@@ -35,6 +37,11 @@ export interface Deps {
   nearbyCacheMs?: number;
   /** How long a content command waits for collab's reply (§6.11); shortened in tests. */
   commandTimeoutMs?: number;
+  /** The running product version; the root package.json's unless a test pretends otherwise. */
+  version?: string;
+  /** Timing and transport of the update check, replaced in tests. */
+  updateTimers?: UpdateTimers;
+  updateFetch?: typeof fetch;
 }
 
 const SETTINGS_CACHE_MS = 5000;
@@ -58,6 +65,8 @@ export class Ctx {
   /** In-flight or recent nearby lists per network group, see `listNearbyCached`. */
   readonly nearbyCache = new Map<string, { at: number; list: Promise<NearbyItem[]> }>();
   readonly trusted: Cidr[];
+  /** Background check for a newer release (docs/OPERATIONS.md "업데이트"). */
+  readonly updates: UpdateChecker;
   /** Open SSE streams in this process per client, so presence outlives a closed second tab. */
   readonly presenceCache = new Map<string, { at: number; list: Promise<PresenceUser[]> }>();
   readonly presencePublishes = new Map<string, Promise<void>>();
@@ -84,6 +93,13 @@ export class Ctx {
     this.commandTimeoutMs = deps.commandTimeoutMs ?? COLLAB_COMMAND_TIMEOUT_MS;
     this.nearbyCacheMs = deps.nearbyCacheMs ?? NEARBY_CACHE_MS;
     this.trusted = parseCidrs(deps.config.trustProxy);
+    this.updates = new UpdateChecker(
+      deps.config.update,
+      deps.valkey,
+      deps.version ?? VERSION,
+      deps.updateTimers ?? DEFAULT_UPDATE_TIMERS,
+      deps.updateFetch,
+    );
   }
 
   async settings(): Promise<Settings> {

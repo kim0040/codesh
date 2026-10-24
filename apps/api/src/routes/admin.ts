@@ -1,4 +1,5 @@
 import {
+  adminUpdateResponseSchema,
   apiKeys,
   auditQuerySchema,
   auditResponseSchema,
@@ -13,7 +14,7 @@ import type { FastifyRequest } from "fastify";
 import { ldapConfigSchema, oidcConfigSchema } from "../auth/adapters.js";
 import { safeEqual } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
-import { forbidden, invalid, notFound } from "../errors.js";
+import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { isValidCidr } from "../net.js";
 import { rateLimit, rateRelease } from "../rate.js";
 import type { App } from "./types.js";
@@ -23,6 +24,9 @@ import type { App } from "./types.js";
  * six bytes per byte (`\u0001`), plus room for the other settings. Fastify's default is 1 MiB.
  */
 const SETTINGS_BODY_LIMIT = MAX_TEMPLATES_TOTAL_BYTES * 6 + 1024 * 1024;
+
+/** "Check now" asks GitHub at most once per this many seconds for the whole deployment. */
+const MANUAL_CHECK_COOLDOWN_SECONDS = 60;
 
 /** Rejects settings the API could not act on, and normalises the login provider blocks. */
 function validateSettings(settings: Settings): Settings {
@@ -136,6 +140,47 @@ export function adminRoutes(app: App, ctx: Ctx): void {
           0,
         ),
       };
+    },
+  );
+
+  const updateResponse = async () => {
+    const { repo, channel } = ctx.config.update;
+    return {
+      ...(await ctx.updates.state()),
+      repo,
+      channel,
+      releasesUrl: `https://github.com/${repo}/releases`,
+      updater: await ctx.updates.updaterStatus(),
+    };
+  };
+
+  app.get(
+    "/api/admin/update",
+    { preHandler: adminOnly, schema: { response: { 200: adminUpdateResponseSchema } } },
+    updateResponse,
+  );
+
+  app.post(
+    "/api/admin/update/check",
+    { preHandler: adminOnly, schema: { response: { 200: adminUpdateResponseSchema } } },
+    async () => {
+      if (ctx.updates.enabled) {
+        const fresh = await ctx.valkey.set(
+          apiKeys.updateManual,
+          "1",
+          "EX",
+          MANUAL_CHECK_COOLDOWN_SECONDS,
+          "NX",
+        );
+        if (fresh !== "OK") {
+          const ttl = await ctx.valkey.ttl(apiKeys.updateManual);
+          throw new ApiError("rate_limited", "Checked a moment ago", {
+            "Retry-After": String(ttl > 0 ? ttl : MANUAL_CHECK_COOLDOWN_SECONDS),
+          });
+        }
+        await ctx.updates.check(true);
+      }
+      return updateResponse();
     },
   );
 }

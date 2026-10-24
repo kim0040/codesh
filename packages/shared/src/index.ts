@@ -13,4 +13,5 @@ export * from "./records.js";
 export * from "./settings.js";
 export * from "./templates.js";
 export * from "./tokens.js";
+export * from "./updates.js";
 export * from "./user.js";
