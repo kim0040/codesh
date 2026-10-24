@@ -9,8 +9,9 @@ import {
 } from "@codesh/shared";
 import { findShare, requireParticipant } from "../access.js";
 import type { Ctx } from "../ctx.js";
-import { forbidden, invalid, notFound } from "../errors.js";
+import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { listNearby, listPresence } from "../presence.js";
+import { rateLimit } from "../rate.js";
 import { userRef } from "../session.js";
 import { getUploadMeta } from "../uploads.js";
 import { type App, limited, OK } from "./types.js";
@@ -52,6 +53,21 @@ export function socialRoutes(app: App, ctx: Ctx): void {
       if (body.to === "net") {
         // Putting a share on every screen is a presenter's tool.
         if (!access.owner) throw forbidden("Only the owner can show a share to the whole room");
+        await rateLimit(ctx, session.ip, "broadcast", ctx.config.limits.BROADCASTS_PER_MIN);
+        await rateLimit(
+          ctx,
+          "group",
+          `broadcast:${session.net}`,
+          ctx.config.limits.BROADCASTS_PER_MIN,
+        );
+        if (
+          (await ctx.valkey.zcount(
+            keys.presenceNet(session.net),
+            Date.now() - PRESENCE_USER_TTL_SECONDS * 1000,
+            "+inf",
+          )) > ctx.config.limits.BROADCAST_FANOUT_MAX
+        )
+          throw new ApiError("rate_limited", "Broadcast audience exceeds the configured limit");
       } else {
         if (body.to === session.clientId) throw invalid("You cannot invite yourself");
         const seen = await ctx.valkey.zscore(keys.presenceNet(session.net), body.to);

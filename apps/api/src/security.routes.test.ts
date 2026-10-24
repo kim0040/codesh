@@ -121,6 +121,15 @@ describe.skipIf(!integration)("security resource boundaries", () => {
     expect((await owner.get(`/api/shares/${id}/pending`)).json()).toHaveLength(1);
   });
 
+  it("L5: caps network broadcasts across fresh owner sessions", async () => {
+    const config = loadConfig({ BROADCASTS_PER_MIN: "1" });
+    h = await createHarness({ config: { limits: config.limits } });
+    const owner = h.client();
+    const { id } = await createShare(owner);
+    expect((await owner.post("/api/invites", { to: "net", shareId: id })).statusCode).toBe(200);
+    expect((await owner.post("/api/invites", { to: "net", shareId: id })).statusCode).toBe(429);
+  });
+
   it("M4: caps open SSE streams per client and IPv6 network key, and releases slots", async () => {
     const config = loadConfig({ SSE_MAX_PER_CLIENT: "1", SSE_MAX_PER_IP: "2" });
     h = await createHarness({ config: { limits: config.limits } });
