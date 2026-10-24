@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import {
   closeAll,
   closeDialog,
@@ -99,6 +99,39 @@ async function viewOnly(owner: User, id: string): Promise<string> {
   const editUrl = await dialog.getByTestId("share-link").inputValue();
   await closeDialog(owner.page);
   return editUrl;
+}
+
+/**
+ * While `hold.on`, the server's confirmations of document updates (Hocuspocus SyncStatus
+ * messages) do not reach the pages of this context: edits typed meanwhile stay unconfirmed,
+ * everything else flows as usual. Set up before the pages open their socket.
+ */
+async function holdConfirmations(context: BrowserContext): Promise<{ on: boolean }> {
+  const hold = { on: false };
+  await context.routeWebSocket(/\/collab/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => server.send(message));
+    server.onMessage((message) => {
+      // A message starts with the document name (length-prefixed), then its type.
+      if (hold.on && typeof message !== "string" && message[1 + (message[0] ?? 0)] === 8) return;
+      ws.send(message);
+    });
+  });
+  return hold;
+}
+
+/** Marks the page's document, so a reload (a new document) can be told apart. */
+async function markDocument(page: Page): Promise<() => Promise<boolean>> {
+  await page.evaluate(() => {
+    (window as { marked?: boolean }).marked = true;
+  });
+  return async () => {
+    try {
+      return await page.evaluate(() => (window as { marked?: boolean }).marked !== true);
+    } catch {
+      return false;
+    }
+  };
 }
 
 async function openSettings(page: Page) {
@@ -562,7 +595,9 @@ for (const databases of ["missing", "rejected"] as const) {
       await page.getByTestId("sign-out").click();
       await page.waitForURL((url) => url.pathname === "/");
       await page.waitForLoadState("load");
-      await expect(page.getByText("Some data could not be deleted")).toHaveCount(0);
+      await expect(page.getByText("Some offline copies on this device might remain")).toHaveCount(
+        0,
+      );
       const check = await owner.context.newPage();
       await check.goto("/");
       await expect.poll(() => copies(check), { timeout: 15_000 }).toEqual([]);
@@ -603,13 +638,17 @@ test("two accounts with the same name and no email are different accounts", asyn
     await type(owner.page, "first ada");
     await expectCopy(owner.page, id, true);
     const other = await owner.context.newPage();
-    await other.goto("/");
+    await other.goto(`/${id}`);
+    await waitForEditor(other);
+    const reloaded = await markDocument(other);
 
     // Another login with the same display name: a new session, opened straight on the share.
     await owner.context.clearCookies();
     await logIndexedDb(owner.page);
     await owner.page.goto(`/${id}`);
-    await other.waitForURL((url) => url.pathname === "/");
+    // The other tab let go of the old session's document and started over as the new one.
+    await expect.poll(reloaded, { timeout: 15_000 }).toBe(true);
+    await waitForEditor(other);
     await expect
       .poll(async () => (await idbLog(owner.page)).filter((entry) => entry.endsWith(id)), {
         timeout: 15_000,
@@ -659,6 +698,171 @@ test("a PIN share shows no local content before the PIN is entered", async ({ br
     await waitForEditor(guest.page);
     await expect.poll(() => editorText(guest.page)).toContain("pin protected body");
     expect(shareIdOf(guest.page)).toBe(id);
+  } finally {
+    await closeAll(owner, guest);
+  }
+});
+
+test("another account makes a tab without an offline copy start over too", async ({ browser }) => {
+  const owner = await newUser(browser, "Owner");
+  try {
+    const id = await createShare(owner.page);
+    await owner.page.getByTestId("device-choice-skip").click();
+    await expect(owner.page.getByTestId("device-choice")).toBeHidden();
+    const other = await owner.context.newPage();
+    await other.goto(`/${id}`);
+    await waitForEditor(other);
+    const reloaded = await markDocument(other);
+
+    await owner.context.clearCookies();
+    await owner.page.goto(`/${id}`);
+    await waitForEditor(owner.page);
+    await expect.poll(reloaded, { timeout: 15_000 }).toBe(true);
+    await waitForEditor(other);
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+test("a join that never reaches the API keeps the document, its copy and its edit key", async ({
+  browser,
+}) => {
+  const owner = await newUser(browser, "Owner");
+  const guest = await newUser(browser, "Guest");
+  try {
+    const id = await createShare(owner.page);
+    await type(owner.page, "base");
+    const editUrl = await viewOnly(owner, id);
+    await logIndexedDb(guest.page);
+    await guest.page.goto(editUrl);
+    await waitForEditor(guest.page);
+    await keepCopies(guest.page);
+    await expectCopy(guest.page, id, true);
+
+    // Joins fail as if the API were unreachable; the collab socket stays up.
+    let refused = 0;
+    await guest.page.route("**/api/shares/*/join", (route) => {
+      refused++;
+      return route.abort("connectionrefused");
+    });
+    const access = (value: Record<string, unknown>) =>
+      owner.context.request.patch(`/api/shares/${id}`, { data: { access: value } });
+    // Access changes, so collab asks the guest to join again, which needs the API.
+    expect((await access({ default: "edit" })).ok()).toBe(true);
+    await expect.poll(() => refused).toBeGreaterThan(0);
+    await type(guest.page, " typed during the outage");
+    // View-only again before the API is back: only the edit key lets these edits in.
+    expect((await access({ default: "view" })).ok()).toBe(true);
+    await guest.page.waitForTimeout(1500);
+    await expect(guest.page.getByTestId("editor")).toBeVisible();
+    await expectCopy(guest.page, id, true);
+    expect((await idbLog(guest.page)).filter((entry) => entry.startsWith("delete"))).toEqual([]);
+
+    await guest.page.unroute("**/api/shares/*/join");
+    await expect
+      .poll(() => editorText(owner.page), { timeout: 30_000 })
+      .toContain("typed during the outage");
+    await expectCopy(guest.page, id, true);
+  } finally {
+    await closeAll(owner, guest);
+  }
+});
+
+test("Forget with edits the server has not confirmed asks first, also for another tab's", async ({
+  browser,
+}) => {
+  const owner = await newUser(browser, "Owner");
+  try {
+    const hold = await holdConfirmations(owner.context);
+    const id = await createShare(owner.page);
+    await keepCopies(owner.page);
+    const second = await owner.context.newPage();
+    await second.goto(`/${id}`);
+    await waitForEditor(second);
+
+    hold.on = true;
+    await type(second, "not confirmed");
+    await openSettings(owner.page);
+    await owner.page.getByTestId("forget-device").click();
+    const dialog = owner.page.getByRole("dialog", {
+      name: "Some changes have not reached the server",
+    });
+    await expect(dialog).toContainText("will be lost");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toBeHidden();
+    // Nothing was closed or deleted.
+    await expect(second.locator(".cm-content")).toContainText("not confirmed");
+    await expectCopy(owner.page, id, true);
+
+    await owner.page.getByTestId("forget-device").click();
+    await owner.page.getByTestId("unsent-leave").click();
+    await owner.page.waitForURL((url) => url.pathname === "/");
+    await second.waitForURL((url) => url.pathname === "/");
+    await expectCopy(owner.page, id, false);
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+test("a PIN asked for while edits were unconfirmed says they could not be kept", async ({
+  browser,
+}) => {
+  const owner = await newUser(browser, "Owner");
+  const guest = await newUser(browser, "Guest");
+  try {
+    const hold = await holdConfirmations(guest.context);
+    const id = await createShare(owner.page);
+    await type(owner.page, "shared");
+    await guest.page.goto(`/${id}`);
+    await waitForEditor(guest.page);
+    await expect.poll(() => editorText(guest.page)).toContain("shared");
+
+    hold.on = true;
+    await type(guest.page, " unconfirmed");
+    await setPin(owner, id, "4821");
+    await expect(guest.page.getByTestId("pin-input")).toBeVisible();
+    await expect(
+      guest.page.getByText("Changes that had not reached the server could not be kept."),
+    ).toBeVisible();
+  } finally {
+    await closeAll(owner, guest);
+  }
+});
+
+test("a PIN or an approval added while the guest was away deletes the copy before the gate", async ({
+  browser,
+}) => {
+  const owner = await newUser(browser, "Owner");
+  const guest = await newUser(browser, "Guest");
+  try {
+    const id = await createShare(owner.page);
+    await type(owner.page, "kept by the guest");
+    await guest.page.goto(`/${id}`);
+    await waitForEditor(guest.page);
+    await keepCopies(guest.page);
+    await expect.poll(() => editorText(guest.page)).toContain("kept by the guest");
+    await expectCopy(guest.page, id, true);
+    await guest.page.goto("/");
+
+    // The same browser, the same session: only the share changed.
+    await setPin(owner, id, "4821");
+    await guest.page.goto(`/${id}`);
+    await expect(guest.page.getByTestId("pin-input")).toBeVisible();
+    expect(await copies(guest.page)).toEqual([]);
+
+    await guest.page.getByTestId("pin-input").fill("4821");
+    await guest.page.getByRole("button", { name: "Unlock" }).click();
+    await waitForEditor(guest.page);
+    await expectCopy(guest.page, id, true);
+    await guest.page.goto("/");
+
+    const patched = await owner.context.request.patch(`/api/shares/${id}`, {
+      data: { access: { pin: null, requireApproval: true } },
+    });
+    expect(patched.ok()).toBe(true);
+    await guest.page.goto(`/${id}`);
+    await expect(guest.page.getByText("The owner needs to let you in")).toBeVisible();
+    expect(await copies(guest.page)).toEqual([]);
   } finally {
     await closeAll(owner, guest);
   }

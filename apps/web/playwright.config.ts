@@ -10,13 +10,14 @@ import {
 } from "./e2e/env";
 
 /**
- * Chromium runs every spec. Firefox and WebKit run the cross-OS spec only (shortcuts, labels, IME,
- * OS-dependent features), so a Mac or Linux visitor's engine is covered too. They need
- * `pnpm exec playwright install firefox webkit` once; `E2E_BROWSERS=chromium` skips them.
+ * Chromium runs every spec. Firefox and WebKit run the cross-OS spec (shortcuts, labels, IME,
+ * OS-dependent features), so a Mac or Linux visitor's engine is covered too, and the device spec.
+ * They need `pnpm exec playwright install firefox webkit` once; `E2E_BROWSERS=chromium` skips them.
  */
 const ENGINES = (process.env.E2E_BROWSERS ?? "chromium,firefox,webkit").split(",");
 const CROSS_OS = /o-cross-os\.spec\.ts$/;
-// Offline copies on Firefox too: its IndexedDB differs (databases(), deletion while open).
+// Offline copies on Firefox and WebKit too: their IndexedDB differs (databases(), deletion while
+// open, Safari's storage lifecycle).
 const DEVICE = /r-edit-key-and-device\.spec\.ts$/;
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
@@ -49,7 +50,13 @@ export default defineConfig({
         ]
       : []),
     ...(ENGINES.includes("webkit")
-      ? [{ name: "webkit", use: { browserName: "webkit" as const }, testMatch: CROSS_OS }]
+      ? [
+          {
+            name: "webkit",
+            use: { browserName: "webkit" as const },
+            testMatch: [CROSS_OS, DEVICE],
+          },
+        ]
       : []),
   ],
   webServer: [
