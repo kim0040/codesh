@@ -164,6 +164,7 @@ export const en = {
   "intro.footer.contact": "Questions? Contact {contact}",
   "intro.footer.noTracking":
     "No ads, trackers or outside scripts. Everything loads from this server.",
+  "intro.footer.licenses": "Open-source licenses",
 
   // ── Share basics (kept from the first dictionary) ──
   "share.new": "New share",
@@ -366,6 +367,7 @@ export const en = {
     "Notifications are blocked for this site. Allow them in the browser’s site settings and in the system’s notification settings (turn off Focus or Do Not Disturb).",
   "settings.notifications.unsupported":
     "This browser cannot show system notifications. On iPhone and iPad, add codesh to the Home Screen first.",
+  "settings.licenses.link": "Open-source licenses",
   "settings.install.action": "Install app",
   "settings.resetAction": "Reset to defaults",
 
@@ -1011,6 +1013,7 @@ export const en = {
   // ── Accessibility ──
   "a11y.skipToContent": "Skip to content",
   "a11y.mainNavigation": "Main",
+  "a11y.opensInNewTab": "(opens in a new tab)",
   "a11y.switchLanguage": "Display language",
   "a11y.switchTheme": "App theme",
   "a11y.editor": "Code editor",

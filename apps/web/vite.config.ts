@@ -4,6 +4,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { thirdPartyLicenses } from "./scripts/third-party-licenses";
 
 // The product version is the root package.json's; open tabs compare it with GET /api/version.
 const { version } = JSON.parse(
@@ -23,6 +24,7 @@ export default defineConfig({
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
     react(),
     tailwindcss(),
+    thirdPartyLicenses(),
     VitePWA({
       // A new build waits for the reload the update prompt offers; it never reloads a tab by itself.
       registerType: "prompt",
@@ -54,7 +56,14 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,ico,webmanifest}"],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//, /^\/collab/, /^\/healthz/, /^\/metrics/],
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/collab/,
+          /^\/healthz/,
+          /^\/metrics/,
+          /^\/THIRD-PARTY-LICENSES\.txt$/,
+          /^\/licenses\//,
+        ],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {

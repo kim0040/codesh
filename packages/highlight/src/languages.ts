@@ -2,7 +2,7 @@
  * Language registry: 200+ languages with a lazily loaded CodeMirror grammar.
  *
  * Identity colours are taken from GitHub Linguist (https://github.com/github-linguist/linguist),
- * which is MIT-licensed data: Copyright (c) 2011-2022 GitHub, Inc. Languages Linguist does not
+ * which is MIT-licensed data: Copyright (c) 2017 GitHub, Inc. Languages Linguist does not
  * colour get a deterministic hash colour so that every language still has a stable dot.
  * The colour is an identity cue only: the language name is always shown next to it.
  */
