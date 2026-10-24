@@ -386,7 +386,7 @@ export const en = {
   "editor.deviceCopy.title": "Keep offline copies on this device?",
   "editor.deviceCopy.body":
     "A copy keeps your edits while the connection is down. Choose not to on a device other people use. You can change this in Settings.",
-  "editor.deviceCopy.keepAction": "Keep copies on this device",
+  "editor.deviceCopy.keepAction": "Keep on this device",
   "editor.deviceCopy.skipAction": "Not on this device",
   "toast.forgotten": "Forgotten on this device",
   "toast.forgetFailed":
