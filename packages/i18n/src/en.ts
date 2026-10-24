@@ -377,21 +377,21 @@ export const en = {
   "settings.section.device": "Saved on this device",
   "settings.offlineCopy.label": "Keep an offline copy on this device",
   "settings.offlineCopy.hint":
-    "Keeps your edits in this browser while the connection is down. Turn it off on a device other people use. A share with a PIN or approval loads its copy only after you are let in again.",
+    "Keeps your edits in this browser while disconnected. Turn it off on a device other people use. A share with a PIN or approval loads its copy only after you are let in again.",
   "settings.forget.action": "Forget on this device",
   "settings.forget.hint":
-    "Closes this share in every tab of this browser and deletes its offline copy and saved edit key. No copy of it is kept again until you turn copies on for it. The share on the server stays.",
+    "Closes this share in every tab of this browser and deletes its offline copy and saved edit key. No copy of it is kept again until you turn copies on for it. The share remains on the server.",
   "settings.signOut.action": "Sign out, forget all",
   "settings.signOut.hint":
-    "Ends the sign-in and deletes every offline copy and edit key in this browser. Other open tabs are cleared too.",
+    "Signs out and deletes every offline copy and edit key in this browser. Other open tabs are cleared too.",
   "editor.deviceCopy.title": "Keep offline copies on this device?",
   "editor.deviceCopy.body":
-    "A copy keeps your edits while the connection is down. Choose not to on a device other people use. You can change this in Settings.",
+    "A copy keeps your edits while disconnected. Choose not to on a device other people use. You can change this in Settings.",
   "editor.deviceCopy.keepAction": "Keep on this device",
   "editor.deviceCopy.skipAction": "Not on this device",
   "toast.forgotten": "Forgotten on this device",
   "toast.forgetFailed":
-    "Some offline copies on this device might remain. To remove them, clear this site’s data in the browser settings.",
+    "Some offline copies might remain on this device. To remove them, clear this site’s data in the browser settings.",
   "settings.unsent.title": "Some changes have not reached the server",
   "settings.unsent.body": "These changes have not reached the server and will be lost.",
   "settings.unsent.leaveAction": "Leave anyway",
@@ -422,11 +422,11 @@ export const en = {
   "conn.reconnecting.title": "Reconnecting…",
   "conn.reconnecting.body": "Your changes are kept on this device and sync once you're back.",
   "conn.reconnecting.bodyMemory":
-    "Your changes are only in this tab and sync once you're back. Keep it open.",
+    "Your changes are only in this tab and sync once reconnected. Keep it open.",
   "conn.offline.title": "You're offline",
   "conn.offline.body": "Changes are kept on this device and merge when you reconnect.",
   "conn.offline.bodyMemory":
-    "Changes are only in this tab until you reconnect. Closing or reloading it loses them.",
+    "Changes are only in this tab until you reconnect. Closing or reloading the tab loses them.",
   "conn.synced": "Back online. Your changes were merged.",
   "conn.disconnected.title": "Disconnected",
   "conn.disconnected.body": "Can't reach the server. Retrying automatically.",
@@ -866,9 +866,9 @@ export const en = {
   "admin.update.checking": "Checking…",
   "admin.update.available": "Version {version} is available",
   "admin.update.upToDate": "You're on the latest version",
-  "admin.update.unreachable": "Can't check: no internet connection",
+  "admin.update.unreachable": "Cannot check: no internet connection",
   "admin.update.unreachableHint":
-    "codesh keeps working as usual. The server tries again in about 12 hours.",
+    "codesh keeps working as usual. The server will try again in about 12 hours.",
   "admin.update.disabled": "The update check is off",
   "admin.update.disabledHint": "Set UPDATE_CHECK=on in .env and restart to see new releases here.",
   "admin.update.pending": "Not checked yet",
@@ -876,9 +876,9 @@ export const en = {
   "admin.update.noRelease": "No release has been published yet",
   "admin.update.rateLimited": "Checked a moment ago. Try again in a minute.",
   "admin.update.privacy":
-    "The check sends one plain request to GitHub (api.github.com) that carries only the version number. UPDATE_CHECK=off turns it off.",
+    "The check sends a single request to GitHub (api.github.com) carrying only the version number. UPDATE_CHECK=off turns it off.",
   "admin.update.notes": "Release notes",
-  "admin.update.notesEmpty": "This release has no notes.",
+  "admin.update.notesEmpty": "This release has no release notes.",
   "admin.update.releaseLink": "Release page",
   "admin.update.newTab": "(opens in a new tab)",
   "admin.update.how.title": "How to update",
@@ -886,21 +886,21 @@ export const en = {
   "admin.update.how.offline":
     "Server without internet: download the bundle for your server (linux-amd64 or linux-arm64) and its .sha256 file from the release page, copy both next to codesh, then run",
   "admin.update.how.safety":
-    "update.sh backs up the database first and goes back to the current version if the new one does not start. upgrade.sh also backs up first.",
+    "update.sh backs up the database first and rolls back to the current version if the new one does not start. upgrade.sh also backs up first.",
   "admin.update.copyAction": "Copy",
   "admin.update.auto.title": "Automatic updates",
   "admin.update.auto.on": "On: every day around {time}, {policy}",
   "admin.update.auto.policy.patch": "bug-fix releases only",
   "admin.update.auto.policy.minor": "feature and bug-fix releases",
-  "admin.update.auto.off": "Off. To turn them on, run this on the server:",
+  "admin.update.auto.off": "Off. To turn on, run this on the server:",
   "admin.update.auto.unknown":
-    "The server's updater status isn't available here. Installations made with install.sh show it.",
+    "The updater status is not available here. Installations set up with install.sh show it.",
   "admin.update.lastRun": "Last run {time}",
   "admin.update.result.updated": "Updated {from} → {to}",
   "admin.update.result.upToDate": "Already up to date",
   "admin.update.result.checked": "Checked only",
-  "admin.update.result.refused": "{to} was not applied: it needs a manual update",
-  "admin.update.result.failed": "Failed without changes. See state/update.log on the server.",
+  "admin.update.result.refused": "{to} was not applied: please update manually",
+  "admin.update.result.failed": "Failed with no changes made. See state/update.log on the server.",
   "admin.update.result.rolledBack": "{to} did not start, so {from} is running again",
 
   // ── Identity ──

@@ -374,9 +374,9 @@ export const ko: KoDictionary = {
   "settings.indent.tabs": "탭",
   "settings.wrap.label": "긴 줄 바꿈",
   "settings.lineNumbers.label": "줄 번호 표시",
-  "settings.smoothTyping.label": "부드러운 타이핑",
+  "settings.smoothTyping.label": "부드러운 입력",
   "settings.smoothTyping.hint":
-    "입력할 때 커서가 부드럽게 움직여요. 기기에서 동작 줄이기를 켜면 꺼져요.",
+    "입력할 때 커서가 부드럽게 움직여요. 기기에서 동작 줄이기가 켜져 있으면 꺼져요.",
   "settings.keymap.label": "키맵",
   "settings.keymap.default": "기본",
   "settings.keymap.vim": "Vim",
@@ -397,16 +397,16 @@ export const ko: KoDictionary = {
   "settings.section.device": "이 기기에 저장된 데이터",
   "settings.offlineCopy.label": "이 기기에 오프라인 사본 저장",
   "settings.offlineCopy.hint":
-    "연결이 끊겨 있는 동안에도 편집 내용을 이 브라우저에 보관해요. 여러 사람이 쓰는 기기에서는 꺼 두세요. PIN이 있거나 승인이 필요한 공유는 다시 입장한 뒤에만 사본을 불러와요.",
+    "연결이 끊겨도 편집 내용을 이 브라우저에 보관해요. 여러 사람이 쓰는 기기에서는 꺼 두세요. PIN이 있거나 승인이 필요한 공유는 다시 입장한 뒤에만 사본을 불러와요.",
   "settings.forget.action": "이 기기에서 지우기",
   "settings.forget.hint":
-    "이 브라우저의 모든 탭에서 이 공유를 닫고, 오프라인 사본과 저장된 편집 키를 지워요. 다시 켜기 전까지는 이 공유의 사본을 저장하지 않아요. 서버에 있는 공유는 그대로예요.",
+    "이 브라우저의 모든 탭에서 이 공유를 닫고, 오프라인 사본과 저장된 편집 키를 지워요. 다시 켜기 전까지는 이 공유의 사본을 저장하지 않아요. 서버에 있는 공유는 그대로 남아요.",
   "settings.signOut.action": "로그아웃하고 모두 지우기",
   "settings.signOut.hint":
-    "로그인을 끊고 이 브라우저의 오프라인 사본과 편집 키를 모두 지워요. 열려 있는 다른 탭도 함께 정리돼요.",
+    "로그아웃하고 이 브라우저의 오프라인 사본과 편집 키를 모두 지워요. 열려 있는 다른 탭도 함께 정리돼요.",
   "editor.deviceCopy.title": "이 기기에 오프라인 사본을 저장할까요?",
   "editor.deviceCopy.body":
-    "사본이 있으면 연결이 끊겨도 편집 내용을 지킬 수 있어요. 여러 사람이 쓰는 기기라면 저장하지 마세요. 설정에서 언제든 바꿀 수 있어요.",
+    "사본이 있으면 연결이 끊겨도 편집 내용을 보관할 수 있어요. 여러 사람이 쓰는 기기라면 저장하지 마세요. 설정에서 언제든 바꿀 수 있어요.",
   "editor.deviceCopy.keepAction": "이 기기에 저장",
   "editor.deviceCopy.skipAction": "이 기기에는 저장 안 함",
   "toast.forgotten": "이 기기에서 지웠어요",
@@ -872,23 +872,23 @@ export const ko: KoDictionary = {
     "codesh는 평소처럼 동작해요. 서버가 약 12시간 뒤에 다시 확인해요.",
   "admin.update.disabled": "업데이트 확인이 꺼져 있어요",
   "admin.update.disabledHint":
-    ".env에서 UPDATE_CHECK=on으로 바꾸고 다시 시작하면 새 릴리스가 여기에 보여요.",
+    ".env에서 UPDATE_CHECK=on으로 설정하고 다시 시작하면 새 릴리스가 여기에 보여요.",
   "admin.update.pending": "아직 확인하지 않았어요",
   "admin.update.pendingHint": "서버가 시작되고 몇 분 뒤에 처음 확인해요.",
   "admin.update.noRelease": "아직 공개된 릴리스가 없어요",
   "admin.update.rateLimited": "방금 확인했어요. 1분 뒤에 다시 시도해 주세요.",
   "admin.update.privacy":
-    "확인할 때 GitHub(api.github.com)에 버전 번호만 담긴 요청 하나를 보내요. UPDATE_CHECK=off로 끌 수 있어요.",
+    "확인할 때 GitHub(api.github.com)로 버전 번호만 담긴 요청 하나를 보내요. UPDATE_CHECK=off로 끌 수 있어요.",
   "admin.update.notes": "릴리스 노트",
-  "admin.update.notesEmpty": "이 릴리스에는 노트가 없어요.",
+  "admin.update.notesEmpty": "이 릴리스에는 릴리스 노트가 없어요.",
   "admin.update.releaseLink": "릴리스 페이지",
   "admin.update.newTab": "(새 탭에서 열려요)",
   "admin.update.how.title": "업데이트 방법",
-  "admin.update.how.online": "인터넷이 되는 서버: codesh 폴더에서 실행해요",
+  "admin.update.how.online": "인터넷이 연결된 서버: codesh 폴더에서 실행해요",
   "admin.update.how.offline":
     "인터넷이 안 되는 서버: 릴리스 페이지에서 서버에 맞는 번들(linux-amd64 또는 linux-arm64)과 .sha256 파일을 받아 codesh 옆에 복사한 뒤 실행해요",
   "admin.update.how.safety":
-    "update.sh는 먼저 데이터베이스를 백업하고, 새 버전이 시작되지 않으면 지금 버전으로 되돌려요. upgrade.sh도 먼저 백업해요.",
+    "update.sh는 먼저 데이터베이스를 백업하고, 새 버전이 시작되지 않으면 현재 버전으로 되돌려요. upgrade.sh도 먼저 백업해요.",
   "admin.update.copyAction": "복사",
   "admin.update.auto.title": "자동 업데이트",
   "admin.update.auto.on": "켜짐: 매일 {time} 무렵, {policy}",
@@ -896,13 +896,13 @@ export const ko: KoDictionary = {
   "admin.update.auto.policy.minor": "기능과 버그 수정 릴리스",
   "admin.update.auto.off": "꺼져 있어요. 켜려면 서버에서 실행해요:",
   "admin.update.auto.unknown":
-    "서버의 업데이트 도구 상태를 여기서 볼 수 없어요. install.sh로 설치한 서버에서 보여요.",
+    "서버의 업데이트 도구 상태를 여기서 확인할 수 없어요. install.sh로 설치한 서버에서 지원돼요.",
   "admin.update.lastRun": "마지막 실행: {time}",
   "admin.update.result.updated": "업데이트 완료: {from} → {to}",
   "admin.update.result.upToDate": "이미 최신 버전이었어요",
   "admin.update.result.checked": "확인만 했어요",
   "admin.update.result.refused": "{to} 버전은 적용하지 않았어요. 직접 업데이트해 주세요.",
-  "admin.update.result.failed": "바뀐 것 없이 실패했어요. 서버의 state/update.log를 확인해 주세요.",
+  "admin.update.result.failed": "변경 없이 실패했어요. 서버의 state/update.log를 확인해 주세요.",
   "admin.update.result.rolledBack": "{to} 버전이 시작되지 않아 {from} 버전으로 되돌렸어요",
 
   // ── Identity ──

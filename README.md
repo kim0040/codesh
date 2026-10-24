@@ -51,7 +51,7 @@ codesh lets everyone on the same network share and edit code together directly i
 - **PIN lock**: Protect shares with a 4–32 character PIN stored as a scrypt hash; 5 wrong attempts lock out the client address for 10 minutes.
 - **Waiting room**: Review and approve each newcomer before granting entry.
 - **Kick and ban**: Remove a participant immediately, or ban them by client and network address.
-- **Offline copy you control**: The editor caches an offline copy in browser storage so edits survive a dropped connection. On shared computers, turn this off in Settings (which purges stored data for that share) or click **Forget on this device** to clear local copies and saved edit keys across all open tabs. Removal, bans, refused authorization, deleted shares, signing out, or switching accounts clear stored copies automatically.
+- **Offline copy you control**: The browser keeps no offline copy until you answer a one-time question in the editor ("Keep on this device" / "Not on this device"; changeable in Settings). **Forget on this device** closes the share in every tab of the browser, deletes its copy and saved edit key, and keeps no copy for that share until asked again; if there are edits the server has not confirmed, it asks first. Removal, a ban, a refused authorization, a deleted share, signing out, and switching accounts delete copies automatically. Lab previews never keep copies.
 - **Nothing leaves the network at runtime**: No external fonts, CDNs, analytics, or third-party widgets. The single optional outbound request is the release check described below, which can be disabled.
 
 ### Terminal CLI
