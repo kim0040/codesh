@@ -1,7 +1,7 @@
 import { apiKeys } from "@codesh/shared";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
-import { networkKey } from "./net.js";
+import { abuseKeys } from "./net.js";
 
 /** Reserve before writing. Failed requests consume their admission; clearing cookies cannot reset IP limits. */
 export async function chargeQuota(
@@ -26,15 +26,16 @@ export async function chargeQuota(
       : kind === "uploads"
         ? limits.QUOTA_UPLOADS_PER_IP
         : limits.QUOTA_BYTES_PER_IP;
+  const ipKeys = ip ? abuseKeys(ip) : [{ key: `client:${clientId}`, factor: 1 }];
   const result = await ctx.valkey.eval(
     RESERVE,
-    2,
+    1 + ipKeys.length,
     apiKeys.quota(kind, "c", clientId),
-    apiKeys.quota(kind, "i", ip ? networkKey(ip) : `client:${clientId}`),
+    ...ipKeys.map(({ key }) => apiKeys.quota(kind, "i", key)),
     amount,
-    clientLimit,
-    ipLimit,
     limits.QUOTA_WINDOW_SECONDS,
+    clientLimit,
+    ...ipKeys.map(({ factor }) => ipLimit * factor),
   );
   if (Number(result) === 0)
     throw new ApiError("rate_limited", "Storage quota reached; try again after the quota window", {
@@ -42,14 +43,15 @@ export async function chargeQuota(
     });
 }
 
+/** KEYS: counters; ARGV: [amount, window seconds, limit of each key]. */
 const RESERVE = `
 local amount = tonumber(ARGV[1])
-for i = 1, 2 do
-  if tonumber(redis.call('GET', KEYS[i]) or '0') + amount > tonumber(ARGV[i + 1]) then return 0 end
+for i = 1, #KEYS do
+  if tonumber(redis.call('GET', KEYS[i]) or '0') + amount > tonumber(ARGV[i + 2]) then return 0 end
 end
-for i = 1, 2 do
+for i = 1, #KEYS do
   redis.call('INCRBY', KEYS[i], amount)
-  redis.call('EXPIRE', KEYS[i], ARGV[4], 'NX')
+  redis.call('EXPIRE', KEYS[i], ARGV[2], 'NX')
 end
 return 1
 `;

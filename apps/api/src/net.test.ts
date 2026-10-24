@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  abuseKeys,
+  addressKey,
   cidrContains,
   formatIp,
+  IPV6_PREFIX_FACTOR,
   isValidCidr,
   parseCidr,
   parseCidrs,
@@ -136,5 +139,28 @@ describe("resolveNet", () => {
 
   it("uses one group for an unparsable address instead of throwing", () => {
     expect(resolveNet("not-an-ip", settings())).toEqual({ net: "unknown", room: null });
+  });
+});
+
+describe("abuseKeys / addressKey", () => {
+  it("keys IPv4 (also IPv4-mapped) on the address alone", () => {
+    expect(abuseKeys("192.0.2.7")).toEqual([{ key: "192.0.2.7", factor: 1 }]);
+    expect(abuseKeys("::ffff:192.0.2.7")).toEqual([{ key: "192.0.2.7", factor: 1 }]);
+  });
+
+  it("keys IPv6 on the address and on its /64 at a multiple of the limit", () => {
+    expect(abuseKeys("2001:DB8:0:1:abcd::7")).toEqual([
+      { key: "2001:db8:0:1:abcd::7", factor: 1 },
+      { key: "2001:db8:0:1::/64", factor: IPV6_PREFIX_FACTOR },
+    ]);
+  });
+
+  it("puts unparsable input in one bucket", () => {
+    expect(abuseKeys("share")).toEqual([{ key: "unknown", factor: 1 }]);
+    expect(addressKey("share")).toBe("unknown");
+  });
+
+  it("bans one IPv6 address, not its /64", () => {
+    expect(addressKey("2001:db8::1")).not.toBe(addressKey("2001:db8::2"));
   });
 });

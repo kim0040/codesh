@@ -8,8 +8,7 @@ import {
   type ShareRecord,
 } from "@codesh/shared";
 import type { Ctx } from "./ctx.js";
-import { ApiError } from "./errors.js";
-import { networkKey } from "./net.js";
+import { addressKey } from "./net.js";
 import { displayName, type Session } from "./session.js";
 
 /** Online users and nearby shares per network group (§7). */
@@ -21,9 +20,11 @@ const SHARE_NET_TTL_SECONDS = 7 * 24 * 3600;
 /**
  * Marks the session online: ZSET entries for its net and for everyone, plus the user card.
  * Name and color come from the stored profile, not from `session`: an SSE stream keeps the
- * session it opened with, and must not turn a rename back into the old name.
+ * session it opened with, and must not turn a rename back into the old name. A net that holds
+ * `PRESENCE_MAX_PER_NET` users leaves a newcomer out of the list (false) but keeps its stream:
+ * failing the stream would let anyone who fills the list cut everyone else off from events.
  */
-export async function touchPresence(ctx: Ctx, session: Session): Promise<void> {
+export async function touchPresence(ctx: Ctx, session: Session): Promise<boolean> {
   const now = Date.now();
   const card = keys.presenceUser(session.clientId);
   const profile = await ctx.valkey.hgetall(apiKeys.profile(session.clientId));
@@ -42,12 +43,9 @@ export async function touchPresence(ctx: Ctx, session: Session): Promise<void> {
     profile.color || session.color,
     session.net,
     session.room ?? "",
-    networkKey(session.ip),
+    addressKey(session.ip),
   );
-  if (Number(accepted) !== 1)
-    throw new ApiError("rate_limited", "This network group has reached its presence capacity", {
-      "Retry-After": "60",
-    });
+  return Number(accepted) === 1;
 }
 
 export async function removePresence(ctx: Ctx, session: Session): Promise<void> {
@@ -208,7 +206,7 @@ redis.call('ZADD', KEYS[1], now, ARGV[3])
 redis.call('PEXPIRE', KEYS[1], ttl * 2)
 redis.call('ZADD', KEYS[2], now, ARGV[3])
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now - ttl)
-redis.call('HSET', KEYS[3], 'name', ARGV[5], 'color', ARGV[6], 'net', ARGV[7], 'room', ARGV[8], 'networkKey', ARGV[9])
+redis.call('HSET', KEYS[3], 'name', ARGV[5], 'color', ARGV[6], 'net', ARGV[7], 'room', ARGV[8], 'address', ARGV[9])
 redis.call('PEXPIRE', KEYS[3], ttl)
 return 1
 `;

@@ -221,9 +221,24 @@ export function resolveNet(ip: string, settings: NetSettings): NetGroup {
   return { net: `${formatIp(mask(bytes, prefix))}/${prefix}`, room: null };
 }
 
-/** Abuse limits use one IPv4 address or one IPv6 /64, independent of display rooms. */
-export function networkKey(ip: string): string {
+/** An IPv6 /64 gets this many times the limit of one address (see `abuseKeys`). */
+export const IPV6_PREFIX_FACTOR = 16;
+
+/** The normalised client address, for per-address records such as network bans. */
+export function addressKey(ip: string): string {
   const bytes = parseIp(ip);
-  if (!bytes) return "unknown";
-  return bytes.length === 16 ? `${formatIp(mask(bytes, 64))}/64` : formatIp(bytes);
+  return bytes ? formatIp(bytes) : "unknown";
+}
+
+/**
+ * Keys of the abuse limits of one client, each with the multiple of the limit it gets: the address,
+ * and for IPv6 also its /64. A host can take any address in its /64, but a /64 is usually a whole
+ * LAN segment (a class), so it gets a much higher limit than one address instead of the same one.
+ */
+export function abuseKeys(ip: string): { key: string; factor: number }[] {
+  const bytes = parseIp(ip);
+  if (!bytes) return [{ key: "unknown", factor: 1 }];
+  const address = { key: formatIp(bytes), factor: 1 };
+  if (bytes.length === 4) return [address];
+  return [address, { key: `${formatIp(mask(bytes, 64))}/64`, factor: IPV6_PREFIX_FACTOR }];
 }

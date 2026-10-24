@@ -36,7 +36,7 @@ import type { Ctx } from "../ctx.js";
 import { loadDoc, readContent, sendCommand, sharePreview } from "../docs.js";
 import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { attachment, basename, sanitizePath } from "../files.js";
-import { networkKey } from "../net.js";
+import { addressKey } from "../net.js";
 import { announceShare, removeNearby } from "../presence.js";
 import { rateLimit } from "../rate.js";
 import { displayName } from "../session.js";
@@ -208,7 +208,7 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       await ctx.valkey.hset(
         apiKeys.admittedNetworks(share.id),
         session.clientId,
-        networkKey(session.ip),
+        addressKey(session.ip),
       );
       await ctx.valkey.expire(apiKeys.admittedNetworks(share.id), 30 * 24 * 3600);
       await noteActivity(ctx, share);
@@ -314,6 +314,8 @@ export function shareRoutes(app: App, ctx: Ctx): void {
         // A client that queued under the old PIN must enter the new one as well.
         await ctx.valkey.del(apiKeys.grants(share.id), keys.pending(share.id));
       }
+      // A new PIN starts a new guessing window, so the owner can undo a lockout of the share.
+      if (body.access?.pin) await ctx.valkey.del(apiKeys.pinFailsShare(share.id));
       if (patch.locked !== undefined) await ctx.publishPerm(share.id, "lock");
       if (askRejoin) await ctx.publishPerm(share.id, "role");
       if (updated.access.nearby && !share.access.nearby) {

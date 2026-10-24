@@ -1,13 +1,14 @@
 import { keys } from "@codesh/shared";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
-import { networkKey } from "./net.js";
+import { abuseKeys } from "./net.js";
 
 export const WINDOW_SECONDS = 60;
 
 /**
- * Fixed-window counter in Valkey (`rl:<ip>:<bucket>`). Throws `rate_limited` with a `Retry-After`
- * header once `limit` hits were made inside the current window.
+ * Fixed-window counters in Valkey (`rl:<ip>:<bucket>`, for IPv6 also `rl:<prefix>/64:<bucket>` at a
+ * multiple of the limit, see `abuseKeys`). Throws `rate_limited` with a `Retry-After` header once
+ * `limit` hits were made inside the current window.
  */
 export async function rateLimit(
   ctx: Ctx,
@@ -16,7 +17,19 @@ export async function rateLimit(
   limit: number,
   windowSeconds = WINDOW_SECONDS,
 ): Promise<void> {
-  const key = keys.rateLimit(networkKey(ip), bucket);
+  for (const { key, factor } of abuseKeys(ip))
+    await countHit(ctx, keys.rateLimit(key, bucket), bucket, limit, factor, windowSeconds);
+}
+
+async function countHit(
+  ctx: Ctx,
+  key: string,
+  bucket: string,
+  addressLimit: number,
+  factor: number,
+  windowSeconds: number,
+): Promise<void> {
+  const limit = addressLimit * factor;
   let result: [Error | null, unknown][] | null;
   try {
     result = await ctx.valkey.multi().incr(key).ttl(key).exec();
@@ -34,7 +47,7 @@ export async function rateLimit(
     for (const [key, entry] of ctx.fallbackRates)
       if (entry.until <= now) ctx.fallbackRates.delete(key);
     const entry = ctx.fallbackRates.get(key) ?? { count: 0, until: now + windowSeconds * 1000 };
-    if (ctx.fallbackRates.size >= 10000 || ++entry.count > Math.min(limit, 30))
+    if (ctx.fallbackRates.size >= 10000 || ++entry.count > Math.min(limit, 30 * factor))
       throw new ApiError("rate_limited", "Too many requests", { "Retry-After": "60" });
     ctx.fallbackRates.set(key, entry);
     return;
@@ -57,7 +70,8 @@ export async function rateLimit(
  * Reserving first and releasing afterwards keeps the limit atomic against parallel guesses.
  */
 export async function rateRelease(ctx: Ctx, ip: string, bucket: string): Promise<void> {
-  await ctx.valkey.eval(RELEASE, 1, keys.rateLimit(networkKey(ip), bucket));
+  for (const { key } of abuseKeys(ip))
+    await ctx.valkey.eval(RELEASE, 1, keys.rateLimit(key, bucket));
 }
 
 const RELEASE = `

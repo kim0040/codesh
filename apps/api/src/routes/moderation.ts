@@ -38,8 +38,14 @@ export function moderationRoutes(app: App, ctx: Ctx): void {
       await ctx.valkey.hdel(apiKeys.grants(share.id), clientId);
       await ctx.valkey.hdel(keys.pending(share.id), clientId);
       if (ban) {
-        const network = await ctx.valkey.hget(apiKeys.admittedNetworks(share.id), clientId);
-        if (network) await ctx.valkey.sadd(apiKeys.bannedNetworks(share.id), network);
+        // The address is banned too, so a fresh cookie does not get back in, unless someone else
+        // joined from it: behind NAT or a proxy that hides addresses it would ban a whole class.
+        const admitted = await ctx.valkey.hgetall(apiKeys.admittedNetworks(share.id));
+        const address = admitted[clientId];
+        const shared = Object.entries(admitted).some(
+          ([other, value]) => other !== clientId && other !== share.ownerId && value === address,
+        );
+        if (address && !shared) await ctx.valkey.sadd(apiKeys.bannedNetworks(share.id), address);
         await ctx.stores.shares.addBan(share.id, clientId);
         // A banned client could neither unsave the share nor would its entry ever let the share expire.
         const settings = await ctx.settings();
