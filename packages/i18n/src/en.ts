@@ -8,7 +8,7 @@
 export const en = {
   // ── App ──
   "app.name": "codesh",
-  "app.tagline": "Share code in real time on your intranet",
+  "app.tagline": "Share code in real time on your network",
 
   // ── Common ──
   "common.add": "Add",
@@ -82,7 +82,7 @@ export const en = {
   "intro.how.step3.title": "Edit together",
   "intro.how.step3.time": "From then on",
   "intro.how.step3.body": "Everyone types at once. Changes merge without conflicts.",
-  "intro.fast.title": "Faster on an intranet",
+  "intro.fast.title": "Faster on the same network",
   "intro.fast.sub": "No more copying links into a messenger.",
   "intro.fast.code.title": "Enter a code",
   "intro.fast.code.body": "Type 6 digits on the home page and you're in.",
@@ -125,7 +125,7 @@ export const en = {
   "intro.diff.free": "Everything is free",
   "intro.diff.freeBody": "View-only links and PIN locks are included, with no limits.",
   "intro.diff.offline": "Works without internet",
-  "intro.diff.offlineBody": "You only need the intranet. Even fonts and icons are on the server.",
+  "intro.diff.offlineBody": "You only need to be on the same network as the server. Even fonts and icons are on the server.",
   "intro.diff.erased": "Deleted text isn't sent to anyone else",
   "intro.diff.erasedBody":
     "People in a share only receive the current document. History stays on the server, and only the owner can open it.",
@@ -142,12 +142,12 @@ export const en = {
   "intro.faq.languages.q": "Which languages are supported?",
   "intro.faq.languages.a":
     "More than 100 programming languages, including JavaScript, Python, Java, C++ and Go. The language is detected automatically.",
-  "intro.faq.outside.q": "Can I use it outside the intranet?",
+  "intro.faq.outside.q": "Can I use it from another network?",
   "intro.faq.outside.a":
-    "No. It opens only on the intranet where this server runs. It does not need an internet connection.",
+    "No. It opens only on the network where this server runs. It does not need an internet connection.",
   "intro.faq.phone.q": "How do I join from a phone?",
   "intro.faq.phone.a":
-    "Point the camera at the QR code or enter the 6-digit code. The phone must be on the same intranet Wi-Fi.",
+    "Point the camera at the QR code or enter the 6-digit code. The phone must be on the same Wi-Fi.",
   "intro.footer.version": "Version {version}",
   "intro.footer.contact": "Questions? Contact {contact}",
   "intro.footer.noTracking":
@@ -714,7 +714,7 @@ export const en = {
     "Shows a warning when pasted text looks like a key or password.",
   "admin.setting.oidc.label": "OIDC sign-in",
   "admin.setting.ldap.label": "LDAP / AD sign-in",
-  "admin.setting.login.hint": "Link sign-ins to company accounts.",
+  "admin.setting.login.hint": "Link sign-ins to existing accounts.",
   "admin.setting.login.notConfigured": "Not configured",
   "admin.setting.login.configured": "Configured",
   "admin.setting.contact.label": "Contact in the footer",
@@ -823,7 +823,7 @@ export const en = {
   "template.searchPlaceholder": "Language or name",
   "template.listLabel": "Templates",
   "template.group.builtin": "Built-in",
-  "template.group.org": "Your organization",
+  "template.group.org": "Our templates",
   "template.files.one": "{count} file",
   "template.files.other": "{count} files",
   "template.filesLabel": "Files",

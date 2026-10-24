@@ -36,7 +36,7 @@ export type KoDictionary = Record<Exclude<DictionaryKey, OneKey>, string> &
 export const ko: KoDictionary = {
   // ── App ──
   "app.name": "codesh",
-  "app.tagline": "사내망에서 실시간으로 코드를 공유하세요",
+  "app.tagline": "같은 네트워크에서 실시간으로 코드를 공유하세요",
 
   // ── Common ──
   "common.add": "추가",
@@ -110,7 +110,7 @@ export const ko: KoDictionary = {
   "intro.how.step3.title": "같이 고치기",
   "intro.how.step3.time": "그다음부터 계속",
   "intro.how.step3.body": "모두 동시에 입력해도 변경 내용이 충돌 없이 합쳐져요.",
-  "intro.fast.title": "사내망이라 더 빠르게",
+  "intro.fast.title": "같은 네트워크라서 더 빠르게",
   "intro.fast.sub": "링크를 복사해 메신저에 붙여넣을 필요가 없어요.",
   "intro.fast.code.title": "코드만 입력",
   "intro.fast.code.body": "첫 화면에 숫자 6개를 입력하면 바로 입장해요.",
@@ -150,7 +150,7 @@ export const ko: KoDictionary = {
   "intro.diff.free": "모든 기능이 무료예요",
   "intro.diff.freeBody": "보기 전용 링크와 PIN 잠금도 제한 없이 쓸 수 있어요.",
   "intro.diff.offline": "인터넷 없이 동작해요",
-  "intro.diff.offlineBody": "사내망만 연결되어 있으면 돼요. 글꼴과 아이콘도 서버에 들어 있어요.",
+  "intro.diff.offlineBody": "서버와 같은 네트워크에만 있으면 돼요. 글꼴과 아이콘도 서버에 들어 있어요.",
   "intro.diff.erased": "지운 내용은 다른 참여자에게 전달되지 않아요",
   "intro.diff.erasedBody":
     "참여자는 지금의 문서 상태만 받아요. 이력은 서버에만 있고 소유자만 볼 수 있어요.",
@@ -167,12 +167,12 @@ export const ko: KoDictionary = {
   "intro.faq.languages.q": "어떤 언어를 지원하나요?",
   "intro.faq.languages.a":
     "JavaScript, Python, Java, C++, Go 등 100개가 넘는 프로그래밍 언어를 지원해요. 언어는 자동으로 감지해요.",
-  "intro.faq.outside.q": "사내망 밖에서도 쓸 수 있나요?",
+  "intro.faq.outside.q": "다른 네트워크에서도 쓸 수 있나요?",
   "intro.faq.outside.a":
-    "아니요. 이 서버가 있는 사내망 안에서만 열려요. 대신 인터넷 연결은 필요 없어요.",
+    "아니요. 이 서버가 있는 네트워크 안에서만 열려요. 대신 인터넷 연결은 필요 없어요.",
   "intro.faq.phone.q": "휴대폰으로는 어떻게 입장하나요?",
   "intro.faq.phone.a":
-    "QR 코드를 카메라로 비추거나 6자리 코드를 입력하세요. 휴대폰이 같은 사내 Wi-Fi에 연결되어 있어야 해요.",
+    "QR 코드를 카메라로 비추거나 6자리 코드를 입력하세요. 휴대폰이 같은 Wi-Fi에 연결되어 있어야 해요.",
   "intro.footer.version": "버전 {version}",
   "intro.footer.contact": "문의: {contact}",
   "intro.footer.noTracking": "광고, 추적, 외부 스크립트가 없어요. 모두 이 서버에서 불러와요.",
@@ -716,7 +716,7 @@ export const ko: KoDictionary = {
   "admin.setting.secretWarning.hint": "붙여넣은 텍스트가 키나 비밀번호처럼 보이면 경고를 보여줘요.",
   "admin.setting.oidc.label": "OIDC 로그인",
   "admin.setting.ldap.label": "LDAP / AD 로그인",
-  "admin.setting.login.hint": "로그인을 사내 계정과 연결해요.",
+  "admin.setting.login.hint": "로그인을 기존 계정과 연결해요.",
   "admin.setting.login.notConfigured": "설정 안 됨",
   "admin.setting.login.configured": "설정됨",
   "admin.setting.contact.label": "바닥글 연락처",
@@ -725,7 +725,7 @@ export const ko: KoDictionary = {
   "admin.setting.group.templates": "코드 템플릿",
   "admin.setting.templates.hint":
     "공유를 만들 때 고를 수 있는 시작 코드예요. 기본 제공 템플릿은 항상 보여요.",
-  "admin.setting.templates.empty": "아직 우리 조직 템플릿이 없어요.",
+  "admin.setting.templates.empty": "아직 추가한 템플릿이 없어요.",
   "admin.setting.templates.addAction": "템플릿 추가",
   "admin.setting.templates.limit": "템플릿은 {max}개까지 추가할 수 있어요.",
   "admin.setting.templates.total": "모든 템플릿을 합쳐 {max} 중 {used}를 쓰고 있어요.",
@@ -824,7 +824,7 @@ export const ko: KoDictionary = {
   "template.searchPlaceholder": "언어나 이름",
   "template.listLabel": "템플릿",
   "template.group.builtin": "기본 제공",
-  "template.group.org": "우리 조직",
+  "template.group.org": "우리 템플릿",
   "template.files.other": "파일 {count}개",
   "template.filesLabel": "파일",
   "template.previewLabel": "{name} 미리보기",

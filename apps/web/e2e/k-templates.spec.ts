@@ -156,7 +156,7 @@ test("admin adds a template and sets the contact; both reach the picker and the 
     await picker.getByTestId("template-search").fill("service skeleton");
     const option = picker.getByRole("option", { name });
     await expect(option).toBeVisible();
-    await expect(picker.getByText("Your organization")).toBeVisible();
+    await expect(picker.getByText("Our templates")).toBeVisible();
     await option.click();
     await expect(picker.getByTestId("template-files")).toContainText("cmd/main.go");
     await picker.getByTestId("template-create").click();

@@ -1,6 +1,6 @@
 # 사용자 안내서 (User Guide)
 
-codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도구입니다. 외부 인터넷 연결이나 계정 가입 없이 브라우저에서 바로 코드를 공유하고 함께 편집할 수 있습니다.
+codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협업 코드 공유 도구입니다. 외부 인터넷 연결이나 계정 가입 없이 브라우저에서 바로 코드를 공유하고 함께 편집할 수 있습니다.
 
 ---
 
@@ -18,11 +18,11 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 
 ### 1.3 QR 코드 및 전체 화면 보기
 - 상단 바의 **공유** 버튼(단축키 `⌘⌥S` 또는 `Ctrl+Alt+S`)을 누르면 **코드·QR** 탭에 참여 코드와 QR 코드가 표시됩니다.
-- 휴대폰 카메라로 QR 코드를 비추면 모바일 브라우저로 바로 입장할 수 있습니다(단, 휴대폰이 사내 동일 네트워크나 Wi-Fi에 연결되어 있어야 합니다).
+- 휴대폰 카메라로 QR 코드를 비추면 모바일 브라우저로 바로 입장할 수 있습니다(단, 휴대폰이 같은 네트워크나 Wi-Fi에 연결되어 있어야 합니다).
 - 회의실이나 강의실에서는 **전체 화면으로 보기**를 눌러 큰 글씨의 6자리 코드와 대형 QR 코드를 프로젝터 화면에 띄울 수 있습니다. `Esc` 키나 닫기 버튼으로 종료합니다.
 
 ### 1.4 근처 공유
-- 첫 화면의 **근처 공유** 목록에는 현재 같은 네트워크 그룹(사내 방 단위 또는 서브넷)에서 열려 있는 공유가 실시간으로 나타납니다.
+- 첫 화면의 **근처 공유** 목록에는 현재 같은 네트워크 그룹(방 단위 또는 서브넷)에서 열려 있는 공유가 실시간으로 나타납니다.
 - 목록에는 공유 제목, 언어, 현재 참여 중인 인원수, 최근 활동 시간, 그리고 본문 첫 8줄의 미리보기가 표시됩니다.
 - 원하는 항목의 **입장** 버튼을 누르면 즉시 참여할 수 있습니다.
 - PIN 잠금이나 입장 승인이 설정된 공유는 근처 공유 목록에 노출되지 않습니다.
@@ -92,7 +92,7 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 ### 2.10 템플릿으로 시작하기
 - 첫 화면의 **템플릿으로 시작** 버튼 또는 명령 팔레트(`⌘K` / `Ctrl+K`)의 **템플릿으로 새 공유 만들기**로 템플릿 선택 창을 엽니다. 검색창에서 이름이나 언어로 찾고 방향키와 Enter로 고를 수 있으며, 오른쪽(좁은 화면에서는 아래)에서 파일 목록과 미리보기를 확인한 뒤 **공유 만들기**를 누릅니다.
 - 기본 제공 템플릿: Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, HTML·CSS·JS 웹 페이지, Markdown, Bash, 여러 파일로 된 Python 패키지.
-- 관리자가 등록한 조직 전용 템플릿은 **우리 조직** 그룹에 함께 표시됩니다. 템플릿을 고르지 않고 만드는 기존 **새 공유 만들기**는 그대로 동작합니다.
+- 관리자가 등록한 추가한 템플릿은 **우리 템플릿** 그룹에 함께 표시됩니다. 템플릿을 고르지 않고 만드는 기존 **새 공유 만들기**는 그대로 동작합니다.
 
 ---
 
@@ -198,11 +198,11 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 **Q. 공유는 얼마나 오래 유지되나요?**  
 저장하지 않은 공유는 마지막 활동으로부터 관리자가 정한 시간(기본 24시간, 소개 페이지 안내 문구에 현재 값이 표시됩니다)이 지나면 자동 만료되어 삭제됩니다. 상단 바의 **내 공유에 저장**을 눌러 보관한 공유는 만료되지 않고 계속 유지됩니다.
 
-**Q. 내가 작성한 코드는 사내에서 누가 볼 수 있나요?**  
+**Q. 내가 작성한 코드는 누가 볼 수 있나요?**  
 공유 링크나 6자리 코드를 가진 사람은 누구나 열람할 수 있습니다. 접근을 제한하려면 PIN 잠금이나 입장 승인(대기실) 기능을 사용하세요. 과거 편집 이력은 소유자만 볼 수 있으며 지운 내용은 다른 참여자에게 전송되지 않습니다.
 
-**Q. 사내망 밖에서도 접속할 수 있나요?**  
-아닙니다. 외부 인터넷과의 연결 없이 사내 폐쇄망 안에서만 동작하도록 설계되어 있습니다.
+**Q. 다른 네트워크에서도 접속할 수 있나요?**  
+아닙니다. 외부 인터넷과의 연결 없이 서버가 있는 네트워크 안에서만 동작하도록 설계되어 있습니다.
 
 **Q. 모바일 기기에서도 동일하게 사용할 수 있나요?**  
 네, 모바일 브라우저에 최적화된 인터페이스를 제공합니다. 화면이 작은 기기에서는 화면 너비에 맞춰 탭 스트립과 패널이 유연하게 축소됩니다.
@@ -247,7 +247,7 @@ codesh는 사내망 환경에서 동작하는 실시간 협업 코드 공유 도
 - **Folders and tags**: In **My shares**, use the tag icon (**Organize**) on a share to give it one folder (up to 60 characters) and up to 10 tags (30 characters each). Pick an existing folder or type a new name; names match regardless of letter case.
 - **Filtering**: Choose **All shares**, a folder or **No folder** in the folder list (a row of buttons on narrow screens), then narrow further with tag chips and the search box.
 - **Private to you**: Folders and tags are stored per person and never shown to others. They are removed when you unsave a share you do not own, when you are banned, or when the share is deleted or expires.
-- **Templates**: Press **Start from a template** on the home page, or run **New share from template** in the command palette (`⌘K` / `Ctrl+K`). Search, pick with the arrow keys and Enter, check the file list and preview, then **Create share**. Built-in templates cover Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, an HTML + CSS + JS page, Markdown, Bash and a multi-file Python package. Templates added by the administrator appear under **Your organization**.
+- **Templates**: Press **Start from a template** on the home page, or run **New share from template** in the command palette (`⌘K` / `Ctrl+K`). Search, pick with the arrow keys and Enter, check the file list and preview, then **Create share**. Built-in templates cover Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, an HTML + CSS + JS page, Markdown, Bash and a multi-file Python package. Templates added by the administrator appear under **Our templates**.
 
 ### Access Control
 - **View-Only Mode**: Default to read-only access. Share the separate edit link with collaborators who need edit rights.
