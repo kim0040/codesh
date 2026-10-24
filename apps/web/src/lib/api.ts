@@ -1,0 +1,243 @@
+import type {
+  CreateInviteBody,
+  CreateLabBody,
+  CreateShareBody,
+  CreateShareResponse,
+  ErrorCode,
+  GetLabResponse,
+  GetShareResponse,
+  JoinPendingResponse,
+  JoinShareBody,
+  JoinShareResponse,
+  KickBody,
+  NearbyItem,
+  PatchLabBody,
+  PatchSessionBody,
+  PatchShareBody,
+  PresenceUser,
+  PutSettingsBody,
+  SessionResponse,
+  Settings,
+  ShareListItem,
+  StatsResponse,
+  UploadResult,
+} from "@codesh/shared";
+
+/** Thin fetch client for the HTTP API (docs/ARCHITECTURE.md §9). Same origin, cookie session. */
+
+export type ClientErrorCode = ErrorCode | "network" | "unknown";
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: ClientErrorCode;
+  /** Seconds from `Retry-After`, when the server sent one. */
+  readonly retryAfter: number | null;
+
+  constructor(status: number, code: ClientErrorCode, message: string, retryAfter: number | null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.retryAfter = retryAfter;
+  }
+}
+
+export function isApiError(error: unknown, code?: ClientErrorCode): error is ApiError {
+  return error instanceof ApiError && (code === undefined || error.code === code);
+}
+
+const KNOWN_CODES: readonly string[] = [
+  "not_found",
+  "forbidden",
+  "pin_required",
+  "pin_invalid",
+  "banned",
+  "pending_approval",
+  "rate_limited",
+  "too_large",
+  "expired",
+  "validation",
+  "unavailable",
+];
+
+interface RequestOptions {
+  body?: unknown;
+  form?: FormData;
+  query?: Record<string, string | number | undefined>;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
+
+async function errorFrom(response: Response): Promise<ApiError> {
+  let code: ClientErrorCode = "unknown";
+  let message = response.statusText;
+  try {
+    const data = (await response.json()) as { error?: { code?: string; message?: string } };
+    if (data.error?.code && KNOWN_CODES.includes(data.error.code)) {
+      code = data.error.code as ErrorCode;
+    }
+    if (data.error?.message) message = data.error.message;
+  } catch {
+    // Not JSON (a proxy error page, say): the status text stands in.
+  }
+  const retry = Number(response.headers.get("Retry-After"));
+  return new ApiError(
+    response.status,
+    code,
+    message,
+    Number.isFinite(retry) && retry > 0 ? retry : null,
+  );
+}
+
+export async function rawRequest(
+  method: string,
+  path: string,
+  options: RequestOptions = {},
+): Promise<Response> {
+  let url = path;
+  if (options.query) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(options.query)) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    const text = params.toString();
+    if (text) url += `?${text}`;
+  }
+  // The API refuses state-changing requests without this header (CSRF guard).
+  const headers: Record<string, string> = { "X-Codesh": "1", ...options.headers };
+  let body: BodyInit | undefined;
+  if (options.form) {
+    body = options.form;
+  } else if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(options.body);
+  }
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: options.signal,
+      credentials: "same-origin",
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new ApiError(0, "network", "Network error", null);
+  }
+  if (!response.ok) throw await errorFrom(response);
+  return response;
+}
+
+async function request<T>(method: string, path: string, options?: RequestOptions): Promise<T> {
+  const response = await rawRequest(method, path, options);
+  if (response.status === 204) return undefined as T;
+  const type = response.headers.get("Content-Type") ?? "";
+  if (!type.includes("json")) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export interface MyShare extends ShareListItem {}
+
+export const api = {
+  session: (signal?: AbortSignal) => request<SessionResponse>("GET", "/api/session", { signal }),
+  patchSession: (body: PatchSessionBody) =>
+    request<SessionResponse>("PATCH", "/api/session", { body }),
+
+  createShare: (body: CreateShareBody = {}) =>
+    request<CreateShareResponse>("POST", "/api/shares", { body }),
+  listShares: (signal?: AbortSignal) => request<ShareListItem[]>("GET", "/api/shares", { signal }),
+  getShare: (id: string, signal?: AbortSignal) =>
+    request<GetShareResponse>("GET", `/api/shares/${id}`, { signal }),
+  /** 200 with a token, or 202 while the owner has to approve. */
+  async joinShare(
+    id: string,
+    body: JoinShareBody,
+    signal?: AbortSignal,
+  ): Promise<JoinShareResponse | JoinPendingResponse> {
+    const response = await rawRequest("POST", `/api/shares/${id}/join`, { body, signal });
+    return (await response.json()) as JoinShareResponse | JoinPendingResponse;
+  },
+  patchShare: (id: string, body: PatchShareBody) =>
+    request<GetShareResponse>("PATCH", `/api/shares/${id}`, { body }),
+  deleteShare: (id: string) => request<{ ok: true }>("DELETE", `/api/shares/${id}`),
+  saveShare: (id: string) => request<{ ok: true }>("POST", `/api/shares/${id}/save`),
+  unsaveShare: (id: string) => request<{ ok: true }>("DELETE", `/api/shares/${id}/save`),
+  forkShare: (id: string) => request<CreateShareResponse>("POST", `/api/shares/${id}/fork`),
+  kick: (id: string, body: KickBody) =>
+    request<{ ok: true }>("POST", `/api/shares/${id}/kick`, { body }),
+  listPending: (id: string) =>
+    request<{ clientId: string; name: string }[]>("GET", `/api/shares/${id}/pending`),
+  resolvePending: (id: string, clientId: string, approve: boolean) =>
+    request<{ ok: true }>("POST", `/api/shares/${id}/pending/${clientId}`, { body: { approve } }),
+  listHistory: (id: string) =>
+    request<{ seq: number; at: string }[]>("GET", `/api/shares/${id}/history`),
+  async historyState(id: string, seq: number): Promise<Uint8Array> {
+    const response = await rawRequest("GET", `/api/shares/${id}/history/${seq}`);
+    return new Uint8Array(await response.arrayBuffer());
+  },
+  restore: (id: string, seq: number) =>
+    request<{ ok: true }>("POST", `/api/shares/${id}/restore`, { body: { seq } }),
+  downloadUrl: (id: string, fileId?: string) =>
+    `/api/shares/${id}/download${fileId ? `?file=${encodeURIComponent(fileId)}` : ""}`,
+
+  resolveCode: (code: string) =>
+    request<{ id: string } | { labId: string }>("GET", `/api/codes/${code}`),
+
+  presence: (signal?: AbortSignal) => request<PresenceUser[]>("GET", "/api/presence", { signal }),
+  nearby: (signal?: AbortSignal) => request<NearbyItem[]>("GET", "/api/nearby", { signal }),
+  invite: (body: CreateInviteBody) => request<{ ok: true }>("POST", "/api/invites", { body }),
+
+  upload: (files: File[], options: { asShare?: boolean } = {}) => {
+    const form = new FormData();
+    for (const file of files) {
+      form.append("file", file, relativePathOf(file) ?? file.name);
+    }
+    return request<UploadResult[] | CreateShareResponse>("POST", "/api/uploads", {
+      form,
+      query: options.asShare ? { asShare: 1 } : undefined,
+    });
+  },
+  uploadUrl: (uploadId: string) => `/api/uploads/${uploadId}`,
+
+  createLab: (body: CreateLabBody = {}) =>
+    request<{ id: string; code: string; url: string }>("POST", "/api/labs", { body }),
+  getLab: (id: string, signal?: AbortSignal) =>
+    request<GetLabResponse>("GET", `/api/labs/${id}`, { signal }),
+  joinLab: (id: string, name: string) =>
+    request<{ shareId: string }>("POST", `/api/labs/${id}/join`, { body: { name } }),
+  patchLab: (id: string, body: PatchLabBody) =>
+    request<GetLabResponse>("PATCH", `/api/labs/${id}`, { body }),
+  distributeLab: (id: string) => request<{ count: number }>("POST", `/api/labs/${id}/distribute`),
+
+  admin: {
+    settings: (token: string) =>
+      request<Settings>("GET", "/api/admin/settings", { headers: bearer(token) }),
+    putSettings: (token: string, body: PutSettingsBody) =>
+      request<Settings>("PUT", "/api/admin/settings", { body, headers: bearer(token) }),
+    audit: (token: string, query: { limit?: number; before?: string } = {}) =>
+      request<
+        {
+          at: string;
+          actor: string;
+          ip: string;
+          action: string;
+          shareId?: string;
+          detail?: unknown;
+        }[]
+      >("GET", "/api/admin/audit", { query, headers: bearer(token) }),
+    stats: (token: string) =>
+      request<StatsResponse>("GET", "/api/admin/stats", { headers: bearer(token) }),
+  },
+};
+
+function bearer(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}` };
+}
+
+/** `webkitRelativePath` of a file picked from a folder, or the path we attach to dropped entries. */
+export function relativePathOf(file: File): string | null {
+  const dropped = (file as File & { codeshPath?: string }).codeshPath;
+  if (dropped) return dropped;
+  return file.webkitRelativePath ? file.webkitRelativePath : null;
+}

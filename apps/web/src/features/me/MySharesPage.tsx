@@ -1,0 +1,274 @@
+import { getLanguage } from "@codesh/highlight";
+import { formatDuration, formatRelativeTime } from "@codesh/i18n";
+import type { ShareListItem } from "@codesh/shared";
+import {
+  Badge,
+  Button,
+  Dialog,
+  DialogContent,
+  EmptyState,
+  IconButton,
+  Input,
+  LanguageBadge,
+  Skeleton,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  toast,
+} from "@codesh/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
+import {
+  ArrowLeft,
+  Bookmark,
+  FolderOpen,
+  Plus,
+  Search,
+  SearchX,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import { api } from "../../lib/api";
+import { firstLines } from "../../lib/format";
+import { useLocale, useT } from "../../lib/i18n";
+
+type Filter = "all" | "saved" | "owned";
+
+export function MySharesPage() {
+  const t = useT();
+  const [locale] = useLocale();
+  const queryClient = useQueryClient();
+  const shares = useQuery({
+    queryKey: ["shares"],
+    queryFn: ({ signal }) => api.listShares(signal),
+    retry: false,
+  });
+  const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
+  const [target, setTarget] = useState<ShareListItem | null>(null);
+
+  const remove = useMutation({
+    mutationFn: (share: ShareListItem) =>
+      share.role === "owner" ? api.deleteShare(share.id) : api.unsaveShare(share.id),
+    onSuccess: (_data, share) => {
+      queryClient.setQueryData<ShareListItem[]>(["shares"], (old) =>
+        old?.filter((item) => item.id !== share.id),
+      );
+      toast({
+        title: share.role === "owner" ? t("toast.deleted") : t("toast.unsaved"),
+        tone: "success",
+        duration: 2500,
+      });
+      setTarget(null);
+    },
+    onError: () => {
+      toast({ title: t("error.generic"), tone: "danger" });
+      setTarget(null);
+    },
+  });
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return [...(shares.data ?? [])]
+      .filter((share) =>
+        filter === "saved" ? share.saved : filter === "owned" ? share.role === "owner" : true,
+      )
+      .filter((share) => !q || share.title.toLowerCase().includes(q) || share.id.includes(q))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [shares.data, filter, query]);
+
+  const total = shares.data?.length ?? 0;
+
+  return (
+    <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col gap-5 px-4 py-6 sm:py-10">
+      <header className="flex flex-wrap items-center gap-3">
+        <Link
+          to="/"
+          aria-label={t("editor.top.back")}
+          className="inline-flex size-8 items-center justify-center rounded-md text-fg-2 hover:bg-fill-hover coarse:size-11"
+        >
+          <ArrowLeft aria-hidden="true" className="size-4 rtl:rotate-180" />
+        </Link>
+        <h1 className="text-heading font-semibold">{t("myshares.title")}</h1>
+        {shares.data ? (
+          <span className="text-caption text-fg-3">{t("myshares.count", { count: total })}</span>
+        ) : null}
+        <Button asChild variant="primary" size="sm" leading={<Plus />} className="ms-auto">
+          <Link to="/new">{t("share.new")}</Link>
+        </Button>
+      </header>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Tabs value={filter} onValueChange={(value) => setFilter(value as Filter)}>
+          <TabsList aria-label={t("myshares.title")}>
+            <TabsTrigger value="all">{t("myshares.tab.all")}</TabsTrigger>
+            <TabsTrigger value="saved">{t("myshares.tab.saved")}</TabsTrigger>
+            <TabsTrigger value="owned">{t("myshares.tab.owned")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="min-w-48 flex-1 sm:max-w-xs sm:flex-none">
+          <Input
+            type="search"
+            aria-label={t("myshares.searchLabel")}
+            placeholder={t("myshares.searchPlaceholder")}
+            leading={<Search />}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            data-testid="share-search"
+          />
+        </div>
+      </div>
+
+      <main id="main" className="flex flex-col gap-3">
+        {shares.isPending ? (
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label={t("myshares.loading")}
+            className="flex flex-col gap-3"
+          >
+            <Skeleton className="h-24" />
+            <Skeleton className="h-24" />
+            <Skeleton className="h-24" />
+          </div>
+        ) : shares.isError ? (
+          <EmptyState
+            tone="danger"
+            icon={<TriangleAlert />}
+            title={t("myshares.error.title")}
+            description={t("myshares.error.body")}
+            action={<Button onClick={() => void shares.refetch()}>{t("common.retry")}</Button>}
+          />
+        ) : visible.length === 0 ? (
+          query.trim() ? (
+            <EmptyState
+              icon={<SearchX />}
+              title={t("myshares.emptySearch.title", { query: query.trim() })}
+              description={t("myshares.emptySearch.body")}
+              action={
+                <Button onClick={() => setQuery("")}>{t("myshares.emptySearch.action")}</Button>
+              }
+            />
+          ) : filter === "saved" ? (
+            <EmptyState
+              icon={<Bookmark />}
+              title={t("myshares.emptySaved.title")}
+              description={t("myshares.emptySaved.body")}
+            />
+          ) : (
+            <EmptyState
+              icon={<FolderOpen />}
+              title={t("myshares.empty.title")}
+              description={t("myshares.empty.body")}
+              action={
+                <Button asChild variant="primary">
+                  <Link to="/new">{t("myshares.empty.action")}</Link>
+                </Button>
+              }
+            />
+          )
+        ) : (
+          <ul className="flex flex-col gap-3" data-testid="share-list">
+            {visible.map((share) => {
+              const language = getLanguage(share.language);
+              const left = share.expiresAt
+                ? new Date(share.expiresAt).getTime() - Date.now()
+                : null;
+              return (
+                <li
+                  key={share.id}
+                  data-testid={`share-${share.id}`}
+                  className="group relative flex flex-col gap-2 rounded-xl border border-line bg-panel p-3 hover:border-fg-3 sm:p-4"
+                >
+                  <div className="flex items-start gap-2">
+                    <h2 className="min-w-0 flex-1 truncate text-body font-medium">
+                      <Link
+                        to="/$id"
+                        params={{ id: share.id }}
+                        className="outline-offset-4 after:absolute after:inset-0 after:content-['']"
+                      >
+                        {share.title || t("common.untitled")}
+                      </Link>
+                    </h2>
+                    {share.saved ? <Badge tone="accent">{t("myshares.saved")}</Badge> : null}
+                    <IconButton
+                      aria-label={
+                        share.role === "owner"
+                          ? t("myshares.deleteAction")
+                          : t("myshares.removeAction")
+                      }
+                      size="sm"
+                      className="relative z-10"
+                      onClick={() => setTarget(share)}
+                      data-testid="share-remove"
+                    >
+                      <Trash2 />
+                    </IconButton>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-3">
+                    <LanguageBadge
+                      name={language?.name ?? share.language}
+                      color={language?.color ?? "#8b949e"}
+                    />
+                    <span>
+                      {t("myshares.updated", {
+                        time: formatRelativeTime(
+                          locale,
+                          new Date(share.updatedAt).getTime() - Date.now(),
+                        ),
+                      })}
+                    </span>
+                    <span className={left !== null && left <= 0 ? "text-danger-text" : undefined}>
+                      {left === null
+                        ? t("myshares.noExpiry")
+                        : left <= 0
+                          ? t("myshares.expired")
+                          : t("myshares.expiresIn", { time: formatDuration(locale, left) })}
+                    </span>
+                  </div>
+                  {share.preview ? (
+                    <pre className="hidden max-h-16 overflow-hidden rounded-md bg-bg p-2 font-mono text-[0.6875rem] leading-snug text-fg-2 sm:block">
+                      {firstLines(share.preview, 3)}
+                    </pre>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </main>
+
+      <Dialog open={target !== null} onOpenChange={(open) => !open && setTarget(null)}>
+        <DialogContent
+          size="sm"
+          title={
+            target?.role === "owner"
+              ? t("myshares.deleteTitle", { title: target.title || t("common.untitled") })
+              : t("myshares.removeTitle", { title: target?.title || t("common.untitled") })
+          }
+          description={
+            target?.role === "owner" ? t("myshares.deleteBody") : t("myshares.removeBody")
+          }
+          closeLabel={t("common.close")}
+          footer={
+            <>
+              <Button onClick={() => setTarget(null)}>{t("common.cancel")}</Button>
+              <Button
+                variant="danger"
+                loading={remove.isPending}
+                loadingLabel={t("common.loading")}
+                onClick={() => target && remove.mutate(target)}
+                data-testid="share-remove-confirm"
+              >
+                {target?.role === "owner" ? t("myshares.deleteAction") : t("myshares.removeAction")}
+              </Button>
+            </>
+          }
+        >
+          <span className="sr-only">{target?.title}</span>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

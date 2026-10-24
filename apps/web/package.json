@@ -6,28 +6,53 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "6.20.4",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/merge": "6.12.3",
+    "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.15",
     "@codesh/highlight": "workspace:*",
     "@codesh/i18n": "workspace:*",
+    "@codesh/shared": "workspace:*",
     "@codesh/ui": "workspace:*",
     "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "@hocuspocus/provider": "4.7.1",
+    "@replit/codemirror-emacs": "6.1.0",
+    "@replit/codemirror-vim": "6.4.0",
     "@tanstack/react-query": "5.104.5",
     "@tanstack/react-router": "1.170.46",
+    "@tanstack/react-virtual": "3.14.22",
+    "fflate": "0.8.3",
+    "lucide-react": "1.61.0",
     "pretendard": "1.3.9",
+    "prettier": "3.9.10",
+    "qrcode": "1.5.4",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "y-codemirror.next": "0.3.6",
+    "y-indexeddb": "9.0.12",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.33"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/router-plugin": "1.168.48",
+    "@types/node": "22.20.5",
+    "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "tailwindcss": "4.3.3",
-    "vite": "8.3.5"
+    "vite": "8.3.5",
+    "vite-plugin-pwa": "2.0.0",
+    "workbox-window": "7.4.1"
   }
 }

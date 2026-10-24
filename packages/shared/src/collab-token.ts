@@ -58,7 +58,9 @@ export async function verifyCollabToken(
   if (!signature || !json) return null;
   const key = await hmacKey(secret, "verify");
   // Constant-time comparison is done by subtle.verify.
-  if (!(await crypto.subtle.verify("HMAC", key, signature, encoder.encode(body)))) return null;
+  // A copy, so the view is typed over a plain ArrayBuffer, which the DOM typings require.
+  if (!(await crypto.subtle.verify("HMAC", key, new Uint8Array(signature), encoder.encode(body))))
+    return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(json));

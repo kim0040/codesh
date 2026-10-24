@@ -53,5 +53,7 @@ export const awarenessStateSchema = z.object({
   cursor: z.object({ anchor: relativePositionSchema, head: relativePositionSchema }).optional(),
   viewport: z.object({ fromLine: z.number().int(), toLine: z.number().int() }).optional(),
   following: userRefSchema.shape.clientId.optional(),
+  /** The owner is presenting: everyone else's editor follows this client's viewport. */
+  presenting: z.boolean().optional(),
 });
 export type AwarenessState = z.infer<typeof awarenessStateSchema>;

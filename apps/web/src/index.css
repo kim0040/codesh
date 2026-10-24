@@ -1,14 +1,46 @@
 @import "tailwindcss";
-@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
-@import "@fontsource-variable/jetbrains-mono";
+@import "@codesh/ui/styles.css";
 
-@theme {
-  --font-sans: "Pretendard Variable", Pretendard, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+/* The shared UI package ships tokens, fonts and component styles; this file holds app-wide rules. */
+
+html,
+body,
+#root {
+  min-height: 100dvh;
 }
 
-@layer base {
-  body {
-    font-family: var(--font-sans);
+body {
+  overflow-x: hidden;
+}
+
+/* Route changes: a short cross-fade. Nothing moves, so there is no layout shift to animate. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 140ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
   }
+}
+
+/* A drop target highlights while a file or a selection is dragged over it. */
+[data-drop-over] {
+  outline: 2px dashed var(--accent-text);
+  outline-offset: 2px;
+  background-color: var(--accent-soft);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Screens that fill the viewport: no pull-to-refresh bounce inside the editor. */
+.screen-fill {
+  height: 100dvh;
+  overscroll-behavior: none;
 }

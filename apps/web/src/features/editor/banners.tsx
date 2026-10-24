@@ -1,0 +1,157 @@
+import { Button } from "@codesh/ui";
+import { CloudOff, Eye, Presentation, ShieldAlert, Wifi, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { useT } from "../../lib/i18n";
+import { useEditor } from "./context";
+
+type Tone = "info" | "warning" | "danger";
+
+const TONES: Record<Tone, string> = {
+  info: "bg-info-soft text-info-text",
+  warning: "bg-warning-soft text-warning-text",
+  danger: "bg-danger-soft text-danger-text",
+};
+
+function Banner(props: {
+  tone: Tone;
+  icon: ReactNode;
+  title: string;
+  body?: string;
+  actions?: ReactNode;
+  testId?: string;
+  live?: "polite" | "assertive";
+}) {
+  return (
+    <div
+      role={props.live === "assertive" ? "alert" : "status"}
+      data-testid={props.testId}
+      className={`flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-3 py-1.5 text-body-sm ${TONES[props.tone]} [&_svg]:size-4 [&_svg]:shrink-0`}
+    >
+      {props.icon}
+      <span className="min-w-0 flex-1 basis-60">
+        <span className="font-medium">{props.title}</span>
+        {props.body ? <span className="ms-2 opacity-90">{props.body}</span> : null}
+      </span>
+      {props.actions}
+    </div>
+  );
+}
+
+/** Everything the editor wants to say about the connection and the permission, in one stack. */
+export function EditorBanners({
+  secretWarning,
+  onKeepSecret,
+  onStopFollow,
+}: {
+  secretWarning: boolean;
+  onKeepSecret: () => void;
+  onStopFollow: () => void;
+}) {
+  const t = useT();
+  const ctx = useEditor();
+  const { status, tooLarge } = ctx.state;
+  const offline = typeof navigator !== "undefined" && !navigator.onLine;
+  const followTarget = ctx.following
+    ? ctx.participants.find((person) => person.clientId === ctx.following)
+    : undefined;
+
+  return (
+    <>
+      {status === "offline" || (offline && status !== "connected") ? (
+        <Banner
+          tone="warning"
+          icon={<CloudOff />}
+          title={t("conn.offline.title")}
+          body={t("conn.offline.body")}
+          testId="banner-offline"
+        />
+      ) : status === "reconnecting" || status === "connecting" ? (
+        ctx.state.synced ? (
+          <Banner
+            tone="warning"
+            icon={<Wifi />}
+            title={t("conn.reconnecting.title")}
+            body={t("conn.reconnecting.body")}
+            testId="banner-reconnecting"
+          />
+        ) : null
+      ) : status === "disconnected" ? (
+        <Banner
+          tone="danger"
+          live="assertive"
+          icon={<CloudOff />}
+          title={t("conn.disconnected.title")}
+          body={t("conn.disconnected.body")}
+          testId="banner-disconnected"
+          actions={
+            <Button size="sm" onClick={() => void ctx.session.reconnect()}>
+              {t("conn.retryNowAction")}
+            </Button>
+          }
+        />
+      ) : null}
+
+      {tooLarge !== null ? (
+        <Banner
+          tone="danger"
+          live="assertive"
+          icon={<ShieldAlert />}
+          title={t("error.too_large")}
+          body={t("error.too_large.hint")}
+        />
+      ) : null}
+
+      {ctx.readOnly ? (
+        <Banner
+          tone="info"
+          icon={<Eye />}
+          title={ctx.state.locked ? t("conn.locked.title") : t("conn.readOnly.title")}
+          body={ctx.state.locked ? t("conn.locked.body") : t("conn.readOnly.body")}
+          testId="banner-readonly"
+        />
+      ) : null}
+
+      {secretWarning ? (
+        <Banner
+          tone="warning"
+          live="assertive"
+          icon={<ShieldAlert />}
+          title={t("editor.secret.title")}
+          body={t("editor.secret.body")}
+          testId="banner-secret"
+          actions={
+            <Button size="sm" onClick={onKeepSecret}>
+              {t("editor.secret.keepAction")}
+            </Button>
+          }
+        />
+      ) : null}
+
+      {ctx.presenting ? (
+        <Banner
+          tone="info"
+          icon={<Presentation />}
+          title={t("editor.present.active")}
+          testId="banner-presenting"
+          actions={
+            <Button size="sm" onClick={() => ctx.setPresenting(false)}>
+              {t("editor.present.stopAction")}
+            </Button>
+          }
+        />
+      ) : followTarget ? (
+        <Banner
+          tone="info"
+          icon={<Presentation />}
+          title={t("editor.present.following", { name: followTarget.name })}
+          testId="banner-following"
+          actions={
+            <Button size="sm" leading={<X />} onClick={onStopFollow}>
+              {t("editor.top.followStopAction")}
+            </Button>
+          }
+        />
+      ) : null}
+    </>
+  );
+}
