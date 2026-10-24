@@ -1,5 +1,5 @@
 /*
- * Language registry: 140+ programming languages with a lazily loaded CodeMirror grammar.
+ * Language registry: 200+ languages with a lazily loaded CodeMirror grammar.
  *
  * Identity colours are taken from GitHub Linguist (https://github.com/github-linguist/linguist),
  * which is MIT-licensed data: Copyright (c) 2011-2022 GitHub, Inc. Languages Linguist does not
@@ -8,7 +8,12 @@
  */
 import { type LanguageDescription, LanguageSupport, StreamLanguage } from "@codemirror/language";
 import { oklchToHex } from "./color.js";
-import { describeLanguage, languageDataLoader, PRECISE_LOADERS } from "./grammars.js";
+import {
+  CUSTOM_STREAM_LOADERS,
+  describeLanguage,
+  languageDataLoader,
+  PRECISE_LOADERS,
+} from "./grammars.js";
 
 export interface LanguageEntry {
   /** Stable key stored in the share document and synced to every participant. */
@@ -25,8 +30,10 @@ export interface LanguageEntry {
   readonly mime: string;
   /** `#rrggbb` identity colour for dots and badges. */
   readonly color: string;
-  /** `lezer`: incremental Lezer parser (precise). `stream`: CodeMirror legacy stream mode. `none`: plain text. */
-  readonly engine: "lezer" | "stream" | "none";
+  /** `mapped` uses a closely related grammar; all entries still have real syntax highlighting. */
+  readonly engine: "lezer" | "stream" | "mapped" | "none";
+  /** Why `engine: mapped` is useful for this language. */
+  readonly mapping?: { readonly to: string; readonly reason: string };
   load(): Promise<LanguageSupport>;
 }
 
@@ -41,6 +48,8 @@ interface Extras {
   d?: string;
   /** Name of the matching `@codemirror/language-data` entry when it differs from `name`. */
   ld?: string;
+  /** A related language id whose real parser is useful for this syntax. */
+  map?: { to: string; reason: string };
 }
 
 export const PLAIN_TEXT_ID = "plaintext";
@@ -70,12 +79,12 @@ const ROWS: readonly Row[] = [
     "python",
     "Python",
     "#3572A5",
-    "py pyw pyi bzl",
-    { a: ["py", "python3"], f: ["BUILD", "BUCK", "SConstruct"], m: "text/x-python", d: "main.py" },
+    "py pyw pyi",
+    { a: ["py", "python3"], f: ["SConstruct"], m: "text/x-python", d: "main.py" },
   ],
   ["java", "Java", "#b07219", "java", { m: "text/x-java", d: "Main.java" }],
   ["kotlin", "Kotlin", "#A97BFF", "kt kts", { a: ["kt"], m: "text/x-kotlin", d: "Main.kt" }],
-  ["c", "C", "#555555", "c h ino", { m: "text/x-csrc", d: "main.c" }],
+  ["c", "C", "#555555", "c h", { m: "text/x-csrc", d: "main.c" }],
   [
     "cpp",
     "C++",
@@ -113,22 +122,10 @@ const ROWS: readonly Row[] = [
   ],
   ["swift", "Swift", "#F05138", "swift", { m: "text/x-swift", d: "main.swift" }],
   ["sql", "SQL", "#e38c00", "sql", { m: "text/x-sql", d: "query.sql" }],
-  [
-    "html",
-    "HTML",
-    "#e34c26",
-    "html htm xhtml handlebars hbs",
-    { a: ["xhtml"], m: "text/html", d: "index.html" },
-  ],
+  ["html", "HTML", "#e34c26", "html htm xhtml", { a: ["xhtml"], m: "text/html", d: "index.html" }],
   ["css", "CSS", "#663399", "css", { m: "text/css", d: "style.css" }],
   ["scss", "SCSS", "#c6538c", "scss", { m: "text/x-scss", d: "style.scss" }],
-  [
-    "json",
-    "JSON",
-    "#292929",
-    "json map json5 webmanifest",
-    { a: ["json5"], m: "application/json", d: "data.json" },
-  ],
+  ["json", "JSON", "#292929", "json map webmanifest", { m: "application/json", d: "data.json" }],
   ["yaml", "YAML", "#cb171e", "yaml yml", { a: ["yml"], m: "text/yaml", d: "config.yaml" }],
   [
     "xml",
@@ -224,7 +221,7 @@ const ROWS: readonly Row[] = [
   ["fsharp", "F#", "#b845fc", "fs fsx fsi", { a: ["f#"] }],
   ["gas", "Gas", "#6e4c13", "s", { a: ["asm", "assembly"] }],
   ["gherkin", "Gherkin", "#5B2063", "feature"],
-  ["groovy", "Groovy", "#e69f56", "groovy gradle", { f: ["Jenkinsfile"] }],
+  ["groovy", "Groovy", "#e69f56", "groovy", { f: ["Jenkinsfile"] }],
   ["haskell", "Haskell", "#5e5086", "hs"],
   ["haxe", "Haxe", "#df7900", "hx"],
   ["hxml", "HXML", "#df7900", "hxml"],
@@ -300,7 +297,543 @@ const ROWS: readonly Row[] = [
   ["mscgen", "MscGen", "", "mscgen mscin msc"],
   ["xu", "Xù", "", "xu"],
   ["msgenny", "MsGenny", "", "msgenny"],
-  ["angular", "Angular Template", "#dd0031", "", { a: ["angular template"] }],
+  [
+    "angular",
+    "Angular Template",
+    "#dd0031",
+    "html",
+    {
+      a: ["angular template"],
+      f: ["app.component.html"],
+      m: "text/x-angular",
+      d: "app.component.html",
+    },
+  ],
+  // Languages with dedicated maintained grammars or directly supported stream modes.
+  ["lezer", "Lezer", "", "lezer", { m: "text/x-lezer", d: "language.lezer" }],
+  ["nix", "Nix", "#7e7eff", "nix", { m: "text/x-nix", d: "default.nix" }],
+  ["solidity", "Solidity", "#AA6746", "sol", { m: "text/x-solidity", d: "Counter.sol" }],
+  ["elixir", "Elixir", "#6e4a7e", "ex exs", { m: "text/x-elixir", d: "lib.ex" }],
+  ["hcl", "HCL", "#844FBA", "hcl", { m: "text/x-hcl", d: "main.hcl" }],
+  ["promql", "PromQL", "", "promql", { m: "text/x-promql", d: "query.promql" }],
+  ["astro", "Astro", "#ff5d01", "astro", { m: "text/x-astro", d: "src.astro" }],
+  ["groq", "GROQ", "", "groq", { m: "text/x-groq", d: "query.groq" }],
+  ["pegjs", "PEG.js", "", "pegjs", { m: "text/x-pegjs", d: "grammar.pegjs" }],
+  [
+    "graphql",
+    "GraphQL",
+    "#e10098",
+    "graphql gql",
+    { m: "application/graphql", d: "schema.graphql" },
+  ],
+  ["prisma", "Prisma", "", "prisma", { m: "text/x-prisma", d: "schema.prisma" }],
+  ["wgsl", "WGSL", "", "wgsl", { m: "text/wgsl", d: "shader.wgsl" }],
+  ["zig", "Zig", "#ec915c", "zig", { m: "text/x-zig", d: "main.zig" }],
+  [
+    "graphviz",
+    "Graphviz DOT",
+    "",
+    "dot gv",
+    { a: ["dot"], m: "text/vnd.graphviz", d: "graph.dot" },
+  ],
+  ["mermaid", "Mermaid", "", "mmd mermaid", { m: "text/x-mermaid", d: "diagram.mmd" }],
+  [
+    "plantuml",
+    "PlantUML",
+    "",
+    "puml plantuml iuml",
+    { a: ["plantuml"], m: "text/x-plantuml", d: "sequence.puml" },
+  ],
+  ["prolog", "Prolog", "", "prolog plg", { m: "text/x-prolog", d: "rules.prolog" }],
+  [
+    "batch",
+    "Windows Batch",
+    "",
+    "bat cmd",
+    { a: ["batchfile", "dosbatch"], m: "text/x-bat", d: "build.bat" },
+  ],
+  [
+    "autohotkey",
+    "AutoHotkey",
+    "",
+    "ahk",
+    { a: ["autohotkey v2"], m: "text/x-autohotkey", d: "hotkeys.ahk" },
+  ],
+  ["abap", "ABAP", "#e8274b", "abap", { m: "text/x-abap", d: "report.abap" }],
+  ["stata", "Stata", "", "do ado", { m: "text/x-stata", d: "analysis.do" }],
+  // Useful syntax-compatible mappings are recorded on each row and exposed on the entry.
+  [
+    "terraform",
+    "Terraform",
+    "#7B42BC",
+    "tf tfvars",
+    {
+      m: "text/x-terraform",
+      d: "main.tf",
+      map: { to: "hcl", reason: "Terraform uses HCL syntax." },
+    },
+  ],
+  [
+    "jsonc",
+    "JSONC",
+    "",
+    "jsonc",
+    {
+      a: ["json-with-comments"],
+      m: "application/jsonc",
+      d: "settings.jsonc",
+      map: { to: "javascript", reason: "JavaScript accepts JSONC comments and trailing commas." },
+    },
+  ],
+  [
+    "json5",
+    "JSON5",
+    "",
+    "json5",
+    {
+      m: "application/json5",
+      d: "data.json5",
+      map: {
+        to: "javascript",
+        reason: "JavaScript syntax highlights JSON5 comments, bare keys, and values.",
+      },
+    },
+  ],
+  [
+    "jsonl",
+    "JSON Lines",
+    "",
+    "jsonl ndjson",
+    {
+      a: ["ndjson"],
+      m: "application/x-ndjson",
+      d: "events.jsonl",
+      map: {
+        to: "json",
+        reason: "Each line is a JSON value, so the JSON parser highlights every record.",
+      },
+    },
+  ],
+  [
+    "json-schema",
+    "JSON Schema",
+    "",
+    "jsonschema",
+    {
+      a: ["schema.json"],
+      f: ["schema.json"],
+      m: "application/schema+json",
+      d: "schema.schema.json",
+      map: { to: "json", reason: "JSON Schema documents use JSON syntax." },
+    },
+  ],
+  [
+    "jsonnet",
+    "Jsonnet",
+    "",
+    "jsonnet libsonnet",
+    {
+      m: "text/x-jsonnet",
+      d: "main.jsonnet",
+      map: {
+        to: "javascript",
+        reason: "Jsonnet shares JSON object, string, number, and expression syntax.",
+      },
+    },
+  ],
+  [
+    "mdx",
+    "MDX",
+    "",
+    "mdx",
+    {
+      m: "text/mdx",
+      d: "article.mdx",
+      map: {
+        to: "markdown",
+        reason: "Markdown headings, lists, links, and fenced code remain highlighted.",
+      },
+    },
+  ],
+  [
+    "asciidoc",
+    "AsciiDoc",
+    "",
+    "adoc asciidoc",
+    {
+      a: ["asciidoc"],
+      m: "text/asciidoc",
+      d: "guide.adoc",
+    },
+  ],
+  [
+    "restructuredtext",
+    "reStructuredText",
+    "",
+    "rst rest",
+    {
+      a: ["restructuredtext"],
+      m: "text/x-rst",
+      d: "guide.rst",
+    },
+  ],
+  [
+    "org",
+    "Org mode",
+    "",
+    "org",
+    {
+      a: ["orgmode"],
+      m: "text/org",
+      d: "notes.org",
+    },
+  ],
+  [
+    "starlark",
+    "Starlark",
+    "",
+    "star bzl",
+    {
+      a: ["bazel"],
+      f: ["BUILD", "BUCK", "BUILD.bazel", "WORKSPACE", "WORKSPACE.bazel", "MODULE.bazel"],
+      m: "text/x-starlark",
+      d: "BUILD.bazel",
+      map: {
+        to: "python",
+        reason: "Starlark is a Python-derived build language with the same core token syntax.",
+      },
+    },
+  ],
+  [
+    "arduino",
+    "Arduino",
+    "#bd79d1",
+    "ino pde",
+    {
+      a: ["arduino-c"],
+      m: "text/x-arduino",
+      d: "Sketch.ino",
+      map: { to: "cpp", reason: "Arduino sketches use C++ declarations and expressions." },
+    },
+  ],
+  [
+    "cuda",
+    "CUDA",
+    "",
+    "cu cuh",
+    {
+      m: "text/x-cuda",
+      d: "vector.cu",
+      map: {
+        to: "cpp",
+        reason: "CUDA embeds C++ host code and uses C++ declarations and expressions.",
+      },
+    },
+  ],
+  [
+    "opencl",
+    "OpenCL C",
+    "",
+    "cl",
+    {
+      a: ["opencl-c"],
+      m: "text/x-opencl",
+      d: "kernel.cl",
+      map: {
+        to: "cpp",
+        reason: "OpenCL C uses C declarations, types, operators, and expressions.",
+      },
+    },
+  ],
+  [
+    "glsl",
+    "GLSL",
+    "",
+    "glsl vert frag geom tesc tese comp vs fs gs",
+    {
+      m: "text/x-glsl",
+      d: "shader.glsl",
+      map: { to: "cpp", reason: "GLSL uses C-like declarations, operators, and control flow." },
+    },
+  ],
+  [
+    "hlsl",
+    "HLSL",
+    "",
+    "hlsl fx fxh",
+    {
+      m: "text/x-hlsl",
+      d: "shader.hlsl",
+      map: { to: "cpp", reason: "HLSL uses C-like declarations, operators, and control flow." },
+    },
+  ],
+  [
+    "ispc",
+    "ISPC",
+    "",
+    "ispc",
+    {
+      m: "text/x-ispc",
+      d: "vector.ispc",
+      map: {
+        to: "cpp",
+        reason: "ISPC uses C-like declarations, types, operators, and control flow.",
+      },
+    },
+  ],
+  [
+    "move",
+    "Move",
+    "",
+    "move",
+    {
+      m: "text/x-move",
+      d: "sources/main.move",
+      map: {
+        to: "rust",
+        reason: "Move uses Rust-like functions, types, modules, and expressions.",
+      },
+    },
+  ],
+  [
+    "cairo",
+    "Cairo",
+    "",
+    "cairo",
+    {
+      m: "text/x-cairo",
+      d: "src/main.cairo",
+      map: { to: "rust", reason: "Cairo shares Rust-like function, type, and expression syntax." },
+    },
+  ],
+  [
+    "qsharp",
+    "Q#",
+    "",
+    "qs",
+    {
+      a: ["q#"],
+      m: "text/x-qsharp",
+      d: "Main.qs",
+      map: {
+        to: "csharp",
+        reason: "Q# shares C#-like declarations, types, and expression syntax.",
+      },
+    },
+  ],
+  [
+    "apex",
+    "Apex",
+    "#1797c0",
+    "cls trigger",
+    {
+      m: "text/x-apex",
+      d: "ContactService.cls",
+      map: { to: "java", reason: "Apex uses Java-like declarations, types, and control flow." },
+    },
+  ],
+  [
+    "handlebars",
+    "Handlebars",
+    "",
+    "hbs handlebars",
+    {
+      m: "text/x-handlebars",
+      d: "template.hbs",
+      map: {
+        to: "jinja",
+        reason:
+          "The Jinja grammar highlights Handlebars' shared interpolation and block delimiters.",
+      },
+    },
+  ],
+  [
+    "twig",
+    "Twig",
+    "",
+    "twig",
+    {
+      m: "text/x-twig",
+      d: "template.twig",
+      map: {
+        to: "jinja",
+        reason: "Twig shares Jinja's interpolation, statement, and filter syntax.",
+      },
+    },
+  ],
+  [
+    "nunjucks",
+    "Nunjucks",
+    "",
+    "njk nunjucks",
+    {
+      m: "text/x-nunjucks",
+      d: "template.njk",
+      map: {
+        to: "jinja",
+        reason: "Nunjucks shares Jinja's interpolation, statement, and filter syntax.",
+      },
+    },
+  ],
+  [
+    "django-template",
+    "Django Template",
+    "",
+    "djhtml djt",
+    {
+      a: ["django", "django-html"],
+      m: "text/x-django-template",
+      d: "template.djhtml",
+      map: {
+        to: "jinja",
+        reason: "Django templates share Jinja's interpolation and statement delimiters.",
+      },
+    },
+  ],
+  [
+    "makefile",
+    "Makefile",
+    "",
+    "mk",
+    {
+      a: ["make"],
+      f: ["Makefile", "GNUmakefile"],
+      m: "text/x-makefile",
+      d: "Makefile",
+      map: {
+        to: "shell",
+        reason: "Recipe lines are shell commands, and the shell grammar highlights them.",
+      },
+    },
+  ],
+  [
+    "gradle",
+    "Gradle",
+    "",
+    "gradle",
+    {
+      f: ["build.gradle", "settings.gradle", "init.gradle"],
+      m: "text/x-gradle",
+      d: "build.gradle",
+      map: { to: "groovy", reason: "Groovy-based Gradle build scripts use Groovy syntax." },
+    },
+  ],
+  [
+    "gradle-kotlin",
+    "Gradle Kotlin DSL",
+    "",
+    "kts",
+    {
+      a: ["kotlin-gradle"],
+      m: "text/x-gradle-kotlin",
+      d: "build.gradle.kts",
+      map: { to: "kotlin", reason: "Gradle Kotlin build scripts use Kotlin syntax." },
+    },
+  ],
+  [
+    "meson",
+    "Meson",
+    "",
+    "meson",
+    {
+      f: ["meson.build"],
+      m: "text/x-meson",
+      d: "meson.build",
+      map: {
+        to: "python",
+        reason: "Meson build files use Python-like calls, strings, and identifiers.",
+      },
+    },
+  ],
+  [
+    "ninja",
+    "Ninja",
+    "",
+    "ninja",
+    {
+      f: ["build.ninja"],
+      m: "text/x-ninja",
+      d: "build.ninja",
+      map: {
+        to: "properties",
+        reason: "Ninja build files use assignment-based rules and variables.",
+      },
+    },
+  ],
+  [
+    "docker-compose",
+    "Docker Compose",
+    "",
+    "compose",
+    {
+      a: ["compose-yaml"],
+      f: ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"],
+      m: "application/x-docker-compose",
+      d: "docker-compose.yml",
+      map: { to: "yaml", reason: "Compose files are YAML documents with service and volume keys." },
+    },
+  ],
+  [
+    "github-actions",
+    "GitHub Actions",
+    "",
+    "workflow-yaml",
+    {
+      a: ["github-actions-yaml", "actions-workflow"],
+      m: "text/x-github-actions",
+      d: ".github/workflows/ci.yml",
+      map: { to: "yaml", reason: "Workflow files use YAML keys, strings, lists, and values." },
+    },
+  ],
+  [
+    "gitlab-ci",
+    "GitLab CI",
+    "",
+    "gitlab-ci-yaml",
+    {
+      f: [".gitlab-ci.yml", ".gitlab-ci.yaml"],
+      m: "text/x-gitlab-ci",
+      d: ".gitlab-ci.yml",
+      map: { to: "yaml", reason: "Pipeline files use YAML keys, strings, lists, and values." },
+    },
+  ],
+  [
+    "ansible",
+    "Ansible Playbook",
+    "",
+    "ansible-yaml",
+    {
+      a: ["ansible-playbook"],
+      m: "text/x-ansible",
+      d: "site.ansible.yml",
+      map: { to: "yaml", reason: "Playbooks are YAML documents with task and module keys." },
+    },
+  ],
+  [
+    "kubernetes",
+    "Kubernetes Manifest",
+    "",
+    "k8s-yaml",
+    {
+      a: ["k8s", "kubernetes-yaml"],
+      m: "text/x-kubernetes",
+      d: "deployment.k8s.yaml",
+      map: { to: "yaml", reason: "Manifests use YAML keys, strings, lists, and scalar values." },
+    },
+  ],
+  [
+    "openapi",
+    "OpenAPI",
+    "",
+    "openapi",
+    {
+      a: ["swagger"],
+      f: ["openapi.yaml", "openapi.yml", "openapi.json"],
+      m: "application/vnd.oai.openapi",
+      d: "openapi.yaml",
+      map: { to: "yaml", reason: "OpenAPI's YAML form is highlighted as structured YAML." },
+    },
+  ],
   [
     PLAIN_TEXT_ID,
     "Plain text",
@@ -328,9 +861,20 @@ function loadPlainText(): Promise<LanguageSupport> {
   return Promise.resolve(new LanguageSupport(language));
 }
 
+function mappedLoader(targetId: string) {
+  const target = ROWS.find(([id]) => id === targetId);
+  if (!target) throw new Error(`Unknown mapped language id "${targetId}"`);
+  const precise = PRECISE_LOADERS[targetId];
+  if (precise) return precise;
+  const [, name, , , extras = {}] = target;
+  return languageDataLoader(extras.ld ?? name);
+}
+
 function build(row: Row): LanguageEntry {
   const [id, name, color, ext, extras = {}] = row;
   const preciseLoader = PRECISE_LOADERS[id];
+  const customStreamLoader = CUSTOM_STREAM_LOADERS[id];
+  const mappingLoader = extras.map ? mappedLoader(extras.map.to) : undefined;
   const isPlain = id === PLAIN_TEXT_ID;
   const extensions = ext.split(" ").filter(Boolean);
   const aliases = [
@@ -345,8 +889,14 @@ function build(row: Row): LanguageEntry {
     defaultFilename: extras.d ?? (extensions[0] ? `main.${extensions[0]}` : `${id}.txt`),
     mime: extras.m ?? `text/x-${id}`,
     color: color || hashColor(id),
-    engine: isPlain ? "none" : preciseLoader ? "lezer" : "stream",
-    load: isPlain ? loadPlainText : (preciseLoader ?? languageDataLoader(extras.ld ?? name)),
+    engine: isPlain ? "none" : preciseLoader ? "lezer" : extras.map ? "mapped" : "stream",
+    ...(extras.map ? { mapping: extras.map } : {}),
+    load: isPlain
+      ? loadPlainText
+      : (preciseLoader ??
+        customStreamLoader ??
+        mappingLoader ??
+        languageDataLoader(extras.ld ?? name)),
   };
 }
 
@@ -386,6 +936,31 @@ export function languageForFilename(filename: string): LanguageEntry | undefined
 /** Candidates for a path, strongest match first: exact file name, special patterns, then extension. */
 export function languagesForFilename(path: string): readonly LanguageEntry[] {
   const base = path.split(/[\\/]/).pop() ?? path;
+  const normalizedPath = path.replaceAll("\\", "/").toLowerCase();
+  if (/\.github\/workflows\/[^/]+\.ya?ml$/.test(normalizedPath)) {
+    const entry = byId.get("github-actions");
+    if (entry) return [entry];
+  }
+  if (/\.component\.html$/i.test(base)) {
+    const entry = byId.get("angular");
+    if (entry) return [entry];
+  }
+  if (/\.gradle\.kts$/i.test(base)) {
+    const entry = byId.get("gradle-kotlin");
+    if (entry) return [entry];
+  }
+  if (/\.schema\.json$/i.test(base)) {
+    const entry = byId.get("json-schema");
+    if (entry) return [entry];
+  }
+  if (/\.ansible\.ya?ml$/i.test(base)) {
+    const entry = byId.get("ansible");
+    if (entry) return [entry];
+  }
+  if (/\.k8s\.ya?ml$/i.test(base)) {
+    const entry = byId.get("kubernetes");
+    if (entry) return [entry];
+  }
   const exact = byFilename.get(base.toLowerCase());
   if (exact) return [exact];
   if (/^dockerfile(\.[\w-]+)?$/i.test(base) || /\.dockerfile$/i.test(base)) {
