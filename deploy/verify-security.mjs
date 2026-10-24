@@ -1,4 +1,4 @@
-// Run on the dev box: node deploy/verify-security.mjs <origin>
+// Run: node deploy/verify-security.mjs <origin>
 // Against a production Caddy image, in an isolated compose project; no external request is allowed.
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";

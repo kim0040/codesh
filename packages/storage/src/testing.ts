@@ -34,7 +34,7 @@ export function mongoAvailable(): Promise<boolean> {
 export interface TestDatabase {
   db: Db;
   stores: Stores;
-  /** Empties every collection (dropping would churn WiredTiger files on the shared dev box). */
+  /** Empties every collection (dropping would churn WiredTiger files on a shared machine). */
   reset(): Promise<Stores>;
   drop(): Promise<void>;
 }

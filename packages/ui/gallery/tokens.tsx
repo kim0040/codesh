@@ -219,7 +219,7 @@ function ParticipantTokens() {
 function TypeSpecimen() {
   const sizes: [string, string, CSSProperties?][] = [
     ["text-hero", "함께 보고, 함께 고쳐요"],
-    ["text-display", "사내망에서 바로 코드 공유"],
+    ["text-display", "같은 네트워크에서 바로 코드 공유"],
     ["text-heading", "공유를 만들어 볼까요?"],
     ["text-title", "6자리 코드로 들어와요"],
     ["text-title-sm", "근처 공유 · Nearby shares"],

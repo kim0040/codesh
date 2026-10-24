@@ -1,4 +1,4 @@
-// Load test for the collab path (docs/PLAN.md 4.2, docs/OPERATIONS.md §11). No k6 (AGPL): plain
+// Load test for the collab path (docs/OPERATIONS.md §11). No k6 (AGPL): plain
 // Node clients.
 //
 //   pnpm load -- --scenario single-share-50 --url http://host --docker-project codesh

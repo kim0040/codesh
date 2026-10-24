@@ -40,7 +40,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /**
  * CSRF guard for requests that change something. `SameSite=Lax` does not cover sibling hosts of
- * the intranet domain, and a cross-origin form can post multipart or empty bodies. A request is
+ * the same domain, and a cross-origin form can post multipart or empty bodies. A request is
  * accepted when it carries `X-Codesh: 1` (a custom header cannot be set by a cross-site form, and
  * a cross-site `fetch` with it needs a CORS preflight this server never grants) or when its
  * `Origin` is the app's own. The admin API is exempt: it needs a bearer token no browser adds.

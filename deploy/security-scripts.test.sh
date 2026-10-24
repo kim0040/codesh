@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression probes for checksums: scripts/box 'bash deploy/security-scripts.test.sh'
+# Regression probes for checksums: bash deploy/security-scripts.test.sh (on a docker host)
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 fixture="$(mktemp -d)"

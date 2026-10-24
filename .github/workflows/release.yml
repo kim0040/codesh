@@ -67,7 +67,7 @@ jobs:
           - { name: api, file: apps/api/Dockerfile, context: . }
           - { name: collab, file: apps/collab/Dockerfile, context: . }
           - { name: web, file: deploy/caddy/Dockerfile, context: . }
-          - { name: mdns, file: deploy/mdns/Dockerfile, context: deploy/mdns }
+          - { name: mdns, file: deploy/mdns/Dockerfile, context: . }
     env:
       IMAGE: ${{ needs.verify.outputs.registry }}/codesh-${{ matrix.name }}
     steps:

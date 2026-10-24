@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Packs the images with the compose file and the admin scripts into one tar.gz for a host without
-# internet (docs/PLAN.md 8; install with install.sh inside the archive), and the same files without
+# internet (install with install.sh inside the archive), and the same files without
 # the images into codesh-deploy-<version>.tar.gz, which update.sh fetches on hosts that pull images.
 #
 #   deploy/bundle.sh [version]                     builds the images from this tree
@@ -10,7 +10,7 @@
 #
 #   -> deploy/dist/codesh-<version><suffix>.tar.gz and codesh-deploy-<version>.tar.gz (+ .sha256)
 #
-# Runs where docker and internet access are available (the instabox dev box: scripts/box deploy/bundle.sh).
+# Runs where docker and internet access are available.
 set -euo pipefail
 cd "$(dirname "$0")"
 . ./lib.sh

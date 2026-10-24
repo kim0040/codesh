@@ -9,7 +9,7 @@ export const oidcConfigSchema = z.object({
   scopes: z.string().default("openid profile email"),
   /** Overrides `<PUBLIC_URL>/api/auth/oidc/callback`. */
   redirectUri: z.url().optional(),
-  /** Intranet identity providers often run on plain HTTP. */
+  /** Identity providers on a private network often run on plain HTTP. */
   allowInsecure: z.boolean().default(false),
 });
 export type OidcConfig = z.infer<typeof oidcConfigSchema>;

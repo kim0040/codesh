@@ -1,5 +1,5 @@
 // Renders the gallery in Chromium and writes PNGs to <repo>/.box-out/gallery-*.png.
-//   scripts/box pnpm --filter @codesh/ui gallery:shots
+//   pnpm --filter @codesh/ui gallery:shots
 // Doubles as a smoke test: it fails on console errors, checks PinInput paste, dialogs, the toast
 // stack and the 320px layout (no horizontal page scroll).
 import { mkdirSync } from "node:fs";

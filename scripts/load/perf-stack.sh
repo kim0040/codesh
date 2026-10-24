@@ -57,7 +57,7 @@ case "${1:-}" in
       } >"$OVERRIDE"
     fi
     compose up -d --build --wait
-    # Each rebuild leaves the previous images of this project untagged; the box disk is small.
+    # Each rebuild leaves the previous images of this project untagged; the disk may be small.
     docker image prune -f --filter "label=com.docker.compose.project=$PROJECT" >/dev/null
     echo "perf stack $PROJECT up on http://localhost:$HTTP_PORT (env $ENV_FILE)"
     ;;

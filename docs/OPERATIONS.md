@@ -38,7 +38,7 @@ deploy/bundle.sh [버전]
 sha256sum -c codesh-<버전>.tar.gz.sha256
 tar xzf codesh-<버전>.tar.gz
 cd codesh-<버전>
-PUBLIC_URL=http://codesh.corp ./install.sh
+PUBLIC_URL=http://codesh.local ./install.sh
 ```
 `install.sh` 스크립트는 다음 작업을 순차적으로 수행합니다.
 1. 번들 안의 `SHA256SUMS`로 모든 파일을 검사하고, 맞지 않으면 아무것도 하지 않고 중단.
@@ -63,8 +63,8 @@ PUBLIC_URL=http://codesh.corp ./install.sh
 | `HTTPS_PROXY` / `NO_PROXY` | 주석 처리됨 | 업데이트 확인이 거칠 HTTPS 프록시와 거치지 않을 호스트입니다(15.9). |
 | `HTTP_PORT` | `80` | Caddy 컨테이너가 호스트에 바인딩할 HTTP 포트입니다. |
 | `HTTPS_PORT` | `443` | Caddy 컨테이너가 호스트에 바인딩할 HTTPS 포트입니다. |
-| `SITE_ADDRESS` | `:80` | Caddy가 응답할 주소입니다. `:80`은 모든 IP/도메인의 일반 HTTP 요청을 처리합니다. 도메인(예: `codesh.corp`)을 지정하면 HTTPS가 활성화됩니다. |
-| `PUBLIC_URL` | 비어 있음 | 사용자가 브라우저 주소창에 입력하는 기준 URL(예: `https://codesh.corp`, 끝 슬래시 제외)입니다. 세션 쿠키의 Secure 플래그, OIDC 콜백 주소, CSRF 원본 검증에 사용됩니다. 일반 HTTP IP 접근 시 비워둘 수 있습니다. |
+| `SITE_ADDRESS` | `:80` | Caddy가 응답할 주소입니다. `:80`은 모든 IP/도메인의 일반 HTTP 요청을 처리합니다. 도메인(예: `codesh.local`)을 지정하면 HTTPS가 활성화됩니다. |
+| `PUBLIC_URL` | 비어 있음 | 사용자가 브라우저 주소창에 입력하는 기준 URL(예: `https://codesh.local`, 끝 슬래시 제외)입니다. 세션 쿠키의 Secure 플래그, OIDC 콜백 주소, CSRF 원본 검증에 사용됩니다. 일반 HTTP IP 접근 시 비워둘 수 있습니다. |
 | `NETWORK_SUBNET` | `172.29.88.0/24` | Compose 내부 브리지 네트워크 서브넷입니다. 호스트 내부 사설망과 대역이 충돌하는 경우에만 변경합니다. |
 | `TRUST_PROXY` | `NETWORK_SUBNET`과 동일 | API 앞단에 위치한 리버스 프록시(Caddy)의 CIDR 대역입니다. Caddy가 실행되는 네트워크 대역을 신뢰하여 `X-Forwarded-For` 헤더로부터 실제 클라이언트 IP를 추출합니다. 비워두면 모든 사용자가 동일 IP로 인식되어 레이트 리밋을 공유하게 됩니다. |
 | `CADDY_TRUSTED_PROXIES` | `127.0.0.1/32` | Caddy 앞단에 별도의 로드밸런서가 있을 때, 해당 프록시의 `X-Forwarded-For` 헤더를 신뢰하기 위한 CIDR 대역입니다. |
@@ -98,7 +98,7 @@ PUBLIC_URL=http://codesh.corp ./install.sh
    ```caddy
    tls /etc/caddy/tls/codesh.crt /etc/caddy/tls/codesh.key
    ```
-3. `.env` 파일에서 `SITE_ADDRESS=codesh.corp` 및 `PUBLIC_URL=https://codesh.corp`로 변경 후 컨테이너를 재시작합니다.
+3. `.env` 파일에서 `SITE_ADDRESS=codesh.local` 및 `PUBLIC_URL=https://codesh.local`로 변경 후 컨테이너를 재시작합니다.
 
 ### 4.2 Caddy 내장 로컬 CA 사용
 인터넷 없이 HTTPS를 제공하려면 Caddy 내장 CA를 사용합니다.
@@ -282,7 +282,7 @@ PERF_DIR=/srv/codesh-perf scripts/load/perf-stack.sh down
 
 ### 11.4 측정 결과
 
-측정 환경: instabox VM 한 대(4 vCPU, 8 GB RAM)에서 운영 Compose 스택(11.2의 임시 스택), 부하 생성기(1–1.7코어를 씀), 브라우저를 모두 같이 돌렸습니다. 네트워크는 루프백이라 실제 LAN 왕복 시간(보통 1–5 ms)은 빠져 있고, 같은 VM을 다른 작업이 함께 쓰는 동안(부하 평균 최대 41) 잰 수치도 섞여 있습니다. 그래서 절댓값은 비관적이고 흔들리며, 변경 전후는 번갈아 연달아 재서 비교했습니다. 원본은 `.box-out/perf/*.json`, 요약은 `.box-out/perf/report.md`입니다.
+측정 환경: VM 한 대(4 vCPU, 8 GB RAM)에서 운영 Compose 스택(11.2의 임시 스택), 부하 생성기(1–1.7코어를 씀), 브라우저를 모두 같이 돌렸습니다. 네트워크는 루프백이라 실제 LAN 왕복 시간(보통 1–5 ms)은 빠져 있고, 같은 VM을 다른 작업이 함께 쓰는 동안(부하 평균 최대 41) 잰 수치도 섞여 있습니다. 그래서 절댓값은 비관적이고 흔들리며, 변경 전후는 번갈아 연달아 재서 비교했습니다. 원본은 `.box-out/perf/*.json`, 요약은 `.box-out/perf/report.md`입니다.
 
 **서버 (지연은 ms, 편집 p50 / p95 / p99 / 최대, 커서 p50 / p95 / p99)**
 

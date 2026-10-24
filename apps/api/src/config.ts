@@ -31,7 +31,7 @@ const envSchema = z.object({
   ADMIN_TOKEN: z.string().default(""),
   /** Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted. */
   TRUST_PROXY: z.string().default(""),
-  /** Origin users reach the app on, e.g. https://codesh.corp. Used for OIDC redirect URIs. */
+  /** Origin users reach the app on, e.g. https://codesh.local. Used for OIDC redirect URIs. */
   PUBLIC_URL: z.string().default(""),
   /** Requests per client IP and minute, per bucket. */
   RATE_LIMIT_API_PER_MIN: z.coerce.number().int().positive().default(1200),

@@ -1,6 +1,6 @@
 # codesh architecture contract
 
-Developer-facing contract shared by every package. Product scope lives in `PLAN.md`; when this file and the code disagree, fix one of them in the same change.
+Developer-facing contract shared by every package. When this file and the code disagree, fix one of them in the same change.
 
 ## 1. Runtime topology
 
@@ -179,7 +179,6 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 
 | Command | Where |
 |---|---|
-| `scripts/box <cmd>` | sync the working tree to the instabox dev box and run `<cmd>` there. **All installs, builds, tests, dev servers and docker run through this.** |
 | `pnpm dev` | turbo: web + api + collab (needs `pnpm services:up`) |
 | `pnpm services:up` / `services:down` | docker compose: MongoDB 8 + Valkey 8 |
 | `pnpm check` | biome lint/format check + `tsc -b` + vitest + license check |

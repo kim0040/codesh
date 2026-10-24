@@ -14,8 +14,12 @@ const hiddenReveals = (page: Page) =>
       ).length,
   );
 
+// Words that tie the copy to one kind of organisation or network (written as escapes so this file
+// does not contain them itself).
+const WHERE_WORDS = /\uc0ac\ub0b4|\ub0b4\ubd80\ub9dd|\ud68c\uc0ac|\u0069ntranet|\u0063ompany/i;
+
 for (const locale of ["ko", "en"] as const) {
-  test(`intro (${locale}): copy does not assume a company or an intranet`, async ({ browser }) => {
+  test(`intro (${locale}): copy does not assume where it is deployed`, async ({ browser }) => {
     const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
     try {
       await user.context.addInitScript((value) => {
@@ -26,8 +30,8 @@ for (const locale of ["ko", "en"] as const) {
       const text = await user.page
         .locator("main, footer")
         .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? "").join(" "));
-      expect(text).not.toMatch(/사내|내부망|회사|intranet|company/i);
-      expect(await user.page.title()).not.toMatch(/사내|내부망|회사|intranet|company/i);
+      expect(text).not.toMatch(WHERE_WORDS);
+      expect(await user.page.title()).not.toMatch(WHERE_WORDS);
     } finally {
       await closeAll(user);
     }

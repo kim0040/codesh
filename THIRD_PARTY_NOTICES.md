@@ -76,7 +76,7 @@ contributors) with its standalone parser plugins. Prettier bundles other softwar
 it lists every bundled component and its licence in its own `THIRD-PARTY-NOTICES.md` (MIT, ISC,
 BSD-3-Clause, BSD-2-Clause, BlueOak-1.0.0 and Apache-2.0, among them TypeScript). That file is
 reproduced in full in `/THIRD-PARTY-LICENSES.txt` and is part of the npm package
-(`node_modules/prettier/THIRD-PARTY-NOTICES.md`). It is incorporated here by reference.
+(`node_modules/prettier/THIRD-PARTY-NOTICES.md`). It is included here by reference.
 
 ## 4. npm packages
 

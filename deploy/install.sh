@@ -3,7 +3,7 @@
 # starts the stack. Needs docker with the compose plugin; no internet.
 #
 #   tar xzf codesh-<version>.tar.gz && cd codesh-<version> && ./install.sh
-#   PUBLIC_URL=http://codesh.corp HTTP_PORT=8080 ./install.sh     # optional settings for a new .env
+#   PUBLIC_URL=http://codesh.local HTTP_PORT=8080 ./install.sh     # optional settings for a new .env
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")"

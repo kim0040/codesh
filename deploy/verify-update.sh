@@ -2,7 +2,7 @@
 # End-to-end check of deploy/update.sh with real images on a docker host: a local registry stands
 # in for GHCR and a local HTTP server for GitHub (release list, SHA256SUMS, deploy archives).
 #
-#   bash deploy/verify-update.sh          from the repository root (scripts/box 'bash deploy/verify-update.sh')
+#   bash deploy/verify-update.sh          from the repository root, on a docker host
 #
 # Builds the images once and publishes them as 1.0.0, 1.0.1 and a 1.0.2 whose api never starts;
 # makes the release files with bundle.sh (BUNDLE_SOURCE=registry, as release.yml does); installs

@@ -1,5 +1,5 @@
-// Builds the web app, serves it, and checks the intro page in Chromium. Run on the box:
-//   scripts/box "node apps/web/src/features/intro/tools/shots.mjs [--quick]"
+// Builds the web app, serves it, and checks the intro page in Chromium. Run it where Chromium is installed:
+//   node apps/web/src/features/intro/tools/shots.mjs [--quick]
 // Writes PNGs to <repo>/.box-out/intro/ and prints requests, console errors, CLS and LCP.
 // Exits 1 when an external request, a console error or CLS >= 0.05 shows up.
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";

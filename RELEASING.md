@@ -27,7 +27,7 @@ in the admin console within about 12 hours and install it with `./update.sh` (do
    `## [Unreleased]` above it and update the links at the bottom. Write for operators: what changed
    for them, and under a `### Upgrade notes` heading anything they must do. This section becomes the
    release notes, and the admin console shows its first 4000 characters as plain text.
-3. Check: `node scripts/release.mjs check vX.Y.Z` and `scripts/box 'pnpm check'`. CI runs the first one too.
+3. Check: `node scripts/release.mjs check vX.Y.Z` and `pnpm check`. CI runs the first one too.
 4. Merge to `main` once CI is green, then tag the merge commit and push the tag:
    ```sh
    git switch main && git pull

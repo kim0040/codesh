@@ -1,6 +1,6 @@
 // Full-page intro screenshots for before/after comparison, plus a check that the scroll reveal
-// never leaves content invisible. Run on the box:
-//   scripts/box "node apps/web/src/features/intro/tools/detail-shots.mjs <label> [--skip-build]"
+// never leaves content invisible. Run it where Chromium is installed:
+//   node apps/web/src/features/intro/tools/detail-shots.mjs <label> [--skip-build]
 // Writes <repo>/.box-out/intro-detail/<label>-<ko|en>-<dark|light>-<width>[-natural].png.
 // The plain PNGs force every reveal visible; "-natural" ones are scrolled through like a visitor
 // would, so they show what a real visit looks like. Exits 1 on an external request, a console

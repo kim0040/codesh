@@ -6,7 +6,7 @@ import * as Y from "yjs";
 import { loadPersisted, PersistedDoc } from "./persisted-doc.js";
 
 /**
- * PLAN §4.3 concurrency check: clients edit the same region concurrently while messages are
+ * Concurrency check: clients edit the same region concurrently while messages are
  * reordered, connections drop and the server restarts from what it persisted. Afterwards every
  * replica and the stored state must be identical.
  */

@@ -22,7 +22,7 @@ Route tests use the real Valkey (database `1 + VITEST_POOL_ID`, flushed per harn
 
 ## Cross-site requests (`X-Codesh`)
 
-Every request under `/api/` that is not `GET`, `HEAD` or `OPTIONS` must carry **`X-Codesh: 1`**, or an `Origin` header that is the app's own (same host as the `Host` header, or the origin of `PUBLIC_URL`). Otherwise the API answers 403 `forbidden`. `SameSite=Lax` does not stop a form post from a sibling intranet host, and a form cannot add a custom header (a cross-site `fetch` with one needs a CORS preflight, which this server never grants). The web app sends `X-Codesh: 1` on all its non-GET requests, including the multipart `POST /api/uploads`; scripts and `curl` must add it. The bearer-token admin API (`/api/admin/*`) is exempt, no browser attaches that token by itself. Reads (`GET`, including the SSE stream) are never checked.
+Every request under `/api/` that is not `GET`, `HEAD` or `OPTIONS` must carry **`X-Codesh: 1`**, or an `Origin` header that is the app's own (same host as the `Host` header, or the origin of `PUBLIC_URL`). Otherwise the API answers 403 `forbidden`. `SameSite=Lax` does not stop a form post from a sibling host on the same network, and a form cannot add a custom header (a cross-site `fetch` with one needs a CORS preflight, which this server never grants). The web app sends `X-Codesh: 1` on all its non-GET requests, including the multipart `POST /api/uploads`; scripts and `curl` must add it. The bearer-token admin API (`/api/admin/*`) is exempt, no browser attaches that token by itself. Reads (`GET`, including the SSE stream) are never checked.
 
 ## Behaviour worth knowing
 

@@ -1,5 +1,5 @@
 // Advertises the codesh host name on the LAN with multicast DNS, so people can open
-// http://codesh.local (docs/PLAN.md 2.4). A sidecar: apps/api stays untouched.
+// http://codesh.local. A sidecar: apps/api stays untouched.
 //
 //   MDNS_HOSTNAME  name to answer for (default codesh.local)
 //   MDNS_PORT      port of the web server (default 80)

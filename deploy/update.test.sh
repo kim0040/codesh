@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests deploy/update.sh against a fake release server and a fake docker:
-#   scripts/box 'bash deploy/update.test.sh'
+#   bash deploy/update.test.sh
 # Covers --check, refused major and downgrade, checksum and digest mismatches, the happy path,
 # rollback after a failed health check, --auto with its policy, and the timer (systemd, cron, dry run).
 # Needs python3 (the HTTP server) and curl.

@@ -4,7 +4,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { ADMIN_TOKEN } from "./env";
 import { closeAll, newUser, type User } from "./helpers";
 
-/** Review screenshots of folders, tags and templates: `.box-out/organize/*.png`, pulled back by scripts/box. */
+/** Review screenshots of folders, tags and templates: `.box-out/organize/*.png`, at the repository root. */
 const OUT = fileURLToPath(new URL("../../../.box-out/organize/", import.meta.url));
 
 async function shot(page: Page, name: string, fullPage = false) {

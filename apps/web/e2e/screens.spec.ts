@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import { closeAll, newUser, type User, waitForEditor } from "./helpers";
 
-/** Review screenshots: `.box-out/screens/*.png` at the repository root, pulled back by scripts/box. */
+/** Review screenshots: `.box-out/screens/*.png` at the repository root. */
 const SCREENS = fileURLToPath(new URL("../../../.box-out/screens/", import.meta.url));
 
 const SERVER_TS = `import { createServer } from "node:http";

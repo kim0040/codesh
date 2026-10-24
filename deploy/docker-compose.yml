@@ -218,7 +218,8 @@ services:
     profiles: [mdns]
     restart: unless-stopped
     build:
-      context: ./mdns
+      context: ..
+      dockerfile: deploy/mdns/Dockerfile
     image: ${CODESH_REGISTRY:-ghcr.io/kim0040}/codesh-mdns:${CODESH_VERSION:?set CODESH_VERSION in .env}
     network_mode: host
     read_only: true

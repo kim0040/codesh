@@ -44,7 +44,7 @@ Instances coordinate through Valkey (document locks, `@hocuspocus/extension-redi
 
 ## Offline bundle
 
-On a machine with internet and docker (for example `scripts/box deploy/bundle.sh`):
+On a machine with internet and docker:
 
 ```sh
 deploy/bundle.sh [version]        # -> deploy/dist/codesh-<version>.tar.gz and codesh-deploy-<version>.tar.gz (+ .sha256)
@@ -56,7 +56,7 @@ Releases attach these bundles as `codesh-<version>-linux-amd64.tar.gz` and `-lin
 ```sh
 sha256sum -c codesh-<version>.tar.gz.sha256     # compare the value with one received over a trusted channel
 tar xzf codesh-<version>.tar.gz && cd codesh-<version>
-PUBLIC_URL=http://codesh.corp ./install.sh      # loads images, writes .env with new secrets, starts, waits for /healthz
+PUBLIC_URL=http://codesh.local ./install.sh      # loads images, writes .env with new secrets, starts, waits for /healthz
 ./backup.sh                                     # mongodump -> ./backups/codesh-<time>.archive.gz
 ./restore.sh backups/codesh-<time>.archive.gz   # stops api+collab, mongorestore --drop, starts them
 ./upgrade.sh ../codesh-<newer>.tar.gz           # checksums, backup, load images, keep .env, up -d, wait for /healthz
@@ -81,7 +81,7 @@ Valkey holds join codes, presence, grants, network bans and quota counters; it i
 
 ## Load test
 
-`pnpm load -- --url http://codesh.corp --shares 100 --writers 5 --viewers 20 --duration 60` (see `scripts/load`). One machine is one client IP: raise `RATE_LIMIT_*` in `.env` for big runs.
+`pnpm load -- --url http://codesh.local --shares 100 --writers 5 --viewers 20 --duration 60` (see `scripts/load`). One machine is one client IP: raise `RATE_LIMIT_*` in `.env` for big runs.
 
 ## Notes
 
