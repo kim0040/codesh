@@ -3,6 +3,7 @@ import { type ReactNode, useEffect } from "react";
 import { retainEvents } from "../../lib/events";
 import { useT } from "../../lib/i18n";
 import { openPalette, openShortcuts } from "../../lib/overlays";
+import { TemplatePicker } from "../start/TemplatePicker";
 import { CommandPalette } from "./CommandPalette";
 import { EventToasts } from "./EventToasts";
 import { ShortcutSheet } from "./ShortcutSheet";
@@ -48,6 +49,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <EventToasts />
       <CommandPalette />
       <ShortcutSheet />
+      <TemplatePicker />
     </>
   );
 }

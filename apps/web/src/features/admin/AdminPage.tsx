@@ -1,5 +1,5 @@
 import { formatRelativeTime } from "@codesh/i18n";
-import type { Settings } from "@codesh/shared";
+import { type Settings, settingsSchema } from "@codesh/shared";
 import {
   Badge,
   Button,
@@ -30,6 +30,7 @@ import { api, isApiError, rawRequest } from "../../lib/api";
 import { usePresence } from "../../lib/events";
 import { formatBytes } from "../../lib/format";
 import { useLocale, useT } from "../../lib/i18n";
+import { TemplatesEditor } from "./TemplatesEditor";
 
 const TOKEN_KEY = "codesh.admin";
 
@@ -313,6 +314,8 @@ function SettingsForm({ token, initial }: { token: string; initial: Settings }) 
     draft.maxUploadMB,
     draft.audit.retentionDays,
   ].every(Number.isFinite);
+  // The same check the server runs, so a refused save (a template over the size limit) is caught here.
+  const schemaOk = settingsSchema.safeParse(draft).success;
 
   return (
     <form
@@ -367,6 +370,12 @@ function SettingsForm({ token, initial }: { token: string; initial: Settings }) 
           onCheckedChange={(guestAllowed) => patch({ guestAllowed })}
         />
       </Group>
+
+      <TemplatesEditor
+        templates={draft.templates}
+        maxDocBytes={draft.maxDocBytes}
+        onChange={(templates) => patch({ templates })}
+      />
 
       <Group title={t("admin.setting.group.nearby")}>
         <Switch
@@ -519,7 +528,7 @@ function SettingsForm({ token, initial }: { token: string; initial: Settings }) 
         <Button
           type="submit"
           variant="primary"
-          disabled={!dirty || !valid}
+          disabled={!dirty || !valid || !schemaOk}
           loading={save.isPending}
           loadingLabel={t("common.loading")}
           data-testid="admin-save"
