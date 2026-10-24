@@ -543,6 +543,7 @@ export const en = {
   "upload.title": "Upload files or a folder",
   "upload.dropHint": "Drop files, a folder or a .zip here",
   "upload.browseAction": "Choose files",
+  "upload.folderAction": "Choose a folder",
   "upload.limit": "Up to {size} per upload",
   "upload.progress.one": "Uploading {count} file…",
   "upload.progress.other": "Uploading {count} files…",

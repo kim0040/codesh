@@ -556,6 +556,7 @@ export const ko: KoDictionary = {
   "upload.title": "파일이나 폴더 올리기",
   "upload.dropHint": "파일, 폴더, .zip을 여기에 끌어다 놓으세요",
   "upload.browseAction": "파일 선택",
+  "upload.folderAction": "폴더 선택",
   "upload.limit": "한 번에 최대 {size}까지 올릴 수 있어요",
   "upload.progress.other": "파일 {count}개 올리는 중…",
   "upload.asShare": "여러 파일 공유로 열기",

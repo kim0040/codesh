@@ -75,10 +75,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Row({ label, children, id }: { label: string; children: React.ReactNode; id?: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span id={id} className="min-w-0 text-body-sm">
+      <span id={id} className="min-w-0 flex-1 text-body-sm">
         {label}
       </span>
-      {children}
+      {/* One control column, so labels stay on one line and the controls line up. */}
+      <div className="flex w-44 max-w-[60%] shrink-0 justify-end">{children}</div>
     </div>
   );
 }

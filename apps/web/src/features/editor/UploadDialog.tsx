@@ -34,15 +34,15 @@ export function UploadDialog() {
   const ctx = useEditor();
   const run = useImport();
   const open = ctx.panel.name === "upload";
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(0);
   const [over, setOver] = useState(false);
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
 
   const handle = async (files: File[]) => {
-    setBusy(true);
+    setBusy(files.length);
     await run(files);
-    setBusy(false);
+    setBusy(0);
     ctx.closePanel();
   };
 
@@ -66,8 +66,8 @@ export function UploadDialog() {
           className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-line-strong p-8 text-center"
           data-testid="upload-zone"
         >
-          {busy ? (
-            <Spinner label={t("upload.progress", { count: 1 })} />
+          {busy > 0 ? (
+            <Spinner label={t("upload.progress", { count: busy })} />
           ) : (
             <>
               <Upload aria-hidden="true" className="size-6 text-fg-3" />
@@ -77,7 +77,7 @@ export function UploadDialog() {
                   {t("upload.browseAction")}
                 </Button>
                 <Button onClick={() => folderInput.current?.click()} leading={<FolderUp />}>
-                  {t("upload.title")}
+                  {t("upload.folderAction")}
                 </Button>
               </div>
             </>

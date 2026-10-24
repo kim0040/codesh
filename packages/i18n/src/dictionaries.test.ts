@@ -48,6 +48,7 @@ const LATIN_ONLY_KO = new Set([
   "locale.en",
   "pin.label",
   "status.latency",
+  "history.position",
   "invite.received.detail",
   "editor.files.namePlaceholder",
   "settings.editorTheme.slate",
