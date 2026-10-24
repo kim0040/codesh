@@ -7,6 +7,16 @@ text of its GitHub release (RELEASING.md).
 
 ## [Unreleased]
 
+### Security
+
+- Edit links carry the key in the URL fragment (`#key=`), which browsers do not send to servers.
+  The key is moved into memory and removed from the address bar at once; links with `?key=` still
+  work and are cleaned the same way.
+- Offline copies on shared devices: a setting to keep (default) or not keep an offline copy, and
+  "Forget on this device". Removal, a ban, a refused authorization, a deleted share, signing out
+  and switching accounts delete the copies and remembered edit keys, in every open tab. Shares with
+  a PIN or approval load their copy only after the server accepted the connection.
+
 ## [1.0.0] - 2026-10-25
 
 The first release: real-time code sharing for one network, with no outside service at runtime.

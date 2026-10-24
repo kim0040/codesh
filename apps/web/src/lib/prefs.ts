@@ -19,6 +19,8 @@ export interface EditorPrefs {
   smoothTyping: boolean;
   /** Show invites as system notifications while the tab is in the background. */
   notifications: boolean;
+  /** Keep an offline copy of each share in this browser (IndexedDB). */
+  offlineCopy: boolean;
 }
 
 export const FONT_SIZE_MIN = 10;
@@ -35,6 +37,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
   keymap: "default",
   smoothTyping: true,
   notifications: false,
+  offlineCopy: true,
 };
 
 const STORAGE_KEY = "codesh.prefs";
@@ -65,6 +68,7 @@ export function sanitizePrefs(input: unknown): EditorPrefs {
     keymap: KEYMAPS.find((k) => k === keymap) ?? d.keymap,
     smoothTyping: bool("smoothTyping", d.smoothTyping),
     notifications: bool("notifications", d.notifications),
+    offlineCopy: bool("offlineCopy", d.offlineCopy),
   };
 }
 
@@ -103,7 +107,7 @@ export function resetPrefs(): void {
   setPrefs({ ...DEFAULT_PREFS });
 }
 
-function subscribe(listener: () => void): () => void {
+export function subscribePrefs(listener: () => void): () => void {
   listeners.add(listener);
   const onStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY) {
@@ -119,5 +123,5 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function usePrefs(): EditorPrefs {
-  return useSyncExternalStore(subscribe, getPrefs, () => DEFAULT_PREFS);
+  return useSyncExternalStore(subscribePrefs, getPrefs, () => DEFAULT_PREFS);
 }

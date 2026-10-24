@@ -4,6 +4,9 @@ import { IndexeddbPersistence } from "y-indexeddb";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { ApiError, api } from "../api";
+import { dropKey } from "../credentials";
+import { forgetShare, idbName, registerHolder } from "../device";
+import { getPrefs, subscribePrefs } from "../prefs";
 import { acquireSocket } from "./socket";
 
 /**
@@ -50,12 +53,16 @@ export interface SessionOptions {
   user: UserRef;
   role: Role;
   credentials: JoinCredentials;
+  /**
+   * The share asks for a PIN or an approval. Its local copy is not read before the server has
+   * accepted this client on the current connection.
+   */
+  sensitive?: boolean;
   /** Called once when the connection came back and local offline edits are merged. */
   onMerged?: () => void;
   onRole?: (role: Role, readOnly: boolean) => void;
 }
 
-const IDB_PREFIX = "codesh:doc:";
 const AWARENESS_MIN_GAP_MS = Math.ceil(1000 / 30);
 
 export function parseStateless(payload: string): CollabStateless | null {
@@ -90,6 +97,13 @@ export class DocSession {
   doc: Y.Doc;
   provider: HocuspocusProvider;
   private persistence: IndexeddbPersistence | null = null;
+  /** Authorization of this connection went through (the PIN and approval checks included). */
+  private authorized = false;
+  /** The user (or a denial) asked to forget this device: no copy is written until they allow it. */
+  private localReleased = false;
+  private readonly unregisterHolder: () => void;
+  private readonly unsubscribePrefs: () => void;
+  private offlineCopyWanted: boolean;
   private readonly socket: HocuspocusProviderWebsocket;
   private readonly releaseSocket: () => void;
   private credentials: JoinCredentials;
@@ -130,6 +144,12 @@ export class DocSession {
     };
     this.doc = new Y.Doc();
     this.provider = this.createProvider(this.doc);
+    this.offlineCopyWanted = getPrefs().offlineCopy;
+    this.unregisterHolder = registerHolder({
+      shareId: this.shareId,
+      releaseLocal: () => this.releaseLocal(),
+    });
+    this.unsubscribePrefs = subscribePrefs(() => this.onPrefs());
     this.attachPersistence();
     window.addEventListener("online", this.onlineListener);
     window.addEventListener("offline", this.onlineListener);
@@ -168,6 +188,8 @@ export class DocSession {
       },
       onAuthenticated: ({ scope }) => {
         this.everConnected = true;
+        this.authorized = true;
+        this.attachPersistence();
         this.patch({ denied: null });
         if (scope === "readonly" && !this.state.readOnly) this.patch({ readOnly: true });
         // The provider sets `isAuthenticated` after this callback returns.
@@ -196,7 +218,7 @@ export class DocSession {
         if (reason === "kicked" || reason === "deleted") {
           this.patch({ closed: reason });
           // Leave the document, but keep the shared socket for other documents of this tab.
-          provider.detach();
+          this.forgetAfterDenial();
         }
         this.refreshStatus();
       },
@@ -226,19 +248,59 @@ export class DocSession {
     doc.on("update", this.docListener);
   }
 
+  private mayKeepCopy(): boolean {
+    if (this.destroyed || this.localReleased || !getPrefs().offlineCopy) return false;
+    return !this.options.sensitive || this.authorized;
+  }
+
   private attachPersistence() {
     // A per-document offline copy: edits survive a closed tab and merge on the next connect.
+    if (this.persistence || !this.mayKeepCopy()) return;
     try {
-      this.persistence = new IndexeddbPersistence(`${IDB_PREFIX}${this.shareId}`, this.doc);
-      this.persistence.whenSynced
+      const persistence = new IndexeddbPersistence(idbName(this.shareId), this.doc);
+      this.persistence = persistence;
+      persistence.whenSynced
         .then(() => {
-          if (this.destroyed) return;
+          if (this.destroyed || this.persistence !== persistence) return;
           if (this.doc.getMap("files").size > 0) this.patch({ restored: true });
         })
         .catch(() => undefined);
     } catch {
       this.persistence = null;
     }
+  }
+
+  /** The "keep an offline copy" setting changed (in this tab or another one). */
+  private onPrefs() {
+    const wanted = getPrefs().offlineCopy;
+    if (wanted === this.offlineCopyWanted) return;
+    this.offlineCopyWanted = wanted;
+    if (wanted) {
+      this.localReleased = false;
+      this.attachPersistence();
+      return;
+    }
+    void forgetShare(this.shareId, { broadcast: false });
+  }
+
+  /** Closes the IndexedDB connection and stops writing a copy (device.ts then deletes it). */
+  async releaseLocal(): Promise<void> {
+    this.localReleased = true;
+    const persistence = this.persistence;
+    this.persistence = null;
+    this.patch({ restored: false });
+    await persistence?.destroy().catch(() => undefined);
+  }
+
+  /**
+   * The server will not have this client (removed, banned, share gone, authorization refused):
+   * the connection stops, the offline copy and the remembered edit key go.
+   */
+  private forgetAfterDenial() {
+    this.credentials = {};
+    dropKey(this.shareId);
+    this.provider.detach();
+    void forgetShare(this.shareId);
   }
 
   /** Fresh collab token on every (re)connect; a failure becomes a rejected token, not a hang. */
@@ -275,7 +337,12 @@ export class DocSession {
     ) {
       denied = "not_found";
     }
+    this.authorized = false;
     this.patch({ denied });
+    // Only the server's own refusal forgets: a failed token request (network, restart) does not.
+    if (denied === "banned" || denied === "not_found" || failure?.code === "forbidden") {
+      this.forgetAfterDenial();
+    }
   }
 
   private handleStateless(payload: string) {
@@ -385,6 +452,8 @@ export class DocSession {
     window.removeEventListener("offline", this.onlineListener);
     if (this.docListener) this.doc.off("update", this.docListener);
     if (this.awarenessTimer) clearTimeout(this.awarenessTimer);
+    this.unregisterHolder();
+    this.unsubscribePrefs();
     this.provider.destroy();
     this.persistence?.destroy().catch(() => undefined);
     this.releaseSocket();

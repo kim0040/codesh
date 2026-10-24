@@ -148,6 +148,7 @@ export const api = {
   session: (signal?: AbortSignal) => request<SessionResponse>("GET", "/api/session", { signal }),
   patchSession: (body: PatchSessionBody) =>
     request<SessionResponse>("PATCH", "/api/session", { body }),
+  logout: () => request<{ ok: true }>("POST", "/api/auth/logout"),
 
   createShare: (body: CreateShareBody = {}) =>
     request<CreateShareResponse>("POST", "/api/shares", { body }),

@@ -1,17 +1,24 @@
 import type { SessionResponse } from "@codesh/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "./api";
+import { noteSessionIdentity } from "./device";
 import { queryClient } from "./query";
 
 export const SESSION_KEY = ["session"] as const;
 
 /** The anonymous session: who I am for the whole tab. Fetched once; the cookie keeps it stable. */
+export const sessionQuery = {
+  queryKey: SESSION_KEY,
+  queryFn: async ({ signal }: { signal?: AbortSignal }) => {
+    const session = await api.session(signal);
+    noteSessionIdentity(session);
+    return session;
+  },
+  staleTime: Number.POSITIVE_INFINITY,
+};
+
 export function useSession() {
-  return useQuery({
-    queryKey: SESSION_KEY,
-    queryFn: ({ signal }) => api.session(signal),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
+  return useQuery(sessionQuery);
 }
 
 export function getCachedSession(): SessionResponse | undefined {
