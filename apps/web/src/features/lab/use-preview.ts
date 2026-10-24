@@ -15,11 +15,17 @@ export interface Preview {
 const THROTTLE_MS = 400;
 const SETTLE_MS = 1500;
 
-/** A session for a read-only live view; it closes when the component unmounts. */
+/** A session for a read-only live view, never kept offline; it closes when the component unmounts. */
 export function usePreviewSession(shareId: string, me: UserRef): DocSession | null {
   const [session, setSession] = useState<DocSession | null>(null);
   useEffect(() => {
-    const next = new DocSession({ shareId, user: me, role: "view", credentials: {} });
+    const next = new DocSession({
+      shareId,
+      user: me,
+      role: "view",
+      credentials: {},
+      keepCopy: false,
+    });
     setSession(next);
     return () => {
       next.destroy();

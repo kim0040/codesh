@@ -63,3 +63,26 @@ describe("setPrefs", () => {
     expect(getPrefs()).toEqual(DEFAULT_PREFS);
   });
 });
+
+describe("offline copy choice", () => {
+  it("is undecided unless it was answered", () => {
+    expect(sanitizePrefs({}).offlineCopy).toBe("undecided");
+    expect(sanitizePrefs({ offlineCopy: "maybe" }).offlineCopy).toBe("undecided");
+    for (const choice of ["undecided", "yes", "no"] as const) {
+      expect(sanitizePrefs({ offlineCopy: choice }).offlineCopy).toBe(choice);
+    }
+  });
+
+  it("migrates the old switch: on was the unasked default, off was a choice", () => {
+    expect(sanitizePrefs({ offlineCopy: true }).offlineCopy).toBe("undecided");
+    expect(sanitizePrefs({ offlineCopy: false }).offlineCopy).toBe("no");
+  });
+
+  it("survives a reset of the editor settings", () => {
+    setPrefs({ offlineCopy: "no", fontSize: 20 });
+    resetPrefs();
+    expect(getPrefs().offlineCopy).toBe("no");
+    expect(getPrefs().fontSize).toBe(DEFAULT_PREFS.fontSize);
+    setPrefs({ offlineCopy: "undecided" });
+  });
+});

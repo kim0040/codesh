@@ -1,7 +1,9 @@
-import { Button } from "@codesh/ui";
-import { CloudOff, Eye, Presentation, ShieldAlert, Wifi, X } from "lucide-react";
+import { Button, toast } from "@codesh/ui";
+import { CloudOff, Eye, HardDrive, Presentation, ShieldAlert, Wifi, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { chooseOfflineCopy } from "../../lib/device";
 import { useT } from "../../lib/i18n";
+import { usePrefs } from "../../lib/prefs";
 import { useEditor } from "./context";
 
 type Tone = "info" | "warning" | "danger";
@@ -49,7 +51,8 @@ export function EditorBanners({
 }) {
   const t = useT();
   const ctx = useEditor();
-  const { status, tooLarge } = ctx.state;
+  const prefs = usePrefs();
+  const { status, tooLarge, copyKept } = ctx.state;
   const offline = typeof navigator !== "undefined" && !navigator.onLine;
   const followTarget = ctx.following
     ? ctx.participants.find((person) => person.clientId === ctx.following)
@@ -62,7 +65,7 @@ export function EditorBanners({
           tone="warning"
           icon={<CloudOff />}
           title={t("conn.offline.title")}
-          body={t("conn.offline.body")}
+          body={t(copyKept ? "conn.offline.body" : "conn.offline.bodyMemory")}
           testId="banner-offline"
         />
       ) : status === "reconnecting" || status === "connecting" ? (
@@ -71,7 +74,7 @@ export function EditorBanners({
             tone="warning"
             icon={<Wifi />}
             title={t("conn.reconnecting.title")}
-            body={t("conn.reconnecting.body")}
+            body={t(copyKept ? "conn.reconnecting.body" : "conn.reconnecting.bodyMemory")}
             testId="banner-reconnecting"
           />
         ) : null
@@ -152,6 +155,37 @@ export function EditorBanners({
           }
         />
       ) : null}
+
+      {prefs.offlineCopy === "undecided" ? <DeviceChoice shareId={ctx.session.shareId} /> : null}
     </>
+  );
+}
+
+/** Asked once per device, without blocking the editor; Settings can change the answer later. */
+function DeviceChoice({ shareId }: { shareId: string }) {
+  const t = useT();
+  const choose = async (choice: "yes" | "no") => {
+    if (!(await chooseOfflineCopy(choice, shareId))) {
+      toast({ title: t("toast.forgetFailed"), tone: "warning" });
+    }
+  };
+  return (
+    <Banner
+      tone="info"
+      icon={<HardDrive />}
+      title={t("editor.deviceCopy.title")}
+      body={t("editor.deviceCopy.body")}
+      testId="device-choice"
+      actions={
+        <span className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => void choose("yes")} data-testid="device-choice-keep">
+            {t("editor.deviceCopy.keepAction")}
+          </Button>
+          <Button size="sm" onClick={() => void choose("no")} data-testid="device-choice-skip">
+            {t("editor.deviceCopy.skipAction")}
+          </Button>
+        </span>
+      }
+    />
   );
 }

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, isApiError } from "../../lib/api";
 import type { JoinCredentials } from "../../lib/collab/session";
 import { useLinkKey } from "../../lib/credentials";
+import { isDenial, leaveShare } from "../../lib/device";
 import { errorText } from "../../lib/errors";
 import { useSseEvent } from "../../lib/events";
 import { useT } from "../../lib/i18n";
@@ -39,7 +40,8 @@ type JoinState =
 export function SharePage({ idOrCode }: { idOrCode: string }) {
   if (isJoinCode(idOrCode)) return <CodeResolver code={idOrCode} />;
   if (!isShareId(idOrCode)) return <NotFoundShare />;
-  return <JoinGate shareId={idOrCode} />;
+  // One gate per share: credentials and attempts never carry over to another one.
+  return <JoinGate key={idOrCode} shareId={idOrCode} />;
 }
 
 function CodeResolver({ code }: { code: string }) {
@@ -98,6 +100,12 @@ function JoinGate({ shareId }: { shareId: string }) {
         }
       } catch (error) {
         if (id !== attemptId.current) return;
+        // The server's own refusal: a copy and a key from an earlier visit go, also when no
+        // document is open (the tab was closed when the ban came).
+        if (isDenial(error)) {
+          credentialsRef.current = {};
+          void leaveShare(shareId);
+        }
         if (isApiError(error, "pin_required")) {
           sensitiveRef.current = true;
           setState({ phase: "pin", invalid: false, rateLimited: false, busy: false });
@@ -115,21 +123,50 @@ function JoinGate({ shareId }: { shareId: string }) {
     [shareId],
   );
 
+  // The key this gate joined with; undefined before the first join.
+  const joinedWith = useRef<{ key: string | undefined } | undefined>(undefined);
   const sessionReady = Boolean(session.data);
   useEffect(() => {
     if (!sessionReady) return;
+    // A new key (pasted link) joins again; a dropped key (forget, denial) is cleanup, not a join.
+    const joined = joinedWith.current;
+    if (joined && (editKey === undefined || editKey === joined.key)) return;
+    joinedWith.current = { key: editKey };
     setState({ phase: "loading" });
     void attempt(editKey ? { editKey } : {});
-    return () => {
-      attemptId.current++;
-    };
   }, [sessionReady, attempt, editKey]);
+  useEffect(
+    () => () => {
+      attemptId.current++;
+      joinedWith.current = undefined;
+    },
+    [],
+  );
+
+  /** The open document left the share. A PIN or approval asked for anew starts the join over. */
+  const onLeft = useCallback(
+    (rejoin: boolean) => {
+      credentialsRef.current = {};
+      if (rejoin) {
+        setState({ phase: "loading" });
+        void attempt({});
+      } else
+        setState((current) =>
+          current.phase === "ready" ? { ...current, credentials: {} } : current,
+        );
+    },
+    [attempt],
+  );
 
   // Waiting room: the owner's answer arrives as an event; a slow poll covers a missed one.
   useSseEvent("approval-result", (result) => {
     if (result.shareId !== shareId) return;
     if (result.approved) void attempt(credentialsRef.current);
-    else setState({ phase: "denied" });
+    else {
+      credentialsRef.current = {};
+      void leaveShare(shareId);
+      setState({ phase: "denied" });
+    }
   });
   const waiting = state.phase === "waiting";
   useEffect(() => {
@@ -205,6 +242,7 @@ function JoinGate({ shareId }: { shareId: string }) {
           role={state.role}
           credentials={state.credentials}
           sensitive={sensitiveRef.current}
+          onLeft={onLeft}
           me={{
             clientId: session.data.clientId,
             name: session.data.name ?? "",

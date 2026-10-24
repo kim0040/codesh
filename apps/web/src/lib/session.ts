@@ -6,12 +6,15 @@ import { queryClient } from "./query";
 
 export const SESSION_KEY = ["session"] as const;
 
-/** The anonymous session: who I am for the whole tab. Fetched once; the cookie keeps it stable. */
+/**
+ * The anonymous session: who I am for the whole tab. Fetched once; the cookie keeps it stable.
+ * Nothing joins a share before it is there, so another account's copies are gone by then.
+ */
 export const sessionQuery = {
   queryKey: SESSION_KEY,
   queryFn: async ({ signal }: { signal?: AbortSignal }) => {
     const session = await api.session(signal);
-    noteSessionIdentity(session);
+    await noteSessionIdentity(session);
     return session;
   },
   staleTime: Number.POSITIVE_INFINITY,

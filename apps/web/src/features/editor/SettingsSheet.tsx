@@ -11,9 +11,10 @@ import {
   type ThemePreference,
   toast,
 } from "@codesh/ui";
+import { useNavigate } from "@tanstack/react-router";
 import { Minus, Plus } from "lucide-react";
 import { useId, useState } from "react";
-import { forgetShare, signOut } from "../../lib/device";
+import { chooseOfflineCopy, forgetShare, isForgotten, signOut } from "../../lib/device";
 import { useLocale, useT } from "../../lib/i18n";
 import { promptInstall, useCanInstall } from "../../lib/install";
 import { LICENSES_URL } from "../../lib/licenses";
@@ -90,6 +91,7 @@ function Row({ label, children, id }: { label: string; children: React.ReactNode
 function SettingsBody() {
   const t = useT();
   const ctx = useEditor();
+  const navigate = useNavigate();
   // Signing out only exists for a verified identity: an anonymous session cannot be signed back in.
   const identity = useSession().data?.identity;
   const [locale, setLocale] = useLocale();
@@ -104,8 +106,19 @@ function SettingsBody() {
     setTheme(next);
   };
 
+  const shareId = ctx.session.shareId;
+  // Off when this share was forgotten here, even if copies are kept for others.
+  const keepsCopy = prefs.offlineCopy === "yes" && !isForgotten(shareId);
+
+  const chooseCopy = async (on: boolean) => {
+    const ok = await chooseOfflineCopy(on ? "yes" : "no", shareId);
+    if (!ok) toast({ title: t("toast.forgetFailed"), tone: "warning" });
+  };
+
+  // Leaving the share here: the editor closes and the start page shows how it went.
   const forget = async () => {
-    const ok = await forgetShare(ctx.session.shareId);
+    const ok = await forgetShare(shareId);
+    void navigate({ to: "/", replace: true });
     toast(
       ok
         ? { title: t("toast.forgotten"), tone: "success", duration: 3000 }
@@ -116,7 +129,10 @@ function SettingsBody() {
   const leave = async () => {
     const ok = await signOut();
     if (ok) window.location.assign("/");
-    else toast({ title: t("toast.forgetFailed"), tone: "warning" });
+    else {
+      void navigate({ to: "/", replace: true });
+      toast({ title: t("toast.forgetFailed"), tone: "warning" });
+    }
   };
 
   const toggleNotifications = async (on: boolean) => {
@@ -278,8 +294,8 @@ function SettingsBody() {
         <Switch
           label={t("settings.offlineCopy.label")}
           description={t("settings.offlineCopy.hint")}
-          checked={prefs.offlineCopy}
-          onCheckedChange={(offlineCopy) => setPrefs({ offlineCopy })}
+          checked={keepsCopy}
+          onCheckedChange={(on) => void chooseCopy(on)}
           data-testid="switch-offline-copy"
         />
         <div className="flex flex-col gap-1.5">

@@ -2,11 +2,12 @@ import type { EditorView } from "@codemirror/view";
 import { DEFAULT_FILE_ID, type GetShareResponse, type Role, type UserRef } from "@codesh/shared";
 import { toast } from "@codesh/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isApiError } from "../../lib/api";
 import { useFiles, useMeta, useParticipants, useSessionState } from "../../lib/collab/hooks";
 import { DocSession, type JoinCredentials } from "../../lib/collab/session";
+import { isDenial, leaveShare } from "../../lib/device";
 import { errorText } from "../../lib/errors";
 import { useSseEvent } from "../../lib/events";
 import { useT } from "../../lib/i18n";
@@ -21,8 +22,6 @@ import {
   LoadFailedScreen,
   LoadingScreen,
   NotFoundShare,
-  PinGate,
-  WaitingRoom,
 } from "./gates";
 import { useFollow } from "./use-follow";
 import { useRtt } from "./use-rtt";
@@ -33,11 +32,16 @@ export interface EditorPageProps {
   credentials: JoinCredentials;
   /** The join asked for a PIN or an approval: no local copy is restored before the server accepts. */
   sensitive?: boolean;
+  /**
+   * The document left the share (forget, denial, logout). `rejoin`: the server asks for a PIN or an
+   * approval again, so the join starts over.
+   */
+  onLeft?: (rejoin: boolean) => void;
   me: UserRef;
 }
 
 /** Owns the DocSession for one share and hands everything the editor UI needs through context. */
-export function EditorPage({ shareId, role, credentials, sensitive, me }: EditorPageProps) {
+export function EditorPage({ shareId, role, credentials, sensitive, onLeft, me }: EditorPageProps) {
   const t = useT();
   const queryClient = useQueryClient();
   const shareQuery = useQuery({
@@ -47,7 +51,6 @@ export function EditorPage({ shareId, role, credentials, sensitive, me }: Editor
     staleTime: 10_000,
   });
   const [session, setSession] = useState<DocSession | null>(null);
-  const credentialsRef = useRef(credentials);
   // Also sensitive when the share says so (the owner sees its own flags).
   const sensitiveRef = useRef(false);
   sensitiveRef.current =
@@ -66,7 +69,7 @@ export function EditorPage({ shareId, role, credentials, sensitive, me }: Editor
       shareId,
       user: { clientId: me.clientId, name: meName, color: me.color },
       role,
-      credentials: credentialsRef.current,
+      credentials,
       sensitive: sensitiveRef.current,
       onMerged: () => toast({ title: t("conn.synced"), tone: "success", duration: 3000 }),
       onRole: () => void queryClient.invalidateQueries({ queryKey: ["share", shareId] }),
@@ -77,6 +80,12 @@ export function EditorPage({ shareId, role, credentials, sensitive, me }: Editor
       setSession(null);
     };
   }, [shareId, me.clientId, shareReady]);
+
+  // The share is gone or this client is refused: the copy and the key from earlier go too.
+  const denied = isDenial(shareQuery.error);
+  useEffect(() => {
+    if (denied) void leaveShare(shareId);
+  }, [denied, shareId]);
 
   // A change of name or colour reaches the others through awareness.
   useEffect(() => {
@@ -105,7 +114,7 @@ export function EditorPage({ shareId, role, credentials, sensitive, me }: Editor
       share={shareQuery.data}
       refetchShare={() => void shareQuery.refetch()}
       me={{ ...me, name: meName }}
-      credentials={credentialsRef}
+      onLeft={onLeft}
     />
   );
 }
@@ -115,11 +124,10 @@ interface ConnectedProps {
   share: GetShareResponse;
   refetchShare: () => void;
   me: UserRef;
-  credentials: MutableRefObject<JoinCredentials>;
+  onLeft?: (rejoin: boolean) => void;
 }
 
-function Connected({ session, share, refetchShare, me, credentials }: ConnectedProps) {
-  const navigate = useNavigate();
+function Connected({ session, share, refetchShare, me, onLeft }: ConnectedProps) {
   const state = useSessionState(session);
   const doc = session.doc;
   const files = useFiles(doc);
@@ -189,27 +197,21 @@ function Connected({ session, share, refetchShare, me, credentials }: ConnectedP
     };
   }, [meta.title]);
 
+  // Once the session has left, the gate above forgets its credentials too.
+  const left = state.closed !== null;
+  const rejoin = state.denied === "pin_required" || state.denied === "pending_approval";
+  useEffect(() => {
+    if (left) onLeft?.(rejoin);
+  }, [left, rejoin, onLeft]);
+
   if (state.closed === "kicked") return <KickedScreen banned={bannedByEvent === true} />;
   if (state.closed === "deleted") return <NotFoundShare />;
   if (state.denied === "banned") return <KickedScreen banned />;
   if (state.denied === "not_found") return <NotFoundShare />;
   if (state.denied === "unauthorized") return <DeniedScreen />;
-  if (state.denied === "pending_approval") {
-    return <WaitingRoom onCancel={() => void navigate({ to: "/" })} />;
-  }
-  if (state.denied === "pin_required") {
-    return (
-      <PinGate
-        invalid={false}
-        rateLimited={false}
-        busy={false}
-        onSubmit={(pin) => {
-          credentials.current = { ...credentials.current, pin };
-          void session.reconnect(credentials.current);
-        }}
-      />
-    );
-  }
+  if (rejoin) return <LoadingScreen />;
+  // Forgotten on this device (here or in another tab), or signed out.
+  if (state.closed === "left") return <Navigate to="/" replace />;
   if (!activeFile) return <LoadingScreen />;
 
   const value: EditorCtx = {
