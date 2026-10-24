@@ -3,8 +3,8 @@
  * app's Tailwind theme is loaded. Everything is scoped under .ix.
  *
  * House rules for this page: sizes come from a five-step type scale, surfaces are separated by a
- * step in tone (no hairlines, no shadows), the six-cell shape is the one recurring motif, and
- * only opacity and transform move.
+ * step in tone (no hairlines, no shadows; the scrolled header is the one exception), the
+ * six-cell shape is the one recurring motif, and only opacity and transform move.
  */
 @import "@codesh/ui/tokens.css";
 @import "@codesh/ui/fonts.css";
@@ -23,9 +23,18 @@
   --ix-radius: var(--rad-xl);
   --ix-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --ix-code-size: 13px;
+  --ix-header-h: 69px;
 
   min-height: 100vh;
-  background: var(--bg);
+  /* One static accent glow behind the top of the page; it fades out well before the first panel. */
+  background:
+    radial-gradient(
+      ellipse 70% 100% at 18% 0%,
+      color-mix(in oklab, var(--accent) 12%, transparent),
+      transparent 72%
+    )
+    top / 100% min(760px, 100vh) no-repeat,
+    var(--bg);
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: var(--ix-body);
@@ -200,6 +209,34 @@
 
 /* ── Header ── */
 
+/* Sticky in flow, so hiding it never shifts the page. useHidingHeader sets data-hidden / data-raised on scroll. */
+.ix-header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-sticky);
+  border-block-end: 1px solid transparent;
+}
+.ix-header[data-raised] {
+  border-block-end-color: var(--border);
+  background: color-mix(in oklab, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+}
+.ix-header[data-hidden] {
+  transform: translateY(-100%);
+}
+/* Keyboard users never land in a hidden header. */
+.ix-header:focus-within {
+  transform: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ix-header {
+    transition:
+      transform 240ms var(--ix-ease),
+      background-color 160ms var(--ix-ease),
+      border-color 160ms var(--ix-ease);
+  }
+}
 .ix-header-row {
   display: flex;
   align-items: center;
@@ -211,6 +248,11 @@
   font-weight: 800;
   letter-spacing: -0.03em;
   text-decoration: none;
+}
+.ix-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .ix-nav {
   display: flex;
@@ -260,6 +302,14 @@
 .ix-seg-control button[aria-pressed="true"] {
   background: var(--raised);
   color: var(--fg);
+}
+
+.ix-seg-icons button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  padding: 0;
+  font-size: 1rem;
 }
 
 /* ── Hero ── */
@@ -559,7 +609,7 @@ button.ix-ed-tab:hover {
 
 .ix-section {
   padding-block: var(--ix-section);
-  scroll-margin-top: 0;
+  scroll-margin-top: var(--ix-header-h);
 }
 .ix-section {
   --ix-tile: var(--panel);
@@ -1287,12 +1337,38 @@ button.ix-ed-tab:hover {
   }
 }
 
+/* Too narrow for brand, links and both switches in one row: the footer repeats the links. */
+@media (max-width: 479px) {
+  .ix-nav {
+    display: none;
+  }
+  .ix-header-controls {
+    margin-inline-start: auto;
+  }
+}
+
 @media (max-width: 639px) {
   .ix {
     --ix-code-size: 12px;
   }
   .ix-nav-how {
     display: none;
+  }
+  .ix-header-row {
+    gap: 12px;
+  }
+  .ix-header-controls {
+    gap: 6px;
+  }
+  .ix-header .ix-seg-control {
+    padding: 2px;
+  }
+  .ix-header .ix-seg-control button {
+    padding-inline: 8px;
+  }
+  .ix-header .ix-seg-icons button {
+    width: 30px;
+    padding: 0;
   }
   .ix-ed-person-name {
     display: none;

@@ -30,22 +30,22 @@
 
 :root {
   /* ── Surfaces: page → panel → raised → overlay (each step one elevation up) ── */
-  --bg: light-dark(#f3f4f7, #0a0c11);
-  --panel: light-dark(#fcfcfe, #111419);
-  --raised: light-dark(#ffffff, #181c22);
-  --overlay: light-dark(#ffffff, #20242b);
+  --bg: light-dark(#f2f4fa, #0a0c13);
+  --panel: light-dark(#fcfcff, #12131c);
+  --raised: light-dark(#ffffff, #191b25);
+  --overlay: light-dark(#ffffff, #21232e);
   --scrim: light-dark(rgb(15 18 25 / 0.42), rgb(0 0 0 / 0.6));
 
   /* ── Lines: --border is decorative; --border-control is a 3:1 UI boundary (inputs, switches) ── */
-  --border: light-dark(#dcdee2, #2b2e34);
-  --border-strong: light-dark(#c1c4c9, #3e434a);
-  --border-control: light-dark(#7d8086, #70757d);
+  --border: light-dark(#dcdde5, #2b2d39);
+  --border-strong: light-dark(#c1c3ce, #3f4250);
+  --border-control: light-dark(#7d7f8a, #717482);
 
   /* ── Text levels, all ≥ 4.5:1 on every surface ── */
-  --fg: light-dark(#181b20, #e9ebef);
-  --fg-2: light-dark(#44484f, #b4b7be);
-  --fg-3: light-dark(#5b616a, #9498a0);
-  --fg-disabled: light-dark(#8a8e96, #5f646c);
+  --fg: light-dark(#191a22, #eaebf0);
+  --fg-2: light-dark(#454752, #b5b6c0);
+  --fg-3: light-dark(#5e606c, #9597a3);
+  --fg-disabled: light-dark(#8b8d98, #61636f);
 
   /* ── Neutral state fills (alpha, so they work on any surface) ── */
   --fill-hover: color-mix(in oklab, var(--fg) 6%, transparent);
@@ -53,13 +53,13 @@
   --fill-selected: color-mix(in oklab, var(--fg) 8%, transparent);
 
   /* ── Accent: filled = the one primary action; -text = links and selected labels ── */
-  --accent: light-dark(#6149d2, #6652d4);
-  --accent-hover: light-dark(#573cc4, #715ee0);
-  --accent-active: light-dark(#4f2fb8, #5e49c9);
+  --accent: light-dark(#6443d9, #694ae0);
+  --accent-hover: light-dark(#5a35cb, #7358ec);
+  --accent-active: light-dark(#5129be, #6141d4);
   --accent-fg: #ffffff;
-  --accent-text: light-dark(#573bc3, #b7b5fd);
-  --accent-soft: light-dark(#eaebff, #26224a);
-  --focus: light-dark(#5e45cd, #a6a1fc);
+  --accent-text: light-dark(#5934ca, #b8b4ff);
+  --accent-soft: light-dark(#ebebff, #262050);
+  --focus: light-dark(#603fd4, #a7a0ff);
 
   /* ── Status: success / warning / danger / info. solid + fg for fills, text + soft for tints ── */
   --success: light-dark(#0a7736, #4bad66);

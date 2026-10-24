@@ -62,7 +62,7 @@ export const THEME_PALETTES: readonly ThemePalette[] = [
   {
     id: "slate",
     appearance: "dark",
-    background: "#111419",
+    background: "#12131c",
     foreground: "#e1e5eb",
     tokens: {
       keyword: "#cba1fa",
@@ -104,7 +104,7 @@ export const THEME_PALETTES: readonly ThemePalette[] = [
   {
     id: "paper",
     appearance: "light",
-    background: "#fbfaf7",
+    background: "#fcfcff",
     foreground: "#20242b",
     tokens: {
       keyword: "#7328ae",

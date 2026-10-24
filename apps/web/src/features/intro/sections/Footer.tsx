@@ -1,39 +1,8 @@
-import { useState } from "react";
 import { useT } from "../../../lib/i18n";
 import { NameCells } from "../art";
 import { ArrowRightIcon } from "../icons";
 import { reveal } from "../reveal";
-import { applyThemePreference, readThemePreference, type ThemePreference } from "../theme-switch";
-import { LocaleSwitch } from "./Header";
-
-const THEMES = [
-  ["system", "settings.uiTheme.system"],
-  ["light", "settings.uiTheme.light"],
-  ["dark", "settings.uiTheme.dark"],
-] as const satisfies readonly (readonly [ThemePreference, string])[];
-
-function ThemeSwitch() {
-  const t = useT();
-  const [preference, setPreference] = useState<ThemePreference>(readThemePreference);
-  return (
-    <fieldset className="ix-seg-control">
-      <legend className="ix-sr">{t("a11y.switchTheme")}</legend>
-      {THEMES.map(([value, label]) => (
-        <button
-          key={value}
-          type="button"
-          aria-pressed={preference === value}
-          onClick={() => {
-            applyThemePreference(value);
-            setPreference(value);
-          }}
-        >
-          {t(label)}
-        </button>
-      ))}
-    </fieldset>
-  );
-}
+import { LocaleSwitch, ThemeSwitch } from "./Header";
 
 export interface FooterProps {
   version: string;

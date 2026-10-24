@@ -4,7 +4,7 @@ import { PARTICIPANT_COLORS, participantColor } from "./participants.js";
 import { EDITOR_THEMES } from "./themes.js";
 
 /** Surfaces of the UI tokens (`packages/ui` tokens.css) a cursor, avatar or chip can sit on. */
-const UI_SURFACES = ["#0a0c11", "#111419", "#181c22", "#f3f4f7", "#fcfcfe", "#ffffff"];
+const UI_SURFACES = ["#0a0c13", "#12131c", "#191b25", "#f2f4fa", "#fcfcff", "#ffffff"];
 const EDITOR_BACKGROUNDS = EDITOR_THEMES.map((theme) => theme.background);
 
 describe("participant palette", () => {
