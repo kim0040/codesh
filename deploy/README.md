@@ -27,6 +27,7 @@ curl http://localhost/healthz
 - `/collab` is proxied to every `collab` replica (`dynamic a` over the compose service name) with `lb_policy query doc`: one document normally lives on one instance. Replicas that fail `/healthz` are skipped.
 - `/metrics/api` and `/metrics/collab` expose Prometheus metrics to loopback and the dedicated compose subnet only. With several collab replicas `/metrics/collab` answers from one of them; scrape the containers directly for per-instance numbers.
 - HTTPS: set `SITE_ADDRESS=codesh.local`, `PUBLIC_URL=https://codesh.local` and copy `tls/internal.caddy.example` to `tls/local.caddy` (see `tls/README.md`).
+- A host name in `SITE_ADDRESS` needs a `tls/*.caddy` file with a `tls ...` line (`tls internal`, or `tls <cert> <key>`). Without one Caddy's automatic HTTPS contacts a public ACME CA (Let's Encrypt/ZeroSSL), which fails on a network without internet and is an outside request. `:80` and bare IP addresses need no `tls` line.
 - Clients behind Caddy: the API trusts `X-Forwarded-For` only from `TRUST_PROXY` (default: the compose network), so rate limits, PIN counters and the nearby network group use the real client address.
 
 ## More collab instances
@@ -50,7 +51,7 @@ deploy/bundle.sh [version]        # -> deploy/dist/codesh-<version>.tar.gz and c
 BUNDLE_SOURCE=registry BUNDLE_SUFFIX=-linux-amd64 deploy/bundle.sh 1.2.3   # from the released images (release.yml)
 ```
 
-Releases attach these bundles as `codesh-<version>-linux-amd64.tar.gz` and `-linux-arm64.tar.gz`, so building one is only needed for unreleased sources. `codesh-deploy-<version>.tar.gz` is the same without images, for `update.sh`; with `BUNDLE_SOURCE=registry` both contain `IMAGES`, the digest of each released image. The archive includes a verified content checksum manifest and holds all images (`docker save`), `docker-compose.yml` without build sections, `.env.example` and the scripts. On the target host (docker + compose plugin, no internet):
+Releases attach these bundles as `codesh-<version>-linux-amd64.tar.gz` and `-linux-arm64.tar.gz`, so building one is only needed for unreleased sources. `codesh-deploy-<version>.tar.gz` is the same without images, for `update.sh`; with `BUNDLE_SOURCE=registry` both contain `IMAGES`, the digest of each released image. The archive includes a verified content checksum manifest and holds all images (`docker save`), `docker-compose.yml` without build sections, `.env.example`, the scripts, and `LICENSE` and `THIRD_PARTY_NOTICES.md`. `images.tar` contains the unmodified official `mongo` (SSPL), `valkey`, `caddy` and `node` base images next to the codesh images; their licences and sources are listed in `THIRD_PARTY_NOTICES.md`. On the target host (docker + compose plugin, no internet):
 
 ```sh
 sha256sum -c codesh-<version>.tar.gz.sha256     # compare the value with one received over a trusted channel
