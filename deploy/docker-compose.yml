@@ -118,6 +118,8 @@ services:
     tmpfs: [/tmp]
     environment:
       <<: *app-env
+      # Tuning only (docs/OPERATIONS.md §11.6): milliseconds a busy document batches cursor changes; 0 turns it off.
+      COLLAB_BROADCAST_WINDOW_MS: ${COLLAB_BROADCAST_WINDOW_MS:-30}
     expose: ["3002"]
     ulimits:
       nofile:
