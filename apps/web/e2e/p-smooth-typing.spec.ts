@@ -28,6 +28,10 @@ test("smooth typing glides the cursor and the setting turns it off", async ({ br
   const owner = await newUser(browser, "Glide");
   try {
     await createShare(owner.page);
+    // The device question above the editor goes first: its layout must not move the editor
+    // while the caret is measured.
+    await owner.page.getByTestId("device-choice-skip").click();
+    await expect(owner.page.getByTestId("device-choice")).toBeHidden();
     const editor = owner.page.locator(".cm-editor");
     await owner.page.locator(".cm-content").click();
     await owner.page.keyboard.type("let a = 1;");
