@@ -829,6 +829,50 @@ test("a PIN asked for while edits were unconfirmed says they could not be kept",
   }
 });
 
+for (const [code, title] of [
+  ["not_found", "This share doesn't exist"],
+  ["expired", "This share has expired"],
+] as const) {
+  test(`the share found ${code} while edits were unconfirmed says they could not be kept`, async ({
+    browser,
+  }) => {
+    const owner = await newUser(browser, "Owner");
+    const guest = await newUser(browser, "Guest");
+    try {
+      const hold = await holdConfirmations(guest.context);
+      const id = await createShare(owner.page);
+      await type(owner.page, "shared");
+      await guest.page.goto(`/${id}`);
+      await waitForEditor(guest.page);
+      await expect.poll(() => editorText(guest.page)).toContain("shared");
+
+      hold.on = true;
+      await type(guest.page, " unconfirmed");
+      // Only the share's own answer changes; the document's connection stays as it is.
+      await guest.page.route(`**/api/shares/${id}`, (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({
+              status: code === "expired" ? 410 : 404,
+              json: { error: { code, message: code } },
+            })
+          : route.continue(),
+      );
+      // Once the share's answer is stale, coming back online asks for it again.
+      await guest.page.waitForTimeout(10_500);
+      await guest.page.evaluate(() => {
+        window.dispatchEvent(new Event("offline"));
+        window.dispatchEvent(new Event("online"));
+      });
+      await expect(guest.page.getByText(title)).toBeVisible();
+      await expect(
+        guest.page.getByText("Changes that had not reached the server could not be kept."),
+      ).toBeVisible();
+    } finally {
+      await closeAll(owner, guest);
+    }
+  });
+}
+
 test("a PIN or an approval added while the guest was away deletes the copy before the gate", async ({
   browser,
 }) => {

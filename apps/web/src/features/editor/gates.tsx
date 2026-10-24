@@ -31,13 +31,14 @@ export function LoadingScreen({ label }: { label?: string }) {
   );
 }
 
-export function ExpiredScreen() {
+export function ExpiredScreen({ lostEdits }: { lostEdits?: boolean }) {
   const t = useT();
+  const withLost = useWithLost(lostEdits);
   return (
     <StatusScreen
       icon={<Clock />}
       title={t("conn.expired.title")}
-      description={t("conn.expired.body")}
+      description={withLost(t("conn.expired.body"))}
       action={
         <Button asChild variant="primary">
           <Link to="/new">{t("conn.expired.newAction")}</Link>

@@ -81,10 +81,19 @@ export function EditorPage({ shareId, role, credentials, sensitive, onLeft, me }
     };
   }, [shareId, me.clientId, shareReady]);
 
-  // The share is gone or this client is refused: the copy and the key from earlier go too.
+  // The share is gone or this client is refused: the copy and the key from earlier go too, and
+  // so do the open document's unconfirmed edits (counted before it leaves, kept after).
   const denied = isDenial(shareQuery.error);
+  const [lostOnDenial, setLostOnDenial] = useState(false);
+  const lostNow =
+    denied && session !== null && (session.unsent() > 0 || session.getState().lostEdits);
+  const lost = lostOnDenial || lostNow;
+  const lostNowRef = useRef(false);
+  lostNowRef.current = lostNow;
   useEffect(() => {
-    if (denied) void leaveAfterDenial(shareId);
+    if (!denied) return;
+    if (lostNowRef.current) setLostOnDenial(true);
+    void leaveAfterDenial(shareId);
   }, [denied, shareId]);
 
   // A change of name or colour reaches the others through awareness.
@@ -94,9 +103,9 @@ export function EditorPage({ shareId, role, credentials, sensitive, onLeft, me }
 
   if (shareQuery.isError) {
     const error = shareQuery.error;
-    if (isApiError(error, "not_found")) return <NotFoundShare />;
-    if (isApiError(error, "expired")) return <ExpiredScreen />;
-    if (isApiError(error, "banned")) return <KickedScreen banned />;
+    if (isApiError(error, "not_found")) return <NotFoundShare lostEdits={lost} />;
+    if (isApiError(error, "expired")) return <ExpiredScreen lostEdits={lost} />;
+    if (isApiError(error, "banned")) return <KickedScreen banned lostEdits={lost} />;
     const text = errorText(error);
     return (
       <LoadFailedScreen
