@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_DOC_BYTES_LIMIT, MAX_TEMPLATES } from "./constants.js";
+import { MAX_DOC_BYTES_LIMIT, MAX_TEMPLATES, MAX_TEMPLATES_TOTAL_BYTES } from "./constants.js";
 import { settingsTemplateSchema, templateBytes } from "./templates.js";
 
 /** Admin-editable settings (§10). Object fields use `prefault` so nested defaults apply. */
@@ -46,6 +46,7 @@ export const settingsSchema = z
   })
   .superRefine((settings, ctx) => {
     const ids = new Set<string>();
+    let total = 0;
     for (const [index, template] of settings.templates.entries()) {
       if (ids.has(template.id)) {
         ctx.addIssue({
@@ -55,13 +56,22 @@ export const settingsSchema = z
         });
       }
       ids.add(template.id);
-      if (templateBytes(template.files) > settings.maxDocBytes) {
+      const bytes = templateBytes(template.files);
+      total += bytes;
+      if (bytes > settings.maxDocBytes) {
         ctx.addIssue({
           code: "custom",
           path: ["templates", index, "files"],
           message: "template is larger than maxDocBytes",
         });
       }
+    }
+    if (total > MAX_TEMPLATES_TOTAL_BYTES) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["templates"],
+        message: `templates are larger than ${MAX_TEMPLATES_TOTAL_BYTES} bytes together`,
+      });
     }
   });
 export type Settings = z.infer<typeof settingsSchema>;

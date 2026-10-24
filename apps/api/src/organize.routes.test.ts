@@ -367,6 +367,24 @@ describe.skipIf(!integration)("templates", () => {
       await expectRefused([orgTemplate("org-a", { files: [file("/etc/a.go")] })]);
     });
 
+    it("refuses templates above 2 MiB together, and accepts a body above Fastify's 1 MiB default", async () => {
+      const big = (id: string, size: number) =>
+        orgTemplate(id, { files: [{ path: "a.txt", content: "x".repeat(size) }] });
+      const half = 1024 * 1024 + 1000;
+      // 1.1 MiB in one request used to fail with a bare 413.
+      expect((await putSettings({ templates: [big("org-a", half)] })).statusCode).toBe(200);
+      // Two of them are 2.2 MiB together: refused by the schema, not by the body limit.
+      await expectRefused([big("org-a", half), big("org-b", half)]).catch(async (error) => {
+        await putSettings({ templates: [] });
+        throw error;
+      });
+      await putSettings({ templates: [] });
+      // Far above the cap the body limit answers 413 too_large.
+      const huge = await putSettings({ templates: [big("org-a", 14 * 1024 * 1024)] });
+      expect(huge.statusCode).toBe(413);
+      expect(errorCode(huge)).toBe("too_large");
+    });
+
     it("refuses a template larger than maxDocBytes", async () => {
       await expectRefused(
         [orgTemplate("org-a", { files: [{ path: "a.txt", content: "x".repeat(2000) }] })],
