@@ -373,6 +373,19 @@ export const en = {
   "settings.licenses.link": "Open-source licenses",
   "settings.install.action": "Install app",
   "settings.resetAction": "Reset to defaults",
+  "settings.section.device": "Saved on this device",
+  "settings.offlineCopy.label": "Keep an offline copy on this device",
+  "settings.offlineCopy.hint":
+    "Keeps your edits in this browser while the connection is down. Turn it off on a device other people use. A share with a PIN or approval loads its copy only after you are let in again.",
+  "settings.forget.action": "Forget on this device",
+  "settings.forget.hint":
+    "Deletes this share’s offline copy and saved edit key from this browser, in every tab. The share on the server stays.",
+  "settings.signOut.action": "Sign out, forget all",
+  "settings.signOut.hint":
+    "Ends the sign-in and deletes every offline copy and edit key in this browser. Other open tabs are cleared too.",
+  "toast.forgotten": "Forgotten on this device",
+  "toast.forgetFailed":
+    "Some data could not be deleted. Clear this site’s data in the browser settings.",
 
   // ── Status bar and connection ──
   "status.connected": "Connected",

@@ -31,11 +31,13 @@ export interface EditorPageProps {
   shareId: string;
   role: Role;
   credentials: JoinCredentials;
+  /** The join asked for a PIN or an approval: no local copy is restored before the server accepts. */
+  sensitive?: boolean;
   me: UserRef;
 }
 
 /** Owns the DocSession for one share and hands everything the editor UI needs through context. */
-export function EditorPage({ shareId, role, credentials, me }: EditorPageProps) {
+export function EditorPage({ shareId, role, credentials, sensitive, me }: EditorPageProps) {
   const t = useT();
   const queryClient = useQueryClient();
   const shareQuery = useQuery({
@@ -46,16 +48,26 @@ export function EditorPage({ shareId, role, credentials, me }: EditorPageProps) 
   });
   const [session, setSession] = useState<DocSession | null>(null);
   const credentialsRef = useRef(credentials);
+  // Also sensitive when the share says so (the owner sees its own flags).
+  const sensitiveRef = useRef(false);
+  sensitiveRef.current =
+    Boolean(sensitive) ||
+    Boolean(shareQuery.data?.needsPin || shareQuery.data?.requireApproval) ||
+    Boolean(shareQuery.data?.access?.hasPin || shareQuery.data?.access?.requireApproval);
   const guest = t("identity.guest", { number: guestNumber(me.clientId) });
   const meName = me.name || guest;
 
+  // The session waits for the share's flags: they decide whether a local copy may be restored.
+  const shareReady = shareQuery.data !== undefined;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the session lives as long as the share; name changes are published below
   useEffect(() => {
+    if (!shareReady) return;
     const next = new DocSession({
       shareId,
       user: { clientId: me.clientId, name: meName, color: me.color },
       role,
       credentials: credentialsRef.current,
+      sensitive: sensitiveRef.current,
       onMerged: () => toast({ title: t("conn.synced"), tone: "success", duration: 3000 }),
       onRole: () => void queryClient.invalidateQueries({ queryKey: ["share", shareId] }),
     });
@@ -64,7 +76,7 @@ export function EditorPage({ shareId, role, credentials, me }: EditorPageProps) 
       next.destroy();
       setSession(null);
     };
-  }, [shareId, me.clientId]);
+  }, [shareId, me.clientId, shareReady]);
 
   // A change of name or colour reaches the others through awareness.
   useEffect(() => {

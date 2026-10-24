@@ -31,7 +31,8 @@ test("the view link cannot type, the edit link can", async ({ browser }) => {
     await dialog.getByRole("button", { name: "Edit link" }).click();
     const editUrl = await dialog.getByTestId("share-link").inputValue();
     expect(viewUrl).not.toContain("key=");
-    expect(editUrl).toContain("key=");
+    expect(editUrl).toContain("#key=");
+    expect(editUrl).not.toContain("?key=");
     await closeDialog(owner.page);
 
     await viewer.page.goto(new URL(viewUrl).pathname);
@@ -46,7 +47,7 @@ test("the view link cannot type, the edit link can", async ({ browser }) => {
     expect(await editorText(viewer.page)).not.toContain("INTRUDER");
 
     const url = new URL(editUrl);
-    await editor.page.goto(`${url.pathname}${url.search}`);
+    await editor.page.goto(`${url.pathname}${url.hash}`);
     await waitForEditor(editor.page);
     await expect(editor.page.getByTestId("banner-readonly")).toBeHidden();
     await type(editor.page, " + edited");

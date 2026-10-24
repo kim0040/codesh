@@ -393,6 +393,19 @@ export const ko: KoDictionary = {
   "settings.licenses.link": "오픈소스 라이선스",
   "settings.install.action": "앱 설치",
   "settings.resetAction": "기본값으로 되돌리기",
+  "settings.section.device": "이 기기에 저장된 데이터",
+  "settings.offlineCopy.label": "이 기기에 오프라인 사본 저장",
+  "settings.offlineCopy.hint":
+    "연결이 끊겨 있는 동안에도 편집 내용을 이 브라우저에 보관해요. 여러 사람이 쓰는 기기에서는 꺼 두세요. PIN이 있거나 승인이 필요한 공유는 다시 입장한 뒤에만 사본을 불러와요.",
+  "settings.forget.action": "이 기기에서 지우기",
+  "settings.forget.hint":
+    "이 공유의 오프라인 사본과 저장된 편집 키를 모든 탭에서 지워요. 서버에 있는 공유는 그대로예요.",
+  "settings.signOut.action": "로그아웃하고 모두 지우기",
+  "settings.signOut.hint":
+    "로그인을 끊고 이 브라우저의 오프라인 사본과 편집 키를 모두 지워요. 열려 있는 다른 탭도 함께 정리돼요.",
+  "toast.forgotten": "이 기기에서 지웠어요",
+  "toast.forgetFailed":
+    "일부를 지우지 못했어요. 브라우저의 사이트 데이터 설정에서 직접 지워 주세요.",
 
   // ── Status bar and connection ──
   "status.connected": "연결됨",

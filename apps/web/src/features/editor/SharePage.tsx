@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, isApiError } from "../../lib/api";
 import type { JoinCredentials } from "../../lib/collab/session";
+import { useLinkKey } from "../../lib/credentials";
 import { errorText } from "../../lib/errors";
 import { useSseEvent } from "../../lib/events";
 import { useT } from "../../lib/i18n";
@@ -35,10 +36,10 @@ type JoinState =
  * `/:id` for a 6-digit join code resolves the code and redirects; for a share id it runs the
  * join (PIN, waiting room, bans) and only then mounts the editor.
  */
-export function SharePage({ idOrCode, editKey }: { idOrCode: string; editKey?: string }) {
+export function SharePage({ idOrCode }: { idOrCode: string }) {
   if (isJoinCode(idOrCode)) return <CodeResolver code={idOrCode} />;
   if (!isShareId(idOrCode)) return <NotFoundShare />;
-  return <JoinGate shareId={idOrCode} editKey={editKey} />;
+  return <JoinGate shareId={idOrCode} />;
 }
 
 function CodeResolver({ code }: { code: string }) {
@@ -73,12 +74,15 @@ function CodeResolver({ code }: { code: string }) {
   return <LoadingScreen label={t("intro.join.checking")} />;
 }
 
-function JoinGate({ shareId, editKey }: { shareId: string; editKey?: string }) {
+function JoinGate({ shareId }: { shareId: string }) {
   const t = useT();
   const session = useSession();
+  const editKey = useLinkKey(shareId);
   const [state, setState] = useState<JoinState>({ phase: "loading" });
   const credentialsRef = useRef<JoinCredentials>(editKey ? { editKey } : {});
   const attemptId = useRef(0);
+  // A PIN or an approval was asked for: the offline copy waits for the server's say (session.ts).
+  const sensitiveRef = useRef(false);
 
   const attempt = useCallback(
     async (credentials: JoinCredentials) => {
@@ -88,10 +92,14 @@ function JoinGate({ shareId, editKey }: { shareId: string; editKey?: string }) {
         const result = await api.joinShare(shareId, credentials);
         if (id !== attemptId.current) return;
         if ("token" in result) setState({ phase: "ready", role: result.role, credentials });
-        else setState({ phase: "waiting" });
+        else {
+          sensitiveRef.current = true;
+          setState({ phase: "waiting" });
+        }
       } catch (error) {
         if (id !== attemptId.current) return;
         if (isApiError(error, "pin_required")) {
+          sensitiveRef.current = true;
           setState({ phase: "pin", invalid: false, rateLimited: false, busy: false });
         } else if (isApiError(error, "pin_invalid")) {
           setState({ phase: "pin", invalid: true, rateLimited: false, busy: false });
@@ -196,6 +204,7 @@ function JoinGate({ shareId, editKey }: { shareId: string; editKey?: string }) {
           shareId={shareId}
           role={state.role}
           credentials={state.credentials}
+          sensitive={sensitiveRef.current}
           me={{
             clientId: session.data.clientId,
             name: session.data.name ?? "",

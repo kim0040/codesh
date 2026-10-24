@@ -13,6 +13,7 @@ import {
 } from "@codesh/ui";
 import { Minus, Plus } from "lucide-react";
 import { useId, useState } from "react";
+import { forgetShare, signOut } from "../../lib/device";
 import { useLocale, useT } from "../../lib/i18n";
 import { promptInstall, useCanInstall } from "../../lib/install";
 import { LICENSES_URL } from "../../lib/licenses";
@@ -26,6 +27,7 @@ import {
   TAB_SIZES,
   usePrefs,
 } from "../../lib/prefs";
+import { useSession } from "../../lib/session";
 import { useEditor } from "./context";
 
 /** Editor and app settings: stored on this device and applied live, no save button. */
@@ -87,6 +89,9 @@ function Row({ label, children, id }: { label: string; children: React.ReactNode
 
 function SettingsBody() {
   const t = useT();
+  const ctx = useEditor();
+  // Signing out only exists for a verified identity: an anonymous session cannot be signed back in.
+  const identity = useSession().data?.identity;
   const [locale, setLocale] = useLocale();
   const prefs = usePrefs();
   const canInstall = useCanInstall();
@@ -97,6 +102,21 @@ function SettingsBody() {
     const next = value as ThemePreference;
     setUiTheme(next);
     setTheme(next);
+  };
+
+  const forget = async () => {
+    const ok = await forgetShare(ctx.session.shareId);
+    toast(
+      ok
+        ? { title: t("toast.forgotten"), tone: "success", duration: 3000 }
+        : { title: t("toast.forgetFailed"), tone: "warning" },
+    );
+  };
+
+  const leave = async () => {
+    const ok = await signOut();
+    if (ok) window.location.assign("/");
+    else toast({ title: t("toast.forgetFailed"), tone: "warning" });
   };
 
   const toggleNotifications = async (on: boolean) => {
@@ -252,6 +272,30 @@ function SettingsBody() {
             }))}
           />
         </Row>
+      </Section>
+
+      <Section title={t("settings.section.device")}>
+        <Switch
+          label={t("settings.offlineCopy.label")}
+          description={t("settings.offlineCopy.hint")}
+          checked={prefs.offlineCopy}
+          onCheckedChange={(offlineCopy) => setPrefs({ offlineCopy })}
+          data-testid="switch-offline-copy"
+        />
+        <div className="flex flex-col gap-1.5">
+          <Button className="self-start" onClick={() => void forget()} data-testid="forget-device">
+            {t("settings.forget.action")}
+          </Button>
+          <p className="text-caption text-fg-3">{t("settings.forget.hint")}</p>
+        </div>
+        {identity ? (
+          <div className="flex flex-col gap-1.5">
+            <Button className="self-start" onClick={() => void leave()} data-testid="sign-out">
+              {t("settings.signOut.action")}
+            </Button>
+            <p className="text-caption text-fg-3">{t("settings.signOut.hint")}</p>
+          </div>
+        ) : null}
       </Section>
 
       <Section title={t("settings.section.misc")}>

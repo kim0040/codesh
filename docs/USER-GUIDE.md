@@ -102,7 +102,8 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 
 ### 3.1 보기 전용 링크와 편집 링크
 - 기본 권한을 **보기 전용**으로 설정하면 링크나 코드로 들어온 사람은 문서를 읽을 수만 있고 편집할 수 없습니다.
-- 소유자는 **편집 링크**(`?k=<editKey>`)를 별도로 복사하여 신뢰할 수 있는 특정 참여자에게만 편집 권한을 부여할 수 있습니다.
+- 소유자는 **편집 링크**를 별도로 복사하여 신뢰할 수 있는 특정 참여자에게만 편집 권한을 부여할 수 있습니다. 편집 링크는 주소 끝에 `#key=...`가 붙은 형태이며, 이 부분은 브라우저가 서버로 보내지 않습니다.
+- 편집 링크를 열면 주소창에서 키가 곧바로 사라지고 편집 권한은 서버에 기억됩니다. 새로고침이나 뒤로 가기 후에도 편집할 수 있으며, 주소를 복사해 다른 사람에게 보내도 키가 따라가지 않습니다. 예전 형식(`?key=...`)의 링크도 계속 열리고 같은 방식으로 정리됩니다.
 
 ### 3.2 PIN 잠금
 - 4자에서 32자 사이의 숫자 또는 문자로 PIN을 지정할 수 있습니다.
@@ -168,14 +169,22 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - **긴 줄 바꿈**: 켜기 / 끄기
 - **줄 번호 표시**: 켜기 / 끄기
 
-### 5.3 키맵 설정
+### 5.3 이 기기에 저장된 데이터
+- **이 기기에 오프라인 사본 저장**: 기본값은 켜짐입니다. 연결이 끊겨도 입력 내용이 이 브라우저(IndexedDB)에 보관되고, 연결되면 서버와 합쳐집니다. 여러 사람이 함께 쓰는 기기에서는 꺼 두세요. 끄면 이미 저장된 이 공유의 사본도 바로 지워집니다.
+- PIN이 있거나 입장 승인이 필요한 공유는 설정과 관계없이 다시 입장이 허용된 뒤에만 사본을 불러옵니다.
+- **이 기기에서 지우기**: 지금 열려 있는 공유의 오프라인 사본과 저장된 편집 키를 이 브라우저에서 지웁니다. 같은 공유가 열려 있는 다른 탭에서도 함께 지워지고, 이후에는 사본을 다시 만들지 않습니다(설정을 껐다 켜면 다시 저장). 서버에 있는 공유는 그대로입니다.
+- **로그아웃하고 모두 지우기**: 로그인한 경우에만 보입니다. 로그인을 끊고 이 브라우저의 모든 공유 사본과 편집 키를 지우며, 열려 있는 다른 탭은 첫 화면으로 돌아갑니다. 다른 계정으로 로그인했을 때도 이전 계정의 사본은 지워집니다.
+- 공유에서 내보내지거나 차단된 경우, 입장 권한을 서버가 거부한 경우, 공유가 삭제된 경우에도 해당 사본은 자동으로 지워집니다.
+- 서버에서는 이미 닫은 브라우저의 사본을 지울 수 없습니다. 공용 기기에서는 사용 후 **이 기기에서 지우기**를 누르거나 별도의 브라우저 프로필을 사용하세요.
+
+### 5.4 키맵 설정
 - 선호하는 에디터 조작 방식에 따라 키맵을 변경할 수 있습니다.
   - **기본** (Default)
   - **Vim**
   - **Emacs**
   - **Sublime**
 
-### 5.4 운영체제별 단축키
+### 5.5 운영체제별 단축키
 
 codesh는 접속한 기기의 운영체제를 알아보고 단축키와 안내 표시를 그 기기에 맞춥니다. `?`를 누르면 지금 기기의 키가 담긴 단축키 안내가 열립니다. 아래 표에서 **Mod**는 Mac의 `⌘`, Windows와 Linux의 `Ctrl`입니다. `⌃`은 Mac의 Control 키입니다.
 
@@ -291,13 +300,14 @@ Mac에서 `⌘⌥`는 브라우저 개발자 도구와 macOS(다른 앱 가리�
 - **Templates**: Press **Start from a template** on the home page, or run **New share from template** in the command palette (`⌘K` or `Ctrl+K`). Search, pick with the arrow keys and Enter, check the file list and preview, then **Create share**. Built-in templates cover Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, an HTML + CSS + JS page, Markdown, Bash and a multi-file Python package. Templates added by the administrator appear under **Our templates**.
 
 ### Access Control
-- **View-Only Mode**: Default to read-only access. Share the separate edit link with collaborators who need edit rights.
+- **View-Only Mode**: Default to read-only access. Share the separate edit link with collaborators who need edit rights. The edit link ends in `#key=...`, which browsers never send to a server; opening it removes the key from the address bar at once (old `?key=` links still work and are cleaned the same way), and the server remembers the edit right for reloads.
 - **PIN Lock**: Secure the share with a 4–32 character PIN (scrypt hashed). 5 invalid attempts trigger a 10-minute lockout.
 - **Waiting Room**: Require owner approval for every newcomer before granting access.
 - **Lock / Kick / Ban**: Owners can lock edits across all participants, temporarily kick users, or permanently ban them.
 
 ### Settings & Keymaps
-- **Shortcuts per OS**: Press `?` for the keys of the device you are on. Mac uses `⌃⌘` for app shortcuts (`⌘⌥` belongs to the browser and macOS), Windows and Linux use `Ctrl+Alt`. Section 5.4 lists every key for Mac and Windows / Linux, plus notes on Option and AltGr typing, Linux window-manager grabs, Firefox and IME composition.
+- **Offline copy on this device**: Settings > *Saved on this device*. On by default; turn it off on a shared device. **Forget on this device** deletes this share's offline copy and saved edit key in every open tab; **Sign out, forget all** (shown when signed in) deletes everything and returns other tabs to the start page. Shares with a PIN or approval load their copy only after you are let in again. Removal, a ban, a refused authorization and a deleted share also delete the copy.
+- **Shortcuts per OS**: Press `?` for the keys of the device you are on. Mac uses `⌃⌘` for app shortcuts (`⌘⌥` belongs to the browser and macOS), Windows and Linux use `Ctrl+Alt`. Section 5.5 lists every key for Mac and Windows / Linux, plus notes on Option and AltGr typing, Linux window-manager grabs, Firefox and IME composition.
 - **Appearance**: Dark and Light app themes; editor themes (Slate, Graphite, Paper, Sand); font size (12–24px).
 - **Keymaps**: Default, Vim, Emacs, and Sublime.
 - **Language**: Switch UI between Korean (default) and English.

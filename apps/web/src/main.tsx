@@ -5,10 +5,21 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import { startAppUpdates } from "./lib/app-update";
+import { captureKeyFromUrl, watchKeyInUrl } from "./lib/credentials";
+import { hasSeenSession, listenForForgetting } from "./lib/device";
 import { queryClient } from "./lib/query";
+import { sessionQuery } from "./lib/session";
 import { routeTree } from "./routeTree.gen";
 
 applyStoredTheme();
+
+// An edit key in the address (`#key=` or a legacy `?key=`) moves into memory before the router
+// reads the location, so it never reaches router state or history.
+captureKeyFromUrl();
+listenForForgetting();
+// A different account than the last one on this device must not inherit its offline copies, also
+// when the first screen never asks who is signed in.
+if (hasSeenSession()) void queryClient.prefetchQuery(sessionQuery);
 
 const router = createRouter({
   routeTree,
@@ -23,6 +34,8 @@ declare module "@tanstack/react-router" {
     router: typeof router;
   }
 }
+
+watchKeyInUrl((url) => router.history.replace(url));
 
 // Service worker in prompt mode and the server version checks (lib/app-update.ts).
 startAppUpdates();
