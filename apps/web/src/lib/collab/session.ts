@@ -12,6 +12,7 @@ import * as Y from "yjs";
 import { ApiError, api } from "../api";
 import {
   CLOSE_TIMEOUT_MS,
+  dropCopy,
   idbName,
   leaveAfterDenial,
   mayKeepCopy,
@@ -323,6 +324,8 @@ export class DocSession {
 
   private mayKeepCopy(): boolean {
     if (this.destroyed || this.left || this.options.keepCopy === false) return false;
+    // Between two providers (a resync): the copy belongs to the next document.
+    if (this.closedProviders.has(this.provider)) return false;
     if (!mayKeepCopy(this.shareId)) return false;
     return !this.options.sensitive || this.authorized;
   }
@@ -537,8 +540,13 @@ export class DocSession {
     this.closeProvider(old);
     this.persistence = null;
     if (oldPersistence) {
-      // `clearData` closes the connection, then deletes the database.
-      await within(oldPersistence.clearData(), CLOSE_TIMEOUT_MS);
+      // Closed, then deleted here: y-indexeddb's `clearData` resolves before its deletion ran, and
+      // a deletion that runs after the next copy opened deletes that one. Waited for a moment;
+      // after that the document goes on from memory and keeps a copy once it finished.
+      void oldPersistence.destroy().catch(() => undefined);
+      const dropped = dropCopy(this.shareId);
+      void dropped.then(() => this.onPrefs());
+      await within(dropped, CLOSE_TIMEOUT_MS);
     }
     oldDoc.destroy();
     // Left, unmounted or resynced again meanwhile: whoever did that owns what comes next.

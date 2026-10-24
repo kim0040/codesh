@@ -31,10 +31,6 @@ const fakes = vi.hoisted(() => {
     static made: Persistence[] = [];
     whenSynced = Promise.resolve();
     destroyed = 0;
-    cleared = 0;
-    clearData: () => Promise<void> = async () => {
-      this.cleared++;
-    };
     constructor(readonly name: string) {
       Persistence.made.push(this);
     }
@@ -42,7 +38,13 @@ const fakes = vi.hoisted(() => {
       this.destroyed++;
     }
   }
-  return { Provider, Persistence, joinShare: vi.fn(), leaveAfterDenial: vi.fn(async () => true) };
+  return {
+    Provider,
+    Persistence,
+    joinShare: vi.fn(),
+    leaveAfterDenial: vi.fn(async () => true),
+    dropCopy: vi.fn(async (_shareId: string) => true),
+  };
 });
 
 vi.mock("@hocuspocus/provider", () => ({ HocuspocusProvider: fakes.Provider }));
@@ -53,6 +55,7 @@ vi.mock("./socket", () => ({
 vi.mock("../prefs", () => ({ subscribePrefs: () => () => {} }));
 vi.mock("../device", () => ({
   CLOSE_TIMEOUT_MS: 4000,
+  dropCopy: fakes.dropCopy,
   idbName: (shareId: string) => `codesh:doc:${shareId}`,
   leaveAfterDenial: fakes.leaveAfterDenial,
   mayKeepCopy: () => true,
@@ -88,6 +91,8 @@ beforeEach(() => {
   fakes.Persistence.made = [];
   fakes.joinShare.mockReset();
   fakes.leaveAfterDenial.mockClear();
+  fakes.dropCopy.mockReset();
+  fakes.dropCopy.mockResolvedValue(true);
   vi.stubGlobal("window", { addEventListener: () => {}, removeEventListener: () => {} });
 });
 afterEach(() => {
@@ -165,10 +170,8 @@ describe("resync", () => {
   for (const ending of ["leave", "destroy"] as const) {
     it(`a resync overtaken by ${ending} builds no new provider`, async () => {
       const session = open();
-      const persistence = fakes.Persistence.made[0];
-      if (!persistence) throw new Error("no copy");
       const clearing = deferred();
-      persistence.clearData = () => clearing.promise;
+      fakes.dropCopy.mockReturnValueOnce(clearing.promise.then(() => true));
 
       const resync = session.resync();
       if (ending === "leave") await session.leave();
@@ -190,7 +193,9 @@ describe("resync", () => {
     await session.resync();
     expect(fakes.Provider.made).toHaveLength(2);
     expect(fakes.Provider.made[0]?.destroyed).toBe(1);
-    expect(fakes.Persistence.made[0]?.cleared).toBe(1);
+    expect(fakes.Persistence.made[0]?.destroyed).toBe(1);
+    expect(fakes.dropCopy).toHaveBeenCalledWith("share1");
+    expect(fakes.Persistence.made).toHaveLength(2);
     expect(session.getState().generation).toBe(1);
     session.destroy();
     expect(fakes.Provider.made[1]?.destroyed).toBe(1);

@@ -129,10 +129,11 @@ export function isForgotten(shareId: string): boolean {
 
 /**
  * A copy of this share may be written: the device choice is yes, the share was not forgotten and
- * no deletion is due. Anything unreadable counts as no.
+ * no deletion is due or still running. Anything unreadable counts as no.
  */
 export function mayKeepCopy(shareId: string): boolean {
   if (getPrefs().offlineCopy !== "yes" || due.ids.has(shareId) || eraseAllDue()) return false;
+  if (deleting.has(idbName(shareId))) return false;
   try {
     return localStorage.getItem(ERASE + shareId) === null && !isForgotten(shareId);
   } catch {
@@ -311,27 +312,59 @@ export function hasUnsentEdits(shareId?: string): Promise<boolean> {
 
 // deleting
 
+/**
+ * Deletions IndexedDB has not finished, by database. One that stopped being waited for still runs
+ * once the connections that block it close, and would delete a copy opened meanwhile.
+ */
+const deleting = new Map<string, number>();
+
+/** Sends one deletion; resolves when IndexedDB finished it, however long that takes. */
+function requestDeletion(name: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof indexedDB === "undefined") return resolve(false);
+    let request: IDBOpenDBRequest;
+    try {
+      request = indexedDB.deleteDatabase(name);
+    } catch {
+      return resolve(false);
+    }
+    deleting.set(name, (deleting.get(name) ?? 0) + 1);
+    const finish = (ok: boolean) => {
+      const running = (deleting.get(name) ?? 1) - 1;
+      if (running > 0) deleting.set(name, running);
+      else deleting.delete(name);
+      resolve(ok);
+    };
+    request.onsuccess = () => finish(true);
+    request.onerror = () => finish(false);
+  });
+}
+
 /** Deletes one IndexedDB database. False when it stayed (blocked, denied, no IndexedDB). */
 export function deleteDatabase(name: string): Promise<boolean> {
   return new Promise((resolve) => {
-    if (typeof indexedDB === "undefined") return resolve(false);
-    let done = false;
-    const finish = (ok: boolean) => {
-      if (done) return;
-      done = true;
+    // A blocked delete completes once the other connections close; do not wait forever.
+    const timer = setTimeout(() => resolve(false), DELETE_TIMEOUT_MS);
+    void requestDeletion(name).then((ok) => {
       clearTimeout(timer);
       resolve(ok);
-    };
-    // A blocked delete completes once the other connections close; do not wait forever.
-    const timer = setTimeout(() => finish(false), DELETE_TIMEOUT_MS);
-    try {
-      const request = indexedDB.deleteDatabase(name);
-      request.onsuccess = () => finish(true);
-      request.onerror = () => finish(false);
-    } catch {
-      finish(false);
-    }
+    });
   });
+}
+
+/**
+ * Deletes the copy of a share whose document stays open and starts over (a resync). Resolves when
+ * IndexedDB finished, however late; until then no copy of it is written (mayKeepCopy). A deletion
+ * that failed stays due and is reported, like any copy that stayed.
+ */
+export async function dropCopy(shareId: string): Promise<boolean> {
+  const ok = await requestDeletion(idbName(shareId));
+  if (!ok) {
+    due.ids.add(shareId);
+    mark(ERASE + shareId);
+    reportLeftovers();
+  }
+  return ok;
 }
 
 async function deleteWithRetry(name: string): Promise<boolean> {
