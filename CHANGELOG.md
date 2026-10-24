@@ -7,6 +7,18 @@ text of its GitHub release (RELEASING.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Updates prepare and verify images before maintenance, wait for Collab's shutdown flush before
+  backup, and restore the database before restarting the previous app on failure. Online and
+  offline updates share transactional file recovery and an installation lock with backup/restore.
+- Stable release selection respects draft/prerelease flags and valid versions; readiness requests
+  have deadlines and require 2xx responses. Unsupported automatic-update install paths are refused.
+- Offline upgrades accept the release's SHA256SUMS beside the bundle. Mongo image changes require
+  a separate supported migration instead of attempting an unsafe automatic rollback.
+- PWA reload approval applies only to the tab whose user clicked, after its pending edits are
+  acknowledged; other tabs continue running until their users reload.
+
 ### Security
 
 - Edit links carry the key in the URL fragment (`#key=`), which browsers do not send to servers.

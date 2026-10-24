@@ -24,6 +24,8 @@ INSTALL="$WORK/install"
 SRV="$WORK/srv"
 export TMPDIR="$WORK/tmp"
 SERVER_PID=""
+OWNED_REGISTRY=0
+MIN_DOCKER_GIB="${VERIFY_MIN_DOCKER_GIB:-3}"
 
 step() { printf '\n== %s\n' "$*"; }
 ok() { printf 'ok: %s\n' "$*"; }
@@ -39,9 +41,11 @@ teardown() {
   if [ -f "$INSTALL/docker-compose.yml" ]; then
     (cd "$INSTALL" && COMPOSE_PROJECT_NAME=$PROJECT docker compose down -v --remove-orphans) >/dev/null 2>&1 || true
   fi
-  docker rm -fv codesh-verify-registry >/dev/null 2>&1 || true
+  if [ "$OWNED_REGISTRY" = 1 ]; then docker rm -fv codesh-verify-registry >/dev/null 2>&1 || true; fi
   # The registry writes as root.
-  [ -d "$WORK/registry" ] && docker run --rm -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry
+  if [ "$OWNED_REGISTRY" = 1 ] && [ -d "$WORK/registry" ]; then
+    docker run --rm --pull never -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry
+  fi
   docker image ls --format '{{.Repository}}:{{.Tag}}' | grep "^$REG/" | xargs -r docker image rm -f >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
@@ -65,35 +69,72 @@ has_marker() {
 }
 admin_update() { call /api/admin/update -H "Authorization: Bearer $(envv ADMIN_TOKEN)"; }
 
-teardown
+[ ! -e "$WORK" ] || fail "$WORK already exists; choose a fresh VERIFY_DIR"
 mkdir -p "$TMPDIR" "$INSTALL" "$SRV/api/repos/kim0040/codesh" "$WORK/registry"
 DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
-[ "$(free_gib "$DOCKER_ROOT")" -ge 3 ] || fail "less than 3 GiB free in $DOCKER_ROOT: a full disk breaks every stack on this host"
+[ "$(free_gib "$DOCKER_ROOT")" -ge "$MIN_DOCKER_GIB" ] || fail "less than $MIN_DOCKER_GIB GiB free in $DOCKER_ROOT: a full disk breaks every stack on this host"
 [ "$(free_gib "$WORK")" -ge 2 ] || fail "less than 2 GiB free in $WORK"
 # bundle.sh reads ../package.json, ../docs, ../CHANGELOG.md, ../LICENSE and ../THIRD_PARTY_NOTICES.md; a snapshot keeps the run stable.
 cp -r "$ROOT/deploy" "$WORK/deploy"
 rm -rf "$WORK/deploy/dist" "$WORK/deploy/state"/* "$WORK/deploy/.env"
 mkdir -p "$WORK/docs" && cp "$ROOT/package.json" "$ROOT/CHANGELOG.md" "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$WORK/" && cp "$ROOT"/docs/*.md "$WORK/docs/"
 
-step "local registry and images 1.0.0, 1.0.1, 1.0.2 (api of 1.0.2 exits at once)"
+step "local registry and images (1.0.2 mutates MongoDB then fails; old API rejects that schema)"
+df -h /
 docker run -d --name codesh-verify-registry -p "127.0.0.1:$REG_PORT:5000" -v "$WORK/registry:/var/lib/registry" \
   registry:2.8.3 >/dev/null
+OWNED_REGISTRY=1
 for _ in $(seq 30); do curl -fs "http://localhost:$REG_PORT/v2/" >/dev/null && break; sleep 1; done
 BUILD_ENV="$WORK/build.env"
 printf 'SESSION_SECRET=x\nCOLLAB_SECRET=x\nMONGO_PASSWORD=x\nMONGO_APP_PASSWORD=x\nVALKEY_PASSWORD=x\nCODESH_VERSION=1.0.0\nCODESH_REGISTRY=%s\n' "$REG" >"$BUILD_ENV"
-# One at a time, so the build cache of one image is gone before the next on a small host.
+# Existing real images may serve as bases on a small shared box. No preview/dev containers,
+# tags, volumes or build cache are removed. Default remains a full source build.
 for service in api collab caddy mdns; do
-  [ "$(free_gib "$DOCKER_ROOT")" -ge 3 ] || fail "less than 3 GiB free in $DOCKER_ROOT before building $service"
-  docker compose --env-file "$BUILD_ENV" --profile mdns -f "$ROOT/deploy/docker-compose.yml" build "$service"
-  if [ "${VERIFY_PRUNE_CACHE:-}" = 1 ]; then docker builder prune -af | tail -n 1; fi
+  df -h /
+  [ "$(free_gib "$DOCKER_ROOT")" -ge "$MIN_DOCKER_GIB" ] || fail "not enough space before building $service"
+  name="$service"; [ "$name" != caddy ] || name=web
+  base=""
+  if [ "${VERIFY_REUSE_IMAGES:-0}" = 1 ]; then
+    case "$service" in
+      api|collab) base="codesh/$service:preview" ;;
+      caddy) base="codesh/caddy:preview" ;;
+    esac
+  fi
+  if [ -n "$base" ]; then docker tag "$base" "$REG/codesh-$name:1.0.0"
+  else docker compose --env-file "$BUILD_ENV" --profile mdns -f "$ROOT/deploy/docker-compose.yml" build "$service"; fi
 done
+# The previous version cannot boot against the deliberate schema marker. This detects rollback
+# that incorrectly starts the old API before restoring, rather than merely checking old health.
+mkdir -p "$WORK/build"
+cat >"$WORK/build/old-guard.mjs" <<'GUARD'
+import { MongoClient } from "mongodb";
+const c = await MongoClient.connect(process.env.MONGO_URL);
+const broken = await c.db().collection("update_failure_marker").findOne({});
+await c.close();
+if (broken) { console.error("old API refuses changed schema"); process.exit(1); }
+await import("./src/main.ts");
+GUARD
+cat >"$WORK/build/bad-api.mjs" <<'BAD'
+import { MongoClient } from "mongodb";
+const c = await MongoClient.connect(process.env.MONGO_URL);
+await c.db().collection("update_failure_marker").insertOne({ incompatible: true });
+await c.db().collection("shares").deleteMany({});
+await c.close();
+console.error("new API changed schema and deleted shares, then failed");
+process.exit(1);
+BAD
+printf 'FROM %s\nCOPY old-guard.mjs /app/old-guard.mjs\nCMD ["node", "--import", "/opt/tsx/node_modules/tsx/dist/esm/index.mjs", "old-guard.mjs"]\n' "$REG/codesh-api:1.0.0" >"$WORK/build/Dockerfile"
+df -h /
+docker build -q -t "$REG/codesh-api:1.0.0" -f "$WORK/build/Dockerfile" "$WORK/build" >/dev/null
 for name in api collab web mdns; do
   docker push -q "$REG/codesh-$name:1.0.0" >/dev/null
   for v in 1.0.1 1.0.2; do
     if [ "$name" = api ] && [ "$v" = 1.0.2 ]; then
-      printf 'FROM %s\nCMD ["node", "-e", "process.exit(1)"]\n' "$REG/codesh-api:1.0.0" |
-        docker build -q -t "$REG/codesh-api:1.0.2" - >/dev/null
+      printf 'FROM %s\nCOPY bad-api.mjs /app/bad-api.mjs\nCMD ["node", "bad-api.mjs"]\n' "$REG/codesh-api:1.0.0" >"$WORK/build/Dockerfile"
+      df -h /
+      docker build -q -t "$REG/codesh-api:1.0.2" -f "$WORK/build/Dockerfile" "$WORK/build" >/dev/null
     else
+      df -h /
       # Its own layer, so 1.0.1 has its own digest like a real release.
       printf 'FROM %s\nLABEL org.opencontainers.image.version=%s\n' "$REG/codesh-$name:1.0.0" "$v" |
         docker build -q -t "$REG/codesh-$name:$v" - >/dev/null
@@ -104,8 +145,9 @@ done
 ok "pushed codesh-{api,collab,web,mdns}:{1.0.0,1.0.1,1.0.2} to $REG"
 
 step "release files with bundle.sh, from the registry"
-[ "$(free_gib "$DOCKER_ROOT")" -ge 3 ] || fail "less than 3 GiB free in $DOCKER_ROOT after the builds"
+[ "$(free_gib "$DOCKER_ROOT")" -ge "$MIN_DOCKER_GIB" ] || fail "less than $MIN_DOCKER_GIB GiB free in $DOCKER_ROOT after the builds"
 for v in 1.0.0 1.0.1 1.0.2; do
+  df -h /
   (cd "$WORK/deploy" && BUNDLE_SOURCE=registry CODESH_REGISTRY="$REG" BUNDLE_SUFFIX=-linux-amd64 bash bundle.sh "$v") | tail -n 1
   dir="$SRV/dl/kim0040/codesh/releases/download/v$v"
   mkdir -p "$dir"
@@ -136,7 +178,8 @@ done
 in_install ./install.sh | tail -n 2
 [ "$(envv CODESH_REGISTRY)" = "$REG" ] || fail "CODESH_REGISTRY not taken from the bundle"
 ID="$(create_data marker-one)"
-[ -n "$ID" ] && has_marker "$ID" marker-one || fail "no data"
+[ -n "$ID" ] || fail "no share id"
+has_marker "$ID" marker-one || fail "no data"
 ok "1.0.0 running with share $ID"
 
 step "update.sh --check and an update to 1.0.1"
@@ -156,17 +199,41 @@ grep -q '"lastRun":{"at":"[^"]*","result":"updated","from":"1.0.0","to":"1.0.1"'
 grep -q '"status":"disabled"' "$WORK/admin.json" || fail "UPDATE_CHECK=off not honoured"
 ok "1.0.1 pulled, digests checked, healthy, data kept, run visible in /api/admin/update"
 
-step "1.0.2 does not start: update.sh rolls back to 1.0.1 and the backup"
+step "1.0.2 changes DB then fails: concurrent accepted writes and shutdown flush survive rollback"
 ID2="$(create_data marker-two)"
-if in_install ./update.sh --yes >"$WORK/bad.log" 2>&1; then fail "update to a broken release succeeded"; fi
+# Gate the image pull using an operator-side docker shim. A real API write is accepted during
+# this gate, after downloads started and before maintenance. Everything else is real Docker.
+mkdir "$WORK/bin"
+REAL_DOCKER="$(command -v docker)"
+export REAL_DOCKER VERIFY_GATE="$WORK/gate"
+cat >"$WORK/bin/docker" <<'DOCKER'
+#!/usr/bin/env bash
+if [[ " $* " == *' pull '* ]]; then
+  touch "$VERIFY_GATE.started"
+  while [ ! -e "$VERIFY_GATE.continue" ]; do sleep .05; done
+fi
+exec "$REAL_DOCKER" "$@"
+DOCKER
+chmod +x "$WORK/bin/docker"
+PATH="$WORK/bin:$PATH" in_install ./update.sh --version 1.0.2 --yes >"$WORK/bad.log" 2>&1 &
+updater=$!
+for _ in $(seq 200); do [ -e "$WORK/gate.started" ] && break; sleep .1; done
+[ -e "$WORK/gate.started" ] || fail "updater never reached pull gate"
+ID3="$(create_data accepted-during-pull)"
+[ -n "$ID3" ] || fail "API did not accept a write while preparing update"
+touch "$WORK/gate.continue"
+if wait "$updater"; then fail "update to a broken release succeeded"; fi
 tail -n 8 "$WORK/bad.log"
 grep -q 'rolling back to 1.0.1' "$WORK/bad.log" || fail "no rollback"
 [ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "version not rolled back"
 curl -fsS "http://127.0.0.1:$P/readyz" >/dev/null || fail "1.0.1 not healthy after the rollback"
 in_install docker compose ps --format '{{.Service}} {{.Image}}' | grep -q "^api $REG/codesh-api:1.0.1$" || fail "api not on 1.0.1"
-has_marker "$ID" marker-one && has_marker "$ID2" marker-two || fail "data lost in the rollback"
+has_marker "$ID" marker-one || fail "first share lost in rollback"
+has_marker "$ID2" marker-two || fail "second share lost in rollback"
+has_marker "$ID3" accepted-during-pull || fail "accepted write during pull lost in rollback"
+in_install docker compose logs api | grep -q 'old API refuses changed schema' && fail "old app ran before DB restore"
 admin_update | grep -q '"result":"rolled-back","from":"1.0.1","to":"1.0.2"' || fail "rollback not in the admin API"
-ok "1.0.2 refused by its health check; 1.0.1 runs with both shares"
+ok "1.0.2 mutated DB and failed; restore precedes old API startup; all three shares survive"
 
 step "automatic updates (dry run on this host)"
 in_install ./update.sh --enable-auto --at 04:00 --policy patch --dry-run
