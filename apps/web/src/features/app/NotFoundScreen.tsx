@@ -8,6 +8,7 @@ export function NotFoundScreen() {
   return (
     <main id="main" className="grid min-h-dvh place-items-center px-4 py-12">
       <EmptyState
+        headingLevel={1}
         icon={<SearchX />}
         title={t("error.not_found")}
         description={t("error.not_found.hint")}
