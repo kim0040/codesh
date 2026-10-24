@@ -416,7 +416,8 @@ describe.skipIf(!integration)("kick and ban", () => {
     ]);
     await eventually(() => perm.messages[2]);
     const versions = perm.messages.map((m) => (m as { version: number }).version);
-    expect(versions).toEqual([versions[0], versions[0] + 1, versions[0] + 2]);
+    const [first = 0] = versions;
+    expect(versions).toEqual([first, first + 1, first + 2]);
     // The grant is gone, so the PIN is asked again; the client is not banned.
     expect((await guest.post(`/api/shares/${id}/join`)).statusCode).toBe(401);
     expect((await guest.post(`/api/shares/${id}/join`, { pin: "1357" })).statusCode).toBe(200);

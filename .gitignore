@@ -34,3 +34,7 @@ test-results/
 .data/
 *.sqlite
 .box-out/
+
+# deploy
+deploy/backups/
+deploy/.env

@@ -252,7 +252,21 @@ importers:
         specifier: 7.4.1
         version: 7.4.1
 
-  packages/cli: {}
+  packages/cli:
+    dependencies:
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
+      qrcode:
+        specifier: 1.5.4
+        version: 1.5.4
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      '@types/qrcode':
+        specifier: 1.5.6
+        version: 1.5.6
 
   packages/highlight:
     dependencies:
@@ -411,6 +425,31 @@ importers:
       vite:
         specifier: 8.3.5
         version: 8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+
+  scripts/load:
+    dependencies:
+      '@hocuspocus/provider':
+        specifier: 4.7.1
+        version: 4.7.1(y-protocols@1.0.7(yjs@13.6.33))(yjs@13.6.33)
+      undici:
+        specifier: 8.12.3
+        version: 8.12.3
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
+      yjs:
+        specifier: 13.6.33
+        version: 13.6.33
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.5
+        version: 22.20.5
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
 
 packages:
 
@@ -4318,6 +4357,10 @@ packages:
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
+  undici@8.12.3:
+    resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
+    engines: {node: '>=22.19.0'}
 
   unicode-canonical-property-names-ecmascript@2.0.1:
     resolution: {integrity: sha512-dA8WbNeb2a6oQzAQ55YlT5vQAWGV9WXOsi3SskE3bcCdM0P4SDd+24zS/OCacdRq5BkdsRj9q3Pg6YyQoxIGqg==}
@@ -8867,6 +8910,8 @@ snapshots:
       which-boxed-primitive: 1.1.1
 
   undici-types@6.21.0: {}
+
+  undici@8.12.3: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 
