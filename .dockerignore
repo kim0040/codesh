@@ -17,5 +17,6 @@ docs
 deploy/.env
 deploy/dist
 deploy/backups
+deploy/state
 *.log
 .DS_Store

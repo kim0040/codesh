@@ -23,11 +23,12 @@ env_set() {
   fi
 }
 
-# wait_healthy [seconds]: waits until Caddy answers /healthz (api and Valkey are behind it)
+# wait_healthy [seconds] [path]: waits until Caddy answers /healthz (api and Valkey are behind it),
+# or another path such as /readyz (api can also read MongoDB)
 wait_healthy() {
   local port url deadline
   port="$(env_get HTTP_PORT 80)"
-  url="http://127.0.0.1:${port}/healthz"
+  url="http://127.0.0.1:${port}${2:-/healthz}"
   deadline=$((SECONDS + ${1:-120}))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if command -v curl >/dev/null 2>&1; then

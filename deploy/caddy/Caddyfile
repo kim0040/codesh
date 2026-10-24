@@ -58,6 +58,9 @@
 	handle /healthz {
 		reverse_proxy api:3001
 	}
+	handle /readyz {
+		reverse_proxy api:3001
+	}
 
 	# REST and the SSE stream. flush_interval -1 sends every event as it is written.
 	handle /api/* {

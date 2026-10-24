@@ -38,6 +38,9 @@ test-results/
 # deploy
 deploy/backups/
 deploy/.env
+# Written by deploy/update.sh (status, log, auto-update settings, rollback copies).
+deploy/state/*
+!deploy/state/.gitkeep
 
 # TLS private material; only documentation and opt-in examples are tracked.
 deploy/tls/*
