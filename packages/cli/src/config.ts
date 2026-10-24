@@ -1,18 +1,24 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, posix, win32 } from "node:path";
 
-/** `~/.config/codesh.json`: `{ "url": "http://codesh.corp" }`, plus the sessions the CLI keeps. */
+/** Platform config file: `%APPDATA%/codesh/codesh.json` on Windows, otherwise XDG config. */
 export interface ConfigFile {
   url?: string;
   /** Session cookie per server origin, so repeated pushes belong to one owner. */
   sessions?: Record<string, string>;
 }
 
-export function configPath(env: NodeJS.ProcessEnv): string {
-  return (
-    env.CODESH_CONFIG || join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "codesh.json")
-  );
+export function configPath(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (env.CODESH_CONFIG) return env.CODESH_CONFIG;
+  if (platform === "win32") {
+    const appData = env.APPDATA || win32.join(homedir(), "AppData", "Roaming");
+    return win32.join(appData, "codesh", "codesh.json");
+  }
+  return posix.join(env.XDG_CONFIG_HOME || posix.join(homedir(), ".config"), "codesh.json");
 }
 
 export async function readConfig(path: string): Promise<ConfigFile> {
@@ -39,7 +45,7 @@ export function resolveUrl(
   const url = flag || env.CODESH_URL || config.url;
   if (!url) {
     throw new CliError(
-      'No server URL. Pass --url, set CODESH_URL or put {"url": "http://..."} in ~/.config/codesh.json',
+      'No server URL. Pass --url, set CODESH_URL or put {"url": "http://..."} in the codesh config file (%APPDATA%\\codesh\\codesh.json on Windows, ~/.config/codesh.json elsewhere)',
     );
   }
   if (!/^https?:\/\//.test(url)) throw new CliError(`Invalid server URL: ${url}`);

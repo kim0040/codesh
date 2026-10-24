@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, posix, relative, resolve, win32 } from "node:path";
 import { parseArgs } from "node:util";
 import { unzipSync } from "fflate";
 import QRCode from "qrcode";
@@ -15,18 +15,20 @@ export interface Io {
   /** Reads all of stdin; only called for `push -` or a pipe without file arguments. */
   readStdin: () => Promise<Buffer>;
   stdinIsTTY: boolean;
-  openBrowser: (url: string) => Promise<void>;
+  openBrowser: (url: string, platform?: NodeJS.Platform) => Promise<void>;
+  /** Optional platform override for deterministic platform-specific tests. */
+  platform?: NodeJS.Platform;
 }
 
 export const HELP = `codesh - share code from the terminal
 
 usage:
-  codesh push <file...> [--title <t>] [--language <id>] [--view-only] [--no-qr] [--name <file>] [--url <u>]
+  codesh push <file|folder...> [--title <t>] [--language <id>] [--view-only] [--no-qr] [--name <file>] [--url <u>]
   codesh push -  --name snippet.py          read the content from stdin
   codesh open <code|id> [--print] [--url <u>]
   codesh pull <code|id> [-o <dir>] [--zip] [--pin <pin>] [--url <u>]
 
-The server comes from --url, the CODESH_URL environment variable or "url" in ~/.config/codesh.json.`;
+The server comes from --url, CODESH_URL or the codesh config file (%APPDATA%\\codesh\\codesh.json on Windows, ~/.config/codesh.json elsewhere).`;
 
 interface CreateResponse {
   id: string;
@@ -79,7 +81,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
 }
 
 async function connect(flag: string | undefined, io: Io): Promise<Client> {
-  const file = configPath(io.env);
+  const file = configPath(io.env, io.platform);
   const config = await readConfig(file);
   return new Client(resolveUrl(flag, io.env, config), config, file);
 }
@@ -105,6 +107,7 @@ async function push(args: string[], io: Io): Promise<void> {
   });
 
   const files: { path: string; language?: string; content: string }[] = [];
+  const platform = io.platform ?? process.platform;
   const fromStdin =
     positionals.length === 0 || (positionals.length === 1 && positionals[0] === "-");
   if (fromStdin) {
@@ -114,25 +117,33 @@ async function push(args: string[], io: Io): Promise<void> {
       );
     }
     files.push({
-      path: values.name ?? "snippet.txt",
+      path: sharePath(values.name ?? "snippet.txt", platform),
       content: decode(await io.readStdin(), "stdin"),
     });
   } else {
     const seen = new Set<string>();
     for (const name of positionals) {
       const path = resolve(io.cwd, name);
-      let data: Buffer;
       try {
-        data = await readFile(path);
+        await readdir(path, { withFileTypes: true });
       } catch (error) {
-        throw new CliError(
-          `Cannot read ${name}: ${(error as NodeJS.ErrnoException).code ?? error}`,
-        );
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOTDIR") {
+          throw new CliError(`Cannot read ${name}: ${code ?? error}`);
+        }
+        await appendFile(path, sharePath(basename(path), platform), name, files, seen);
+        continue;
       }
-      const shareName = basename(path);
-      if (seen.has(shareName)) throw new CliError(`Two files are called ${shareName}`);
-      seen.add(shareName);
-      files.push({ path: shareName, content: decode(data, name) });
+      const rel = relative(io.cwd, path);
+      const prefix =
+        rel === "."
+          ? ""
+          : rel === ".." || rel.startsWith(`..${(platform === "win32" ? win32 : posix).sep}`)
+            ? sharePath(basename(path), platform)
+            : sharePath(rel, platform);
+      const countBefore = files.length;
+      await appendDirectory(path, prefix, name, files, seen, platform);
+      if (files.length === countBefore) throw new CliError(`Cannot share empty directory ${name}`);
     }
   }
   for (const file of files) if (values.language) file.language = values.language;
@@ -149,7 +160,7 @@ async function push(args: string[], io: Io): Promise<void> {
 
   const url = absoluteUrl(client, created.url || `/${created.id}`);
   if (!values["no-qr"])
-    io.stdout(`${await QRCode.toString(url, { type: "terminal", small: true })}\n`);
+    io.stdout(`${await QRCode.toString(url, { type: qrOutputType(platform), small: true })}\n`);
   io.stdout(`${url}\n`);
   io.stdout(`code ${created.code}${values["view-only"] ? " (view only)" : ""}\n`);
 }
@@ -158,6 +169,58 @@ function decode(data: Buffer, label: string): string {
   if (data.includes(0))
     throw new CliError(`${label} looks like a binary file; only text can be shared`);
   return data.toString("utf8");
+}
+
+async function appendFile(
+  diskPath: string,
+  shareName: string,
+  label: string,
+  files: { path: string; language?: string; content: string }[],
+  seen: Set<string>,
+): Promise<void> {
+  let data: Buffer;
+  try {
+    data = await readFile(diskPath);
+  } catch (error) {
+    throw new CliError(`Cannot read ${label}: ${(error as NodeJS.ErrnoException).code ?? error}`);
+  }
+  if (seen.has(shareName)) throw new CliError(`Two files are called ${shareName}`);
+  seen.add(shareName);
+  files.push({ path: shareName, content: decode(data, label) });
+}
+
+async function appendDirectory(
+  directory: string,
+  prefix: string,
+  label: string,
+  files: { path: string; language?: string; content: string }[],
+  seen: Set<string>,
+  platform: NodeJS.Platform,
+): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const diskPath = join(directory, entry.name);
+    const shareName = sharePath(prefix ? `${prefix}/${entry.name}` : entry.name, platform);
+    if (entry.isDirectory()) {
+      await appendDirectory(diskPath, shareName, label, files, seen, platform);
+    } else if (entry.isFile()) {
+      await appendFile(diskPath, shareName, label, files, seen);
+    } else {
+      throw new CliError(`Cannot share unsupported path ${diskPath}`);
+    }
+  }
+}
+
+/** Converts a local path into the forward-slash form used in share archives. */
+export function sharePath(value: string, platform: NodeJS.Platform = process.platform): string {
+  const path = platform === "win32" ? win32 : posix;
+  return value.replaceAll(platform === "win32" ? "\\" : path.sep, "/");
+}
+
+/** Windows terminals without ANSI support get the plain UTF-8 QR renderer. */
+export function qrOutputType(platform: NodeJS.Platform = process.platform): "terminal" | "utf8" {
+  return platform === "win32" ? "utf8" : "terminal";
 }
 
 // --- open ------------------------------------------------------------------------------------
@@ -189,18 +252,45 @@ async function open(args: string[], io: Io): Promise<void> {
   const { path } = await resolveTarget(client, target);
   const url = `${client.base}${path}`;
   io.stdout(`${url}\n`);
-  if (!values.print) await io.openBrowser(url);
+  if (!values.print) await io.openBrowser(url, io.platform ?? process.platform);
 }
 
 // --- pull ------------------------------------------------------------------------------------
 
 /** A path inside `root` for an archive entry, or null if the entry would escape it. */
-export function safeJoin(root: string, entry: string): string | null {
-  const cleaned = normalize(entry.replaceAll("\\", "/"));
-  if (!cleaned || isAbsolute(cleaned) || cleaned === ".." || cleaned.startsWith(`..${sep}`))
+export function safeJoin(
+  root: string,
+  entry: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const path = platform === "win32" ? win32 : posix;
+  const cleaned = path.normalize(entry.replaceAll("\\", "/"));
+  if (!cleaned || path.isAbsolute(cleaned)) return null;
+  if (
+    platform === "win32" &&
+    cleaned
+      .split(path.sep)
+      .some(
+        (part) =>
+          part.includes(":") ||
+          part.endsWith(".") ||
+          part.endsWith(" ") ||
+          /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i.test(part),
+      )
+  ) {
     return null;
-  const full = join(root, cleaned);
-  return full.startsWith(root + sep) ? full : null;
+  }
+  const full = path.join(root, cleaned);
+  const relativePath = path.relative(root, full);
+  if (
+    !relativePath ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    return null;
+  }
+  return full;
 }
 
 async function pull(args: string[], io: Io): Promise<void> {
@@ -254,7 +344,7 @@ async function pull(args: string[], io: Io): Promise<void> {
   const names = Object.keys(entries).filter((name) => !name.endsWith("/"));
   await mkdir(output, { recursive: true });
   for (const name of names) {
-    const target = safeJoin(output, name);
+    const target = safeJoin(output, name, io.platform ?? process.platform);
     if (!target) throw new CliError(`Refusing to write outside the output directory: ${name}`);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, entries[name] as Uint8Array);
@@ -264,13 +354,19 @@ async function pull(args: string[], io: Io): Promise<void> {
 
 // --- browser ---------------------------------------------------------------------------------
 
-export function openInBrowser(url: string): Promise<void> {
-  const [command, args]: [string, string[]] =
-    process.platform === "darwin"
-      ? ["open", [url]]
-      : process.platform === "win32"
-        ? ["cmd", ["/c", "start", "", url]]
-        : ["xdg-open", [url]];
+export function browserCommand(platform: NodeJS.Platform, url: string): [string, string[]] {
+  return platform === "darwin"
+    ? ["open", [url]]
+    : platform === "win32"
+      ? ["explorer.exe", [url]]
+      : ["xdg-open", [url]];
+}
+
+export function openInBrowser(
+  url: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  const [command, args] = browserCommand(platform, url);
   return new Promise((resolveOpen) => {
     const child = spawn(command, args, { stdio: "ignore", detached: true });
     // No browser (a server over ssh): the URL was printed already.

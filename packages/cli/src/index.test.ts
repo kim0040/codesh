@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness, type Harness, integration } from "../../../apps/api/src/testing/harness.js";
-import { CliError, resolveUrl } from "./config.js";
-import { PACKAGE_NAME, safeJoin } from "./index.js";
+import { CliError, configPath, resolveUrl } from "./config.js";
+import { browserCommand, PACKAGE_NAME, qrOutputType, safeJoin, sharePath } from "./index.js";
 import { type Io, run } from "./run.js";
 
 it("exports the package name", () => {
@@ -20,6 +20,42 @@ describe("server url", () => {
     expect(resolveUrl(undefined, {}, { url: "http://c/" })).toBe("http://c");
     expect(() => resolveUrl(undefined, {}, {})).toThrow(CliError);
     expect(() => resolveUrl("codesh.corp", {}, {})).toThrow(CliError);
+  });
+});
+
+describe("platform-specific paths and terminal integration", () => {
+  it("uses APPDATA on Windows and XDG on other platforms", () => {
+    expect(
+      configPath(
+        { APPDATA: "C:\\Users\\Ada\\AppData\\Roaming", XDG_CONFIG_HOME: "/tmp/xdg" },
+        "win32",
+      ),
+    ).toBe("C:\\Users\\Ada\\AppData\\Roaming\\codesh\\codesh.json");
+    expect(configPath({ XDG_CONFIG_HOME: "/tmp/xdg" }, "linux")).toBe("/tmp/xdg/codesh.json");
+    expect(configPath({ CODESH_CONFIG: "C:\\custom\\codesh.json" }, "win32")).toBe(
+      "C:\\custom\\codesh.json",
+    );
+  });
+
+  it("normalizes Windows share paths and protects Windows pull paths", () => {
+    expect(sharePath("src\\nested\\main.ts", "win32")).toBe("src/nested/main.ts");
+    expect(safeJoin("C:\\out", "src\\nested\\main.ts", "win32")).toBe(
+      "C:\\out\\src\\nested\\main.ts",
+    );
+    expect(safeJoin("C:\\out", "..\\outside.txt", "win32")).toBeNull();
+    expect(safeJoin("C:\\out", "C:\\outside.txt", "win32")).toBeNull();
+    expect(safeJoin("C:\\out", "file:stream.txt", "win32")).toBeNull();
+    expect(safeJoin("C:\\out", "NUL.txt", "win32")).toBeNull();
+  });
+
+  it("uses a plain QR renderer and Explorer on Windows", () => {
+    expect(qrOutputType("win32")).toBe("utf8");
+    expect(qrOutputType("linux")).toBe("terminal");
+    expect(browserCommand("win32", "http://codesh.local/abc12345")).toEqual([
+      "explorer.exe",
+      ["http://codesh.local/abc12345"],
+    ]);
+    expect(browserCommand("darwin", "http://codesh.local/abc12345")[0]).toBe("open");
   });
 });
 
@@ -85,6 +121,22 @@ describe.skipIf(!integration)("against an in-process API", () => {
     );
     expect(zipped.code, zipped.err).toBe(0);
     expect((await readFile(join(dir, "demo.zip"))).subarray(0, 2).toString()).toBe("PK");
+  });
+
+  it("pushes folders with forward-slash paths and preserves CRLF bytes on pull", async () => {
+    const source = join(dir, "folder-share");
+    await mkdir(join(source, "src", "nested"), { recursive: true });
+    const contents = Buffer.from("first\r\nsecond\r\n", "utf8");
+    await writeFile(join(source, "src", "nested", "main.ts"), contents);
+    const pushed = await codesh(["push", "folder-share", "--no-qr"]);
+    expect(pushed.code, pushed.err).toBe(0);
+    const code = /code (\d{6})/.exec(pushed.out)?.[1] as string;
+    const output = join(dir, "folder-pulled");
+    const pulled = await codesh(["pull", code, "-o", output], "folder-reader");
+    expect(pulled.code, pulled.err).toBe(0);
+    expect(await readFile(join(output, "folder-share", "src", "nested", "main.ts"))).toEqual(
+      contents,
+    );
   });
 
   it("prints a QR code unless --no-qr", async () => {

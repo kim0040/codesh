@@ -22,7 +22,7 @@
 		X-Frame-Options DENY
 	}
 
-	# Prometheus endpoints, for the intranet only (also read by scripts/load).
+	# Prometheus endpoints, restricted to private address ranges (also read by scripts/load).
 	@metrics_api {
 		path /metrics/api
 		remote_ip private_ranges
