@@ -61,7 +61,10 @@ interface BrowserPhase {
   phase: string;
   longTasks: { count: number; maxMs: number };
   longFrames: { count: number; maxMs: number };
-  inputToPaintMs: Latency;
+  /** Called `inputToPaintMs` in files from before the metric was renamed. */
+  keydownToFrameMs?: Latency;
+  inputToPaintMs?: Latency;
+  visible?: { carets: { min: number; max: number }; selections: { min: number; max: number } };
   frameMs: { fps: number; over50: number };
   perSecond: {
     script: number;
@@ -111,9 +114,10 @@ for (const file of files) {
     for (const p of data.phases) {
       browser.push(
         `| ${data.name} | ${data.label} | ${p.phase} | ${p.longTasks.count} (${n(p.longTasks.maxMs, 0)}) | ` +
-          `${p.longFrames.count} (${n(p.longFrames.maxMs, 0)}) | ${ms(p.inputToPaintMs, ["p50", "p95", "max"])} | ` +
+          `${p.longFrames.count} (${n(p.longFrames.maxMs, 0)}) | ${ms(p.keydownToFrameMs ?? p.inputToPaintMs ?? null, ["p50", "p95", "max"])} | ` +
           `${n(p.frameMs.fps)} / ${p.frameMs.over50} | ${n(p.perSecond.script)} / ${n(p.perSecond.layout)} / ${n(p.perSecond.style)} | ` +
-          `${n(p.perSecond.cpu)} | ${n(p.perSecond.styleCount, 0)} / ${n(p.perSecond.layoutCount, 0)} |`,
+          `${n(p.perSecond.cpu)} | ${n(p.perSecond.styleCount, 0)} / ${n(p.perSecond.layoutCount, 0)} | ` +
+          `${p.visible ? `${p.visible.carets.min}–${p.visible.carets.max} / ${p.visible.selections.min}–${p.visible.selections.max}` : "-"} |`,
       );
     }
     continue;
@@ -181,8 +185,11 @@ const lines = [
   "",
   "## Browser (one real Chromium, headless, software rendering)",
   "",
-  "| Test | Label | Phase | Long tasks (max ms) | Long frames (max ms) | Input → paint p50 / p95 / max ms | fps / frames > 50 ms | Script / layout / style ms per s | Main-thread CPU ms per s | Style / layout passes per s |",
-  "|---|---|---|---|---|---|---|---|---|---|",
+  "Keydown → next frame is a scheduling proxy (a task queued from the frame after the key); it does not",
+  "show when the editor displays the typed text. Files from before the rename call it input → paint.",
+  "",
+  "| Test | Label | Phase | Long tasks (max ms) | Long frames (max ms) | Keydown → next frame (proxy) p50 / p95 / max ms | fps / frames > 50 ms | Script / layout / style ms per s | Main-thread CPU ms per s | Style / layout passes per s | Carets / selections in view min–max |",
+  "|---|---|---|---|---|---|---|---|---|---|---|",
   ...browser,
   "",
 ];
