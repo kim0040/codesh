@@ -273,6 +273,12 @@ const SIGNATURES: Record<string, Signature[]> = {
     sig(/<\/(?:div|span|p|a|ul|li|body|html|head|script|style)>/gi, 1.5, 3),
     sig(/\b(?:class|id|href|src|style)="[^"\n]*"/g, 1, 3),
   ],
+  angular: [
+    sig(/^\s*@(?:if|for|switch|defer)\s*\(/gm, 8, 2),
+    sig(/\(\s*(?:click|input|submit|change|keyup|keydown)\s*\)\s*=/g, 6, 2),
+    sig(/\[\s*(?:ngIf|ngFor|ngClass|ngStyle|disabled|value)\s*\]\s*=/g, 6, 2),
+    sig(/\{\{\s*[\w$][^}\n]*\s*\}\}/g, 1, 4),
+  ],
   xml: [
     sig(/^\s*<\?xml\b/g, 25, 1),
     sig(/\bxmlns(?::\w+)?=/g, 7, 2),
@@ -575,6 +581,53 @@ const SIGNATURES: Record<string, Signature[]> = {
     sig(/\bproc \w+ \{[^}\n]*\} \{/g, 10, 1),
     sig(/\bputs \$?\w+|\bset \w+ /g, 3, 3),
     sig(/\bforeach \w+ \{/g, 4, 1),
+  ],
+  nix: [
+    sig(/^\s*\{\s*pkgs\s*\?\s*import <nixpkgs>/gm, 12, 1),
+    sig(/\b(?:let|in|inherit|with|rec|mkShell)\b/g, 2, 5),
+    sig(/\b(?:builtins|pkgs)\.\w+/g, 3, 3),
+  ],
+  solidity: [
+    sig(/^\s*pragma solidity \^?[\d.]+;/gm, 15, 1),
+    sig(/\bcontract \w+\s*\{/g, 10, 2),
+    sig(/\b(?:uint\d*|address|mapping)\b/g, 3, 5),
+    sig(/\bfunction \w+\([^)]*\)\s*(?:public|external|internal|private)\b/g, 5, 2),
+    sig(/\bemit \w+/g, 3, 2),
+  ],
+  elixir: [
+    sig(/^\s*defmodule [A-Z]\w*(?:\.\w+)* do\s*$/gm, 12, 1),
+    sig(/^\s*defp? \w+[^\n]*\bdo\s*$/gm, 6, 2),
+    sig(/\b(?:when|end|@moduledoc)\b/g, 2, 4),
+  ],
+  terraform: [
+    sig(/^\s*terraform\s*\{/gm, 8, 1),
+    sig(/^\s*(?:resource|data) "[\w_-]+" "[\w_-]+"\s*\{/gm, 12, 2),
+    sig(/^\s*(?:provider|variable|output) "[\w_-]+"\s*\{/gm, 5, 2),
+    sig(/\b(?:source|version|region)\s*=/g, 2, 3),
+  ],
+  graphql: [
+    sig(/^\s*(?:query|mutation|subscription) \w+/gm, 10, 2),
+    sig(/^\s*(?:type|input|enum|scalar|interface|union) \w+\s*\{/gm, 10, 2),
+    sig(/\$\w+\s*:/g, 3, 3),
+    sig(/\b[A-Za-z]\w*\s*:\s*(?:String|Int|ID|Boolean|Float)\b/g, 2, 4),
+  ],
+  promql: [
+    sig(/\b(?:sum|avg|min|max|count|rate|irate|increase|histogram_quantile)\s*\(/g, 6, 3),
+    sig(/\bby\s*\(\s*\w+\s*\)/g, 5, 2),
+    sig(/\b\w+_total\s*\{/g, 4, 2),
+    sig(/\[\d+[smhdwy]\]/g, 4, 2),
+  ],
+  astro: [
+    sig(/^---\s*$/gm, 8, 2),
+    sig(/^const \w+ =/gm, 2, 3),
+    sig(/<\/?(?:html|head|body|[A-Z]\w+)\b/g, 2, 4),
+    sig(/\{\w+\}/g, 2, 3),
+  ],
+  groq: [
+    sig(/\*\[[^\]\n]*\]/g, 8, 2),
+    sig(/\|\s*order\(/g, 6, 1),
+    sig(/_type\s*==\s*["']/g, 6, 1),
+    sig(/\bnow\(\)/g, 3, 1),
   ],
 };
 

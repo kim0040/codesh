@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DETECT_SAMPLE_BYTES, detectLanguage } from "./detect.js";
-import { SAMPLES } from "./samples.js";
+import { DETECTION_SAMPLES, SAMPLES } from "./samples.js";
 
 const id = (content: string, filename?: string) =>
   detectLanguage({ content, filename }).language?.id;
@@ -10,7 +10,7 @@ describe("detection from content", () => {
     expect(Object.keys(SAMPLES).length).toBeGreaterThanOrEqual(24);
   });
 
-  it.each(Object.entries(SAMPLES))("recognises the %s sample", (language, source) => {
+  it.each(Object.entries(DETECTION_SAMPLES))("recognises the %s sample", (language, source) => {
     const result = detectLanguage({ content: source });
     expect(result.language?.id, `${language}: ${result.reason}`).toBe(language);
     expect(result.confidence).toBeGreaterThanOrEqual(0.4);
@@ -109,6 +109,24 @@ describe("detection from file names", () => {
   it.each([
     ["main.go", "go"],
     ["index.ts", "typescript"],
+    ["default.nix", "nix"],
+    ["Counter.sol", "solidity"],
+    ["lib.ex", "elixir"],
+    ["main.tf", "terraform"],
+    ["schema.graphql", "graphql"],
+    ["query.promql", "promql"],
+    ["src.astro", "astro"],
+    ["query.groq", "groq"],
+    ["shader.wgsl", "wgsl"],
+    ["grammar.pegjs", "pegjs"],
+    ["BUILD.bazel", "starlark"],
+    ["Sketch.ino", "arduino"],
+    ["build.gradle.kts", "gradle-kotlin"],
+    [".github/workflows/ci.yml", "github-actions"],
+    ["site.ansible.yml", "ansible"],
+    ["deployment.k8s.yaml", "kubernetes"],
+    ["schema.schema.json", "json-schema"],
+    ["src/app.component.html", "angular"],
     ["Dockerfile", "dockerfile"],
     ["Gemfile", "ruby"],
     ["x.kt", "kotlin"],

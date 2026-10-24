@@ -28,7 +28,7 @@
 | 저장소 구조 | pnpm workspaces + Turborepo | 모노레포 구조로 웹, 서버, 공용 라이브러리 일괄 관리 |
 | 언어 | TypeScript 7 (strict) 전 구간 | 클라이언트와 서버 간 일관된 정적 타입 검증 |
 | 웹 애플리케이션 | React 19 + Vite 8 + TanStack Router/Query | 반응형 SPA, 서버 상태 관리 및 클라이언트 라우팅 |
-| 에디터 | CodeMirror 6 + Lezer | 모바일 지원, 100개 이상 언어 문법 강조, Vim/Emacs/Sublime 키맵 |
+| 에디터 | CodeMirror 6 + Lezer | 모바일 지원, 200개 이상 언어 문법 강조, Vim/Emacs/Sublime 키맵 |
 | 실시간 동기화 | Yjs + Hocuspocus 4 | CRDT 동시 편집, 다중 커서(Awareness), IndexedDB 오프라인 보관 |
 | API 서버 | Fastify 5 | 고성능 HTTP API, Zod 기반 스키마 검증, SSE 이벤트 스트림 |
 | 데이터베이스 | MongoDB 8 (공식 드라이버) | 문서 상태 저장, TTL 인덱스 자동 만료, GridFS 대용량 파일 저장 |

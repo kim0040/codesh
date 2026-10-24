@@ -132,7 +132,7 @@ export const ko: KoDictionary = {
   "intro.features.sub": "공유에 꼭 필요한 기능만 담았어요.",
   "intro.features.highlight.title": "언어별 문법 강조",
   "intro.features.highlight.body":
-    "100개가 넘는 프로그래밍 언어를 언어마다 다른 색으로 보여줘요. 어두운 화면과 밝은 화면 모두 읽기 편해요.",
+    "200개가 넘는 프로그래밍 언어를 언어마다 다른 색으로 보여줘요. 어두운 화면과 밝은 화면 모두 읽기 편해요.",
   "intro.features.highlight.pick": "예제 언어 고르기",
   "intro.features.merge.title": "충돌 없는 동시 편집",
   "intro.features.merge.body":
@@ -174,7 +174,7 @@ export const ko: KoDictionary = {
     "코드나 링크가 있는 사람은 누구나 입장할 수 있어요. PIN이나 입장 승인으로 범위를 좁힐 수 있고, 이력은 소유자만 볼 수 있어요.",
   "intro.faq.languages.q": "어떤 언어를 지원하나요?",
   "intro.faq.languages.a":
-    "JavaScript, Python, Java, C++, Go 등 100개가 넘는 프로그래밍 언어를 지원해요. 언어는 자동으로 감지해요.",
+    "JavaScript, Python, Java, C++, Go 등 200개가 넘는 프로그래밍 언어를 지원해요. 언어는 자동으로 감지해요.",
   "intro.faq.outside.q": "다른 네트워크에서도 쓸 수 있나요?",
   "intro.faq.outside.a":
     "아니요. 이 서버가 있는 네트워크 안에서만 열려요. 대신 인터넷 연결은 필요 없어요.",

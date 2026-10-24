@@ -105,7 +105,7 @@ export const en = {
   "intro.features.sub": "Only the features that sharing code needs.",
   "intro.features.highlight.title": "Syntax highlighting",
   "intro.features.highlight.body":
-    "More than 100 programming languages, each in its own colors. Easy to read on dark and light screens.",
+    "More than 200 programming languages, each in its own colors. Easy to read on dark and light screens.",
   "intro.features.highlight.pick": "Choose an example language",
   "intro.features.merge.title": "Conflict-free editing",
   "intro.features.merge.body":
@@ -149,7 +149,7 @@ export const en = {
     "Anyone with the code or link can join. Add a PIN or require approval to limit that. Only the owner can see history.",
   "intro.faq.languages.q": "Which languages are supported?",
   "intro.faq.languages.a":
-    "More than 100 programming languages, including JavaScript, Python, Java, C++ and Go. The language is detected automatically.",
+    "More than 200 programming languages, including JavaScript, Python, Java, C++ and Go. The language is detected automatically.",
   "intro.faq.outside.q": "Can I use it from another network?",
   "intro.faq.outside.a":
     "No. It opens only on the network where this server runs. It does not need an internet connection.",
