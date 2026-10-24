@@ -1,6 +1,6 @@
 import type { AwarenessState, Comment, UserRef } from "@codesh/shared";
 import { YDOC } from "@codesh/shared";
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { type DocMetaView, type FileEntry, readComments, readFiles, readMeta } from "./model";
@@ -81,9 +81,23 @@ function readPeers(awareness: Awareness): AwarenessPeer[] {
   return peers;
 }
 
-/** Every awareness state with a user card, refreshed at most once per animation frame. */
-export function useAwarenessPeers(awareness: Awareness): AwarenessPeer[] {
-  const cache = useRef<{ awareness: Awareness; value: AwarenessPeer[] } | null>(null);
+/**
+ * A value derived from the awareness peers, read at most once per animation frame, that re-renders
+ * only when `equal` says it changed. In a class of 50 the cursors change awareness hundreds of
+ * times a second while the list of people changes when someone joins or leaves. `key` names what
+ * else `select` depends on; a new key derives the value again.
+ */
+export function useAwarenessSelector<T>(
+  awareness: Awareness,
+  select: (peers: AwarenessPeer[]) => T,
+  equal: (a: T, b: T) => boolean,
+  key: unknown = null,
+): T {
+  const cache = useRef<{ awareness: Awareness; key: unknown; value: T } | null>(null);
+  const selectRef = useRef(select);
+  selectRef.current = select;
+  const equalRef = useRef(equal);
+  equalRef.current = equal;
   const subscribe = useCallback(
     (onChange: () => void) => {
       let frame = 0;
@@ -91,7 +105,11 @@ export function useAwarenessPeers(awareness: Awareness): AwarenessPeer[] {
         if (frame) return;
         frame = requestAnimationFrame(() => {
           frame = 0;
-          cache.current = { awareness, value: readPeers(awareness) };
+          const value = selectRef.current(readPeers(awareness));
+          const previous = cache.current;
+          const same = previous?.awareness === awareness && previous.key === key;
+          if (same && equalRef.current(previous.value, value)) return;
+          cache.current = { awareness, key, value };
           onChange();
         });
       };
@@ -101,14 +119,15 @@ export function useAwarenessPeers(awareness: Awareness): AwarenessPeer[] {
         if (frame) cancelAnimationFrame(frame);
       };
     },
-    [awareness],
+    [awareness, key],
   );
   const getSnapshot = useCallback(() => {
-    if (!cache.current || cache.current.awareness !== awareness) {
-      cache.current = { awareness, value: readPeers(awareness) };
+    const cached = cache.current;
+    if (!cached || cached.awareness !== awareness || cached.key !== key) {
+      cache.current = { awareness, key, value: selectRef.current(readPeers(awareness)) };
     }
-    return cache.current.value;
-  }, [awareness]);
+    return (cache.current as { value: T }).value;
+  }, [awareness, key]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
@@ -124,29 +143,51 @@ export interface Participant {
   awarenessIds: number[];
 }
 
-/** One entry per person (two tabs of the same person count once), you first. */
-export function useParticipants(awareness: Awareness): Participant[] {
-  const peers = useAwarenessPeers(awareness);
-  return useMemo(() => {
-    const byClient = new Map<string, Participant>();
-    for (const peer of peers) {
-      const existing = byClient.get(peer.user.clientId);
-      if (existing) {
-        existing.awarenessIds.push(peer.awarenessId);
-        existing.isSelf ||= peer.isSelf;
-        continue;
-      }
-      byClient.set(peer.user.clientId, {
-        clientId: peer.user.clientId,
-        name: peer.user.name,
-        color: peer.user.color,
-        isSelf: peer.isSelf,
-        fileId: peer.state.fileId,
-        presenting: peer.state.presenting === true,
-        following: peer.state.following,
-        awarenessIds: [peer.awarenessId],
-      });
+function readParticipants(peers: AwarenessPeer[]): Participant[] {
+  const byClient = new Map<string, Participant>();
+  for (const peer of peers) {
+    const existing = byClient.get(peer.user.clientId);
+    if (existing) {
+      existing.awarenessIds.push(peer.awarenessId);
+      existing.isSelf ||= peer.isSelf;
+      continue;
     }
-    return [...byClient.values()].sort((a, b) => Number(b.isSelf) - Number(a.isSelf));
-  }, [peers]);
+    byClient.set(peer.user.clientId, {
+      clientId: peer.user.clientId,
+      name: peer.user.name,
+      color: peer.user.color,
+      isSelf: peer.isSelf,
+      fileId: peer.state.fileId,
+      presenting: peer.state.presenting === true,
+      following: peer.state.following,
+      awarenessIds: [peer.awarenessId],
+    });
+  }
+  return [...byClient.values()].sort((a, b) => Number(b.isSelf) - Number(a.isSelf));
+}
+
+function sameParticipant(a: Participant, b: Participant): boolean {
+  return (
+    a.clientId === b.clientId &&
+    a.name === b.name &&
+    a.color === b.color &&
+    a.isSelf === b.isSelf &&
+    a.fileId === b.fileId &&
+    a.presenting === b.presenting &&
+    a.following === b.following &&
+    a.awarenessIds.length === b.awarenessIds.length &&
+    a.awarenessIds.every((id, i) => id === b.awarenessIds[i])
+  );
+}
+
+function sameParticipants(a: Participant[], b: Participant[]): boolean {
+  return a.length === b.length && a.every((p, i) => sameParticipant(p, b[i] as Participant));
+}
+
+/**
+ * One entry per person (two tabs of the same person count once), you first. Cursor moves leave
+ * it unchanged, so the people list and the editor context do not re-render for them.
+ */
+export function useParticipants(awareness: Awareness): Participant[] {
+  return useAwarenessSelector(awareness, readParticipants, sameParticipants);
 }

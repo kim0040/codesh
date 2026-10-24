@@ -1,6 +1,6 @@
 import { DEFAULT_FILE_ID, type UserRef, YDOC } from "@codesh/shared";
 import { useEffect, useRef, useState } from "react";
-import { useAwarenessPeers, useSessionState } from "../../lib/collab/hooks";
+import { useAwarenessSelector, useSessionState } from "../../lib/collab/hooks";
 import { DocSession, type SessionState } from "../../lib/collab/session";
 
 export interface Preview {
@@ -29,10 +29,16 @@ export function usePreviewSession(shareId: string, me: UserRef): DocSession | nu
   return session;
 }
 
-/** Text of the main file (throttled), connection state and whether anyone else is there. */
+const someoneElse = (peers: { isSelf: boolean }[]) => peers.some((peer) => !peer.isSelf);
+
+/**
+ * Text of the main file and the time of the last change (both throttled), connection state and
+ * whether anyone else is there. A teacher's grid holds 50 of these, so a keystroke or a cursor
+ * move of a student must not re-render a tile by itself.
+ */
 export function usePreview(session: DocSession): Preview {
   const state = useSessionState(session);
-  const peers = useAwarenessPeers(session.awareness);
+  const online = useAwarenessSelector(session.awareness, someoneElse, Object.is);
   const [text, setText] = useState("");
   const [changedAt, setChangedAt] = useState<number | null>(null);
   const settled = useRef(false);
@@ -42,12 +48,14 @@ export function usePreview(session: DocSession): Preview {
     settled.current = false;
     const ytext = session.doc.getText(YDOC.fileText(DEFAULT_FILE_ID));
     let timer = 0;
+    let lastChange: number | null = null;
     const read = () => {
       timer = 0;
       setText(ytext.toString());
+      if (lastChange !== null) setChangedAt(lastChange);
     };
     const onChange = () => {
-      if (settled.current) setChangedAt(Date.now());
+      if (settled.current) lastChange = Date.now();
       if (!timer) timer = window.setTimeout(read, THROTTLE_MS);
     };
     ytext.observe(onChange);
@@ -63,5 +71,5 @@ export function usePreview(session: DocSession): Preview {
     };
   }, [session, state.generation]);
 
-  return { state, text, online: peers.some((peer) => !peer.isSelf), changedAt };
+  return { state, text, online, changedAt };
 }

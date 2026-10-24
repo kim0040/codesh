@@ -1,7 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import { type MutableRefObject, useEffect, useRef } from "react";
 import { prefersReducedMotion } from "../../lib/appearance";
-import { type AwarenessPeer, useAwarenessPeers } from "../../lib/collab/hooks";
+import { type AwarenessPeer, useAwarenessSelector } from "../../lib/collab/hooks";
 import type { DocSession } from "../../lib/collab/session";
 
 interface FollowOptions {
@@ -15,6 +15,34 @@ interface FollowOptions {
   setFollowing: (clientId: string | null) => void;
   /** I am presenting myself, so I never follow anyone. */
   presenting: boolean;
+}
+
+interface FollowView {
+  presenterId: string | null;
+  /** The person I follow still has a tab here. */
+  followingPresent: boolean;
+  target: AwarenessPeer | null;
+}
+
+function readFollowView(peers: AwarenessPeer[], following: string | null): FollowView {
+  const presenter = peers.find((peer) => !peer.isSelf && peer.state.presenting);
+  return {
+    presenterId: presenter?.user.clientId ?? null,
+    followingPresent: following !== null && peers.some((p) => p.user.clientId === following),
+    target: following
+      ? (peers.find((peer) => !peer.isSelf && peer.user.clientId === following) ?? null)
+      : null,
+  };
+}
+
+/** Awareness states are replaced on every update, so the target's state compares by reference. */
+function sameFollowView(a: FollowView, b: FollowView): boolean {
+  return (
+    a.presenterId === b.presenterId &&
+    a.followingPresent === b.followingPresent &&
+    a.target?.awarenessId === b.target?.awarenessId &&
+    a.target?.state === b.target?.state
+  );
 }
 
 export interface FollowResult {
@@ -35,26 +63,27 @@ export function useFollow(options: FollowOptions): FollowResult {
     setFollowing,
     presenting,
   } = options;
-  const peers = useAwarenessPeers(session.awareness);
+  // Only who presents and the followed person's state re-render this; other cursors do not.
+  const { presenterId, followingPresent, target } = useAwarenessSelector(
+    session.awareness,
+    (peers) => readFollowView(peers, following),
+    sameFollowView,
+    following,
+  );
   void generation;
 
   // A presenter is followed automatically, until I choose to stop.
   const dismissed = useRef(new Set<string>());
-  const presenter = peers.find((peer) => !peer.isSelf && peer.state.presenting);
-  const presenterId = presenter?.user.clientId ?? null;
   useEffect(() => {
     if (presenting) return;
     if (presenterId && !dismissed.current.has(presenterId) && following === null) {
       setFollowing(presenterId);
     }
-    if (!presenterId && following !== null && !peers.some((p) => p.user.clientId === following)) {
+    if (!presenterId && following !== null && !followingPresent) {
       setFollowing(null);
     }
-  }, [presenterId, presenting, following, setFollowing, peers]);
+  }, [presenterId, presenting, following, setFollowing, followingPresent]);
 
-  const target = following
-    ? (peers.find((peer) => !peer.isSelf && peer.user.clientId === following) ?? null)
-    : null;
   const viewport = target?.state.viewport;
   const targetFile = target?.state.fileId;
 

@@ -29,6 +29,9 @@ export function labelColorFor(hex: string): string {
   return color;
 }
 
+/** Until the fade starts (78% of the 3 s animation in editor.css), the flag is fully shown. */
+const FLAG_SHOWN_MS = 2300;
+
 interface Remote {
   awarenessId: number;
   name: string;
@@ -114,6 +117,8 @@ class CaretMarker implements LayerMarker {
 
   update(dom: HTMLElement, old: LayerMarker): boolean {
     const previous = old as CaretMarker;
+    // The layer updates every marker when one of them changes; the others stay as they are.
+    if (this.eq(previous)) return true;
     this.apply(dom);
     if (previous.id !== this.id) this.flash(dom);
     else if (previous.x !== this.x || previous.y !== this.y) this.flash(dom);
@@ -131,11 +136,18 @@ class CaretMarker implements LayerMarker {
     if (flag && flag.textContent !== this.name) flag.textContent = this.name;
   }
 
-  /** Restarts the CSS animation that shows the name and fades it after a moment. */
+  /**
+   * Restarts the CSS animation that shows the name and fades it after a moment. A new animation
+   * name restarts it without reading layout, so 50 moving carets cost no forced reflow; a flag
+   * that is still showing stays opaque instead of fading in again on every keystroke.
+   */
   private flash(root: HTMLElement) {
-    root.classList.remove("is-moving");
-    void root.offsetWidth;
-    root.classList.add("is-moving");
+    const now = performance.now();
+    const showing = now - Number(root.dataset.flashed ?? Number.NEGATIVE_INFINITY) < FLAG_SHOWN_MS;
+    root.dataset.flashed = String(now);
+    const next = root.dataset.flag === "a" ? "b" : "a";
+    root.dataset.flag = next;
+    root.dataset.flagFrom = showing ? "shown" : "hidden";
   }
 }
 
@@ -199,13 +211,28 @@ function needsRedraw(update: import("@codemirror/view").ViewUpdate): boolean {
 }
 
 export function remoteCursors(session: DocSession, ytext: Y.Text, fileId: string) {
+  // Both layers draw from the same positions; resolving them is O(document) per cursor, so they
+  // are resolved once per document state and awareness change, not once per layer.
+  let version = 0;
+  let cached: { doc: unknown; version: number; remotes: Remote[] } | null = null;
+  const remotesOf = (view: EditorView): Remote[] => {
+    if (cached?.doc !== view.state.doc || cached.version !== version) {
+      cached = {
+        doc: view.state.doc,
+        version,
+        remotes: collectRemotes(session, ytext, fileId, view.state.doc.length),
+      };
+    }
+    return cached.remotes;
+  };
+
   const selections = layer({
     above: false,
     class: "cm-remote-selections",
     update: needsRedraw,
     markers(view) {
       const markers: LayerMarker[] = [];
-      for (const remote of collectRemotes(session, ytext, fileId, view.state.doc.length)) {
+      for (const remote of remotesOf(view)) {
         if (remote.anchor === remote.head) continue;
         const range = EditorSelection.range(remote.anchor, remote.head);
         for (const rect of RectangleMarker.forRange(view, "", range)) {
@@ -225,7 +252,7 @@ export function remoteCursors(session: DocSession, ytext: Y.Text, fileId: string
     markers(view) {
       const base = layerBase(view);
       const markers: LayerMarker[] = [];
-      for (const remote of collectRemotes(session, ytext, fileId, view.state.doc.length)) {
+      for (const remote of remotesOf(view)) {
         const coords = view.coordsAtPos(remote.head, remote.head > remote.anchor ? -1 : 1);
         if (!coords) continue;
         markers.push(
@@ -248,6 +275,7 @@ export function remoteCursors(session: DocSession, ytext: Y.Text, fileId: string
     const awareness = session.provider.awareness;
     let frame = 0;
     const onChange = () => {
+      version++;
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
