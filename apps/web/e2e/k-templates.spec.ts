@@ -141,6 +141,8 @@ test("admin adds a template and sets the contact; both reach the picker and the 
     await dialog.getByTestId("template-done").click();
     await expect(dialog).toBeHidden();
     await expect(editor.getByText(name)).toBeVisible();
+    // Confirming the template only changes the draft; nothing is saved until Save.
+    await expect(admin.page.getByText("Settings saved", { exact: true })).toHaveCount(0);
 
     await admin.page.getByLabel("Contact in the footer").fill("it-help@example.org");
     await admin.page.getByTestId("admin-save").click();

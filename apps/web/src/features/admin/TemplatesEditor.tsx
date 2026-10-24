@@ -251,6 +251,9 @@ function TemplateForm({
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault();
+        // The dialog is portalled, but React still bubbles its submit to the settings form, which
+        // would save every setting each time a template is confirmed.
+        event.stopPropagation();
         submit();
       }}
     >

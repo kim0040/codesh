@@ -139,35 +139,38 @@ test("admin templates editor", async ({ browser }) => {
   const bearer = { Authorization: `Bearer ${ADMIN_TOKEN}` };
   try {
     await setTheme(admin, "dark");
+    // Settings are global and k-templates.spec.ts edits them in parallel, so this screenshot test
+    // only answers the admin page's read with its own templates and never writes them.
     const current = await admin.context.request.get("/api/admin/settings", { headers: bearer });
     const settings = (await current.json()) as object;
-    const put = await admin.context.request.put("/api/admin/settings", {
-      headers: bearer,
-      data: {
-        ...settings,
-        templates: [
-          {
-            id: "org-service",
-            name: "Team service skeleton",
-            language: "go",
-            description: "Our HTTP service with health check and tests.",
-            files: [
-              { path: "cmd/server/main.go", content: "package main\n\nfunc main() {}\n" },
-              { path: "internal/health/health.go", content: "package health\n" },
-              { path: "README.md", content: "# Service\n" },
-            ],
-          },
-          {
-            id: "org-lab",
-            name: "Lab exercise",
-            language: "python",
-            description: "",
-            files: [{ path: "exercise.py", content: "def solve():\n    pass\n" }],
-          },
-        ],
-      },
+    await admin.page.route("**/api/admin/settings", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({
+        json: {
+          ...settings,
+          templates: [
+            {
+              id: "org-service",
+              name: "Team service skeleton",
+              language: "go",
+              description: "Our HTTP service with health check and tests.",
+              files: [
+                { path: "cmd/server/main.go", content: "package main\n\nfunc main() {}\n" },
+                { path: "internal/health/health.go", content: "package health\n" },
+                { path: "README.md", content: "# Service\n" },
+              ],
+            },
+            {
+              id: "org-lab",
+              name: "Lab exercise",
+              language: "python",
+              description: "",
+              files: [{ path: "exercise.py", content: "def solve():\n    pass\n" }],
+            },
+          ],
+        },
+      });
     });
-    expect(put.ok()).toBe(true);
 
     await admin.page.goto("/admin");
     await admin.page.getByTestId("admin-token").fill(ADMIN_TOKEN);
@@ -182,13 +185,6 @@ test("admin templates editor", async ({ browser }) => {
     await expect(dialog.getByTestId("template-name")).toHaveValue("Team service skeleton");
     await shot(admin.page, "admin-templates-editor");
   } finally {
-    const current = await admin.context.request.get("/api/admin/settings", { headers: bearer });
-    if (current.ok()) {
-      await admin.context.request.put("/api/admin/settings", {
-        headers: bearer,
-        data: { ...((await current.json()) as object), templates: [] },
-      });
-    }
     await closeAll(admin);
   }
 });
