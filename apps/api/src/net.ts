@@ -220,3 +220,10 @@ export function resolveNet(ip: string, settings: NetSettings): NetGroup {
   const prefix = bytes.length === 4 ? settings.subnetPrefixV4 : IPV6_PREFIX;
   return { net: `${formatIp(mask(bytes, prefix))}/${prefix}`, room: null };
 }
+
+/** Abuse limits use one IPv4 address or one IPv6 /64, independent of display rooms. */
+export function networkKey(ip: string): string {
+  const bytes = parseIp(ip);
+  if (!bytes) return "unknown";
+  return bytes.length === 16 ? `${formatIp(mask(bytes, 64))}/64` : formatIp(bytes);
+}

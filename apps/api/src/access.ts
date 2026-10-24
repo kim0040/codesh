@@ -14,6 +14,7 @@ import { touchCode } from "./codes.js";
 import { safeEqual, verifyPin } from "./crypto.js";
 import type { Ctx } from "./ctx.js";
 import { ApiError, notFound } from "./errors.js";
+import { networkKey } from "./net.js";
 import { refreshNearby } from "./presence.js";
 import { displayName, type Session } from "./session.js";
 
@@ -125,11 +126,14 @@ export function requireOwner(share: ShareRecord, session: Session): void {
 const RESERVE_PIN_ATTEMPT = `
 local client = redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[1], 'NX')
+local share = redis.call('INCR', KEYS[3])
+redis.call('EXPIRE', KEYS[3], ARGV[1], 'NX')
 local ip = redis.call('INCR', KEYS[2])
 redis.call('EXPIRE', KEYS[2], ARGV[1], 'NX')
-if client > tonumber(ARGV[2]) or ip > tonumber(ARGV[3]) then
+if client > tonumber(ARGV[2]) or ip > tonumber(ARGV[3]) or share > tonumber(ARGV[4]) then
   redis.call('DECR', KEYS[1])
   redis.call('DECR', KEYS[2])
+  redis.call('DECR', KEYS[3])
   return {0, redis.call('TTL', KEYS[1])}
 end
 return {1, 0}
@@ -140,6 +144,9 @@ const RELEASE_PIN_ATTEMPT = `
 redis.call('DEL', KEYS[1])
 if redis.call('EXISTS', KEYS[2]) == 1 and redis.call('DECR', KEYS[2]) <= 0 then
   redis.call('DEL', KEYS[2])
+end
+if redis.call('EXISTS', KEYS[3]) == 1 and redis.call('DECR', KEYS[3]) <= 0 then
+  redis.call('DEL', KEYS[3])
 end
 return 1
 `;
@@ -159,15 +166,18 @@ export async function checkPin(
   if (hash === null) return;
   if (pin === undefined || pin === "") throw new ApiError("pin_required", "This share needs a PIN");
   const clientKey = apiKeys.pinFailsClient(share.id, session.clientId);
-  const ipKey = apiKeys.pinFailsIp(share.id, session.ip);
+  const ipKey = apiKeys.pinFailsIp(share.id, networkKey(session.ip));
+  const shareKey = apiKeys.pinFailsShare(share.id);
   const [allowed, ttl] = (await ctx.valkey.eval(
     RESERVE_PIN_ATTEMPT,
-    2,
+    3,
     clientKey,
     ipKey,
+    shareKey,
     String(PIN_ATTEMPT_WINDOW_SECONDS),
     String(PIN_MAX_ATTEMPTS),
     String(PIN_IP_MAX_ATTEMPTS),
+    "200",
   )) as [number, number];
   if (allowed !== 1) {
     ctx.metrics.rateLimited.inc({ bucket: "pin" });
@@ -176,7 +186,7 @@ export async function checkPin(
     });
   }
   if (await verifyPin(pin, hash)) {
-    await ctx.valkey.eval(RELEASE_PIN_ATTEMPT, 2, clientKey, ipKey);
+    await ctx.valkey.eval(RELEASE_PIN_ATTEMPT, 3, clientKey, ipKey, shareKey);
     return;
   }
   throw new ApiError("pin_invalid", "Wrong PIN");

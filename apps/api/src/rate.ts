@@ -1,6 +1,7 @@
 import { keys } from "@codesh/shared";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
+import { networkKey } from "./net.js";
 
 export const WINDOW_SECONDS = 60;
 
@@ -15,7 +16,7 @@ export async function rateLimit(
   limit: number,
   windowSeconds = WINDOW_SECONDS,
 ): Promise<void> {
-  const key = keys.rateLimit(ip, bucket);
+  const key = keys.rateLimit(networkKey(ip), bucket);
   const result = await ctx.valkey.multi().incr(key).ttl(key).exec();
   const count = Number(result?.[0]?.[1] ?? 0);
   let ttl = Number(result?.[1]?.[1] ?? -1);
@@ -35,7 +36,7 @@ export async function rateLimit(
  * Reserving first and releasing afterwards keeps the limit atomic against parallel guesses.
  */
 export async function rateRelease(ctx: Ctx, ip: string, bucket: string): Promise<void> {
-  await ctx.valkey.eval(RELEASE, 1, keys.rateLimit(ip, bucket));
+  await ctx.valkey.eval(RELEASE, 1, keys.rateLimit(networkKey(ip), bucket));
 }
 
 const RELEASE = `
