@@ -108,6 +108,19 @@ describe.skipIf(!integration)("security resource boundaries", () => {
     expect((await owner.post(`/api/shares/${id}/join`)).statusCode).toBe(200);
   });
 
+  it("L3: caps waiting-room entries and deduplicates requests", async () => {
+    const config = loadConfig({ PENDING_MAX_PER_SHARE: "1" });
+    h = await createHarness({ config: { limits: config.limits } });
+    const owner = h.client();
+    const guest = h.client();
+    const { id } = await createShare(owner);
+    await owner.patch(`/api/shares/${id}`, { access: { requireApproval: true } });
+    expect((await guest.post(`/api/shares/${id}/join`)).statusCode).toBe(202);
+    expect((await guest.post(`/api/shares/${id}/join`)).statusCode).toBe(202);
+    expect((await h.client().post(`/api/shares/${id}/join`)).statusCode).toBe(429);
+    expect((await owner.get(`/api/shares/${id}/pending`)).json()).toHaveLength(1);
+  });
+
   it("M4: caps open SSE streams per client and IPv6 network key, and releases slots", async () => {
     const config = loadConfig({ SSE_MAX_PER_CLIENT: "1", SSE_MAX_PER_IP: "2" });
     h = await createHarness({ config: { limits: config.limits } });

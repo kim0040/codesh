@@ -38,6 +38,7 @@ import { ApiError, forbidden, invalid, notFound } from "../errors.js";
 import { attachment, basename, sanitizePath } from "../files.js";
 import { networkKey } from "../net.js";
 import { announceShare, removeNearby } from "../presence.js";
+import { rateLimit } from "../rate.js";
 import { displayName } from "../session.js";
 import { createShare, deleteShare, syncExpiry } from "../shares.js";
 import { type App, limited, mapLimit, OK } from "./types.js";
@@ -165,9 +166,30 @@ export function shareRoutes(app: App, ctx: Ctx): void {
         }
         if (share.access.requireApproval) {
           const pendingKey = keys.pending(share.id);
-          const added = await ctx.valkey.hset(pendingKey, session.clientId, displayName(session));
-          await ctx.valkey.expire(pendingKey, PENDING_TTL_SECONDS);
-          if (added === 1) {
+          const added = Number(
+            await ctx.valkey.eval(
+              ADD_PENDING,
+              1,
+              pendingKey,
+              session.clientId,
+              displayName(session),
+              ctx.config.limits.PENDING_MAX_PER_SHARE,
+              PENDING_TTL_SECONDS,
+            ),
+          );
+          if (added === -1)
+            throw new ApiError("rate_limited", "The waiting room is full", { "Retry-After": "60" });
+          let notify = added === 1;
+          if (notify) {
+            try {
+              await rateLimit(ctx, session.ip, `approval:${share.id}`, 10);
+              await rateLimit(ctx, "share", `approval:${share.id}`, 20);
+            } catch (error) {
+              if (!(error instanceof ApiError) || error.code !== "rate_limited") throw error;
+              notify = false;
+            }
+          }
+          if (notify) {
             await ctx.publishUser(share.ownerId, {
               event: "approval-request",
               data: { shareId: share.id, clientId: session.clientId, name: displayName(session) },
@@ -413,3 +435,11 @@ export function shareRoutes(app: App, ctx: Ctx): void {
     },
   );
 }
+
+const ADD_PENDING = `
+if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1 then return 0 end
+if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then return -1 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return 1
+`;
