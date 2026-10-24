@@ -443,7 +443,7 @@ export const ko: KoDictionary = {
   "myshares.tab.saved": "저장한 공유",
   "myshares.tab.owned": "내가 만든 공유",
   "myshares.searchLabel": "내 공유 검색",
-  "myshares.searchPlaceholder": "제목이나 코드",
+  "myshares.searchPlaceholder": "제목, 코드, 폴더, 태그",
   "myshares.saved": "저장됨",
   "myshares.expiresIn": "{time} 뒤 만료",
   "myshares.noExpiry": "만료되지 않아요",
@@ -473,6 +473,8 @@ export const ko: KoDictionary = {
   "myshares.organize.folderNone": "폴더 없음",
   "myshares.organize.folderEmpty": "아직 폴더가 없어요. 이름을 입력하면 만들 수 있어요.",
   "myshares.organize.folderTooLong": "폴더 이름은 {max}자까지 쓸 수 있어요.",
+  "myshares.organize.folderInvalid": "폴더 이름에는 줄바꿈이나 탭을 넣을 수 없어요.",
+  "myshares.organize.tagInvalid": "태그에는 줄바꿈이나 탭을 넣을 수 없어요.",
   "myshares.organize.tagsLabel": "태그",
   "myshares.organize.tagPlaceholder": "태그를 입력하고 Enter를 누르세요",
   "myshares.organize.tagHint": "태그는 {max}개까지 달 수 있어요. Backspace로 마지막 태그를 지워요.",
@@ -726,6 +728,9 @@ export const ko: KoDictionary = {
   "admin.setting.templates.empty": "아직 우리 조직 템플릿이 없어요.",
   "admin.setting.templates.addAction": "템플릿 추가",
   "admin.setting.templates.limit": "템플릿은 {max}개까지 추가할 수 있어요.",
+  "admin.setting.templates.total": "모든 템플릿을 합쳐 {max} 중 {used}를 쓰고 있어요.",
+  "admin.setting.templates.totalTooLarge":
+    "템플릿 크기의 합이 {max}를 넘어요. 하나를 줄이거나 삭제해야 설정을 저장할 수 있어요.",
   "admin.setting.templates.deleteTitle": "“{name}” 템플릿을 삭제할까요?",
   "admin.setting.templates.deleteBody":
     "더 이상 이 템플릿으로 시작할 수 없어요. 이미 만든 공유는 그대로 남아요. 설정을 저장하면 적용돼요.",
@@ -747,9 +752,14 @@ export const ko: KoDictionary = {
   "admin.template.error.description": "설명은 {max}자까지 쓸 수 있어요.",
   "admin.template.error.language": "언어를 골라 주세요.",
   "admin.template.error.files": "파일을 하나 이상 추가해 주세요.",
-  "admin.template.error.path": "“..”나 맨 앞 슬래시 없이 상대 경로로 입력해 주세요.",
+  "admin.template.error.path":
+    "src/main.py처럼 상대 경로로 입력해 주세요. “..”, 역슬래시, 드라이브 문자, 빈 항목, 맨 앞이나 맨 뒤 슬래시는 쓸 수 없어요.",
   "admin.template.error.duplicatePath": "파일 이름이 겹쳐요.",
   "admin.template.error.size": "파일 크기의 합이 공유 크기 제한({size})을 넘어요.",
+  "admin.template.error.total":
+    "템플릿 크기의 합은 {size}까지 가능해요. 이 템플릿을 줄이거나 다른 템플릿을 삭제해 주세요.",
+  "admin.template.error.id":
+    "이 템플릿의 ID가 올바르지 않아 저장할 수 없어요. 삭제한 뒤 다시 추가해 주세요.",
   "admin.people.title": "접속자",
   "admin.people.online.other": "{count}명 접속 중",
   "admin.people.column.name": "이름",
@@ -818,7 +828,7 @@ export const ko: KoDictionary = {
   "template.files.other": "파일 {count}개",
   "template.filesLabel": "파일",
   "template.previewLabel": "{name} 미리보기",
-  "template.selectHint": "템플릿을 고르면 파일 목록을 볼 수 있어요.",
+  "template.previewCode": "{path}의 앞부분",
   "template.createAction": "공유 만들기",
   "template.loading": "템플릿을 불러오는 중…",
   "template.error.title": "템플릿을 불러오지 못했어요",

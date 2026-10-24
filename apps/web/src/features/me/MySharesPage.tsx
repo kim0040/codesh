@@ -41,6 +41,7 @@ import {
   listFolders,
   listTags,
   matchesLabels,
+  matchesQuery,
   pruneFilters,
 } from "../../lib/labels";
 import { FolderNav } from "./FolderNav";
@@ -99,12 +100,11 @@ export function MySharesPage() {
   }, [shares.data, folderFilter, tagKeys]);
 
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return [...(shares.data ?? [])]
       .filter((share) =>
         filter === "saved" ? share.saved : filter === "owned" ? share.role === "owner" : true,
       )
-      .filter((share) => !q || share.title.toLowerCase().includes(q) || share.id.includes(q))
+      .filter((share) => matchesQuery(share, query))
       .filter((share) => matchesLabels(share, library.folder, library.selected))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }, [shares.data, filter, query, library.folder, library.selected]);
@@ -291,7 +291,7 @@ export function MySharesPage() {
                       </h2>
                       {share.saved ? <Badge tone="accent">{t("myshares.saved")}</Badge> : null}
                       <IconButton
-                        aria-label={t("myshares.organizeAction")}
+                        aria-label={`${t("myshares.organizeAction")}: ${share.title || t("common.untitled")}`}
                         size="sm"
                         className="relative z-10"
                         onClick={() => setOrganizing(share)}

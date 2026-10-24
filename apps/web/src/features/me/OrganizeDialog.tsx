@@ -37,9 +37,20 @@ interface OrganizeDialogProps {
 export function OrganizeDialog({ share, shares, onClose }: OrganizeDialogProps) {
   const t = useT();
   const formId = useId();
+  // Lives here because Radix closes the dialog on Escape before the combobox sees the key.
+  const [listOpen, setListOpen] = useState(false);
+  useEffect(() => {
+    if (share === null) setListOpen(false);
+  }, [share]);
   return (
     <Dialog open={share !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
+        // With the folder list open, the first Escape closes the list and keeps the dialog.
+        onEscapeKeyDown={(event) => {
+          if (!listOpen) return;
+          event.preventDefault();
+          setListOpen(false);
+        }}
         title={t("myshares.organize.title", { title: share?.title || t("common.untitled") })}
         description={t("myshares.organize.body")}
         closeLabel={t("common.close")}
@@ -58,6 +69,8 @@ export function OrganizeDialog({ share, shares, onClose }: OrganizeDialogProps) 
             formId={formId}
             share={share}
             shares={shares}
+            listOpen={listOpen}
+            onListOpen={setListOpen}
             onDone={onClose}
           />
         ) : null}
@@ -70,11 +83,15 @@ function OrganizeForm({
   formId,
   share,
   shares,
+  listOpen,
+  onListOpen,
   onDone,
 }: {
   formId: string;
   share: ShareListItem;
   shares: readonly ShareListItem[];
+  listOpen: boolean;
+  onListOpen: (open: boolean) => void;
   onDone: () => void;
 }) {
   const t = useT();
@@ -82,7 +99,7 @@ function OrganizeForm({
   const [folderText, setFolderText] = useState(share.folder ?? "");
   const [tags, setTags] = useState<string[]>(share.tags);
   const [tagText, setTagText] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ folder?: string; tags?: string }>({});
 
   const others = useMemo(() => shares.filter((item) => item.id !== share.id), [shares, share.id]);
   const existingFolders = useMemo(() => listFolders(shares).folders, [shares]);
@@ -141,10 +158,24 @@ function OrganizeForm({
       tags: finalTags,
     });
     if (!parsed.success) {
-      setError(t("myshares.organize.folderTooLong", { max: MAX_FOLDER_LENGTH }));
+      const next: { folder?: string; tags?: string } = {};
+      for (const issue of parsed.error.issues) {
+        if (issue.path[0] === "folder") {
+          next.folder =
+            issue.code === "too_big"
+              ? t("myshares.organize.folderTooLong", { max: MAX_FOLDER_LENGTH })
+              : t("myshares.organize.folderInvalid");
+        } else {
+          next.tags =
+            issue.code === "too_big"
+              ? t("myshares.organize.tagTooLong", { max: MAX_TAG_LENGTH })
+              : t("myshares.organize.tagInvalid");
+        }
+      }
+      setErrors(next);
       return;
     }
-    setError(null);
+    setErrors({});
     save.mutate(parsed.data);
   };
 
@@ -161,15 +192,21 @@ function OrganizeForm({
         value={folderText}
         onChange={(value) => {
           setFolderText(value);
-          setError(null);
+          setErrors((current) => ({ ...current, folder: undefined }));
         }}
+        open={listOpen}
+        onOpen={onListOpen}
         folders={existingFolders}
-        error={error}
+        error={errors.folder ?? null}
       />
       <TagsField
         tags={tags}
         text={tagText}
-        onText={setTagText}
+        error={errors.tags}
+        onText={(value) => {
+          setTagText(value);
+          setErrors((current) => ({ ...current, tags: undefined }));
+        }}
         onAdd={addTags}
         onRemove={(index) => setTags((current) => current.filter((_, i) => i !== index))}
         suggestions={suggestTags(existingTags, tags, tagText).slice(0, MAX_SUGGESTIONS)}
@@ -187,17 +224,20 @@ type FolderOption =
 function FolderField({
   value,
   onChange,
+  open,
+  onOpen: setOpen,
   folders,
   error,
 }: {
   value: string;
   onChange: (value: string) => void;
+  open: boolean;
+  onOpen: (open: boolean) => void;
   folders: readonly FolderEntry[];
   error: string | null;
 }) {
   const t = useT();
   const listId = useId();
-  const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
 
@@ -232,12 +272,8 @@ function FolderField({
     } else if (event.key === "Enter" && open) {
       event.preventDefault();
       choose(options[active]);
-    } else if (event.key === "Escape" && open) {
-      // Closes the list first; a second Escape closes the dialog.
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
     }
+    // Escape is handled by the dialog (`onEscapeKeyDown`): the first one closes the list.
   };
 
   return (
@@ -332,6 +368,7 @@ function FolderField({
 function TagsField({
   tags,
   text,
+  error,
   onText,
   onAdd,
   onRemove,
@@ -339,6 +376,7 @@ function TagsField({
 }: {
   tags: readonly string[];
   text: string;
+  error?: string;
   onText: (value: string) => void;
   onAdd: (names: readonly string[]) => void;
   onRemove: (index: number) => void;
@@ -380,12 +418,14 @@ function TagsField({
               ? t("myshares.organize.tagTooLong", { max: MAX_TAG_LENGTH })
               : t("myshares.organize.tagHint", { max: MAX_TAGS_PER_SHARE })
         }
+        error={error}
       >
         <Input
           ref={input}
           autoComplete="off"
           maxLength={MAX_TAG_LENGTH}
-          disabled={full}
+          // Not `disabled`: the input has focus when the last tag is added, and a disabled element loses it.
+          readOnly={full}
           placeholder={t("myshares.organize.tagPlaceholder")}
           value={text}
           onChange={(event) => {

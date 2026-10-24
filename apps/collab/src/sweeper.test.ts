@@ -52,7 +52,7 @@ describe.runIf(available)("sweeper", () => {
       expiresAt: new Date(now.getTime() + DAY_MS),
     });
     await stores.files.put({ ...upload, expiresAt: old });
-    const owner = generateClientId();
+    const owner = live.ownerId;
     const labels = { folder: "Week 1", tags: ["loops"] };
     await stores.labels.set(owner, live.id, labels, now);
     await stores.labels.set(owner, "gone0001", labels, now);
@@ -78,6 +78,28 @@ describe.runIf(available)("sweeper", () => {
     const lock = new ValkeyLock(harness.redis, "sweeper-test", 60_000);
     expect(await sweep(stores, lock)).toEqual({ orphans: 1 });
     expect(await stores.labels.get(owner, "gone0002")).toBeNull();
+  });
+
+  it("removes labels of people who neither own nor have saved the share", async () => {
+    const { stores } = harness;
+    const share = await harness.createShare();
+    const saver = generateClientId();
+    const stranger = generateClientId();
+    const labels = { folder: "Week 1", tags: ["loops"] };
+    await stores.shares.addSaved(share.id, saver);
+    await stores.labels.set(share.ownerId, share.id, labels, new Date());
+    await stores.labels.set(saver, share.id, labels, new Date());
+    // What a label write that raced with unsave or ban leaves behind.
+    await stores.labels.set(stranger, share.id, labels, new Date());
+
+    const lock = new ValkeyLock(harness.redis, "sweeper-test", 60_000);
+    expect(await sweep(stores, lock)).toEqual({ orphans: 0 });
+
+    expect(await stores.labels.get(stranger, share.id)).toBeNull();
+    expect(await stores.labels.get(share.ownerId, share.id)).toMatchObject(labels);
+    expect(await stores.labels.get(saver, share.id)).toMatchObject(labels);
+    await stores.shares.delete(share.id);
+    await stores.labels.deleteForShare(share.id);
   });
 
   it("runs on one instance at a time", async () => {

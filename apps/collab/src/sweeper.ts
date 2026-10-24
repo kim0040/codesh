@@ -11,7 +11,8 @@ export interface SweepResult {
 }
 
 /**
- * §5 sweeper: removes update logs, snapshots, uploads and labels of shares that no longer exist, history
+ * §5 sweeper: removes update logs, snapshots, uploads and labels of shares that no longer exist, labels of
+ * people who neither own nor have saved their share (a label write that raced with unsave or ban), history
  * snapshots past `historyRetentionDays`, expired uploads and audit entries past retention. One
  * instance at a time, guarded by `lock:sweeper`.
  */
@@ -43,6 +44,15 @@ export async function sweep(
       await stores.snapshots.deleteForShare(id);
       await stores.files.deleteForShare(id);
       await stores.labels.deleteForShare(id);
+    }
+    // Labels are read before the shares, so a share saved in between keeps the label written after it.
+    for (const clientId of await stores.labels.clientIds()) {
+      const entries = await stores.labels.listForClient(clientId);
+      const mine = new Set((await stores.shares.listForClient(clientId)).map((share) => share.id));
+      for (const entry of entries) {
+        if (!mine.has(entry.shareId)) await stores.labels.delete(clientId, entry.shareId);
+      }
+      await lock.renew(keys.sweeperLock);
     }
     await stores.snapshots.deleteOlderThan(
       "history",

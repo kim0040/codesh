@@ -38,6 +38,13 @@ export function organizeRoutes(app: App, ctx: Ctx): void {
         return labels;
       }
       const stored = await ctx.stores.labels.set(clientId, id, labels, new Date());
+      // Unsave and ban delete the entry after they remove the person from the share. If one of them
+      // ran between the check above and the write, it did not see this entry, so look again.
+      const current = await ctx.stores.shares.get(id);
+      if (!current || !(current.ownerId === clientId || current.savedBy.includes(clientId))) {
+        await ctx.stores.labels.delete(clientId, id);
+        throw notFound("Share not found");
+      }
       return { folder: stored.folder, tags: stored.tags };
     },
   );

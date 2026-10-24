@@ -582,6 +582,10 @@ class MongoLabelStore implements LabelStore {
   async shareIds() {
     return this.labels.distinct("shareId");
   }
+
+  async clientIds() {
+    return this.labels.distinct("clientId");
+  }
 }
 
 class MongoSettingsStore implements SettingsStore {

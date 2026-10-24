@@ -187,3 +187,76 @@ test("admin adds a template and sets the contact; both reach the picker and the 
     await closeAll(admin, visitor);
   }
 });
+
+test("the picker names its groups and the preview can be scrolled with the keyboard", async ({
+  browser,
+}) => {
+  const user = await newUser(browser, "A11y");
+  try {
+    await user.page.goto("/");
+    await user.page.getByTestId("new-from-template").click();
+    const picker = user.page.getByRole("dialog", { name: "Start from a template" });
+    const group = picker.getByRole("group", { name: "Built-in" });
+    await expect(group).toBeVisible();
+    await expect(group.getByTestId("template-builtin-java")).toBeVisible();
+
+    await picker.getByTestId("template-builtin-java").click();
+    const code = picker.getByTestId("template-preview").getByRole("region", { name: /Start of/ });
+    await expect(code).toHaveAttribute("tabindex", "0");
+    await code.focus();
+    await expect(code).toBeFocused();
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("admin: templates share one size limit, and a refused save shows the reason and keeps the edits", async ({
+  browser,
+}) => {
+  // Nothing here is saved: the draft lives in the page and the one PUT is answered by the test, so the
+  // settings other specs share on this stack stay as they are.
+  const admin = await newUser(browser, "Limit");
+  try {
+    await admin.page.goto("/admin");
+    await admin.page.getByTestId("admin-token").fill(ADMIN_TOKEN);
+    await admin.page.getByTestId("admin-login").click();
+    const editor = admin.page.getByTestId("templates-editor");
+    await expect(editor).toBeVisible();
+
+    const addTemplate = async (name: string, size: number) => {
+      await editor.getByTestId("template-add").click();
+      const dialog = admin.page.getByRole("dialog", { name: "Add template" });
+      await dialog.getByTestId("template-name").fill(name);
+      await dialog.getByTestId("template-file-content").fill("y".repeat(size));
+      await dialog.getByTestId("template-done").click();
+      return dialog;
+    };
+    await expect(await addTemplate("First", 1_500_000)).toBeHidden();
+    await expect(editor.getByTestId("templates-total")).toContainText("used by all templates");
+
+    const dialog = await addTemplate("Second", 1_000_000);
+    await expect(dialog.getByText(/The templates together can have up to/)).toBeVisible();
+    // Under the limit it goes through.
+    await dialog.getByTestId("template-file-content").fill("y".repeat(1000));
+    await dialog.getByTestId("template-done").click();
+    await expect(dialog).toBeHidden();
+
+    // The server refuses the save: its reason is shown, and the form still holds the edits.
+    await admin.page.route("**/api/admin/settings", async (route) => {
+      if (route.request().method() !== "PUT") return route.fallback();
+      return route.fulfill({
+        status: 413,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "too_large", message: "too large" } }),
+      });
+    });
+    await admin.page.getByLabel("Contact in the footer").fill("keep-me@example.org");
+    await admin.page.getByTestId("admin-save").click();
+    await expect(admin.page.getByText("That's too large to save", { exact: true })).toBeVisible();
+    await expect(admin.page.getByLabel("Contact in the footer")).toHaveValue("keep-me@example.org");
+    await expect(editor.getByText("Second")).toBeVisible();
+    await expect(admin.page.getByTestId("admin-save")).toBeEnabled();
+  } finally {
+    await closeAll(admin);
+  }
+});

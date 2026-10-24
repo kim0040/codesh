@@ -458,6 +458,17 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
         expect(await labels.shareIds()).toEqual(["wxyz5678"]);
         expect(await labels.get(OWNER, "wxyz5678")).not.toBeNull();
       });
+
+      it("lists the clients that have some", async () => {
+        const { labels } = await open();
+        expect(await labels.clientIds()).toEqual([]);
+        await labels.set(OWNER, "abcd1234", { folder: "f", tags: [] }, T0);
+        await labels.set(OWNER, "wxyz5678", { folder: "f", tags: [] }, T0);
+        await labels.set(OTHER, "abcd1234", { folder: "g", tags: [] }, T0);
+        expect((await labels.clientIds()).sort()).toEqual([OWNER, OTHER]);
+        await labels.delete(OTHER, "abcd1234");
+        expect(await labels.clientIds()).toEqual([OWNER]);
+      });
     });
 
     describe("SettingsStore", () => {

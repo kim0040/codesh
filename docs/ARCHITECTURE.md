@@ -66,7 +66,7 @@ Y.Array "comments"  { id, fileId, anchor: RelativePosition(JSON), head: Relative
 | `settings` | single doc `_id: 'global'` (see §10) | |
 | `audit` | `{at, actor: clientId, ip, action, shareId?, detail}` (only when audit enabled) | `{at: -1}`, TTL by retention |
 
-- A sweeper (in `apps/collab`, every 10 min, guarded by a Valkey lock `lock:sweeper`) deletes updates/snapshots/uploads/share_labels whose share no longer exists.
+- A sweeper (in `apps/collab`, every 10 min, guarded by a Valkey lock `lock:sweeper`) deletes updates/snapshots/uploads/share_labels whose share no longer exists, and `share_labels` of people who neither own nor have saved the share (a label write that raced with unsave or ban; `PUT .../labels` also checks the share again after writing).
 - Expiry: unsaved shares `expiresAt = lastActiveAt + settings.anonymousTtlHours` (default 24). Saving sets `expiresAt = null`.
 
 ## 6. Persistence and concurrency (apps/collab)
@@ -154,7 +154,7 @@ While a client has an open SSE stream the API refreshes its presence every 20 s.
 
 ## 10. Settings (`settings` doc, admin-editable, env provides defaults)
 
-`anonymousTtlHours` 24, `historyRetentionDays` 7, `maxDocBytes` 5 MB (at most 12 MiB, below MongoDB's 16 MiB document limit), `maxUploadMB` 200, `guestAllowed` true, `rooms` [], `subnetPrefixV4` 24, `nearbyDefault` true, `audit.enabled` false, `audit.retentionDays` 90, `secretWarning` true, `auth.oidc` null, `auth.ldap` null, `contact` "", `templates` [] (at most 50 `{id, name, language, description, files}`, each template within `maxDocBytes`; ids are unique and never collide with built-in ids, which start with `builtin-`).
+`anonymousTtlHours` 24, `historyRetentionDays` 7, `maxDocBytes` 5 MB (at most 12 MiB, below MongoDB's 16 MiB document limit), `maxUploadMB` 200, `guestAllowed` true, `rooms` [], `subnetPrefixV4` 24, `nearbyDefault` true, `audit.enabled` false, `audit.retentionDays` 90, `secretWarning` true, `auth.oidc` null, `auth.ldap` null, `contact` "", `templates` [] (at most 50 `{id, name, language, description, files}`, each template within `maxDocBytes` and all of them together within 2 MiB (`MAX_TEMPLATES_TOTAL_BYTES`, so the settings document and the `PUT /api/admin/settings` request stay small; the route's body limit is six times that plus 1 MiB for JSON escaping, and a larger body answers `413 too_large`); ids are unique and never collide with built-in ids, which start with `builtin-`).
 
 ## 11. Web app
 

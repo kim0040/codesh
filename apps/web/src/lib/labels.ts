@@ -73,6 +73,21 @@ export function matchesLabels(
   return tagKeys.every((key) => own.has(key));
 }
 
+/** Search box of "my shares": the text is in the title, the code, the folder or one of the tags. */
+export function matchesQuery(
+  share: Labelled & Pick<ShareListItem, "id" | "title">,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    share.title.toLowerCase().includes(q) ||
+    share.id.toLowerCase().includes(q) ||
+    (share.folder?.toLowerCase().includes(q) ?? false) ||
+    share.tags.some((tag) => tag.toLowerCase().includes(q))
+  );
+}
+
 /** A filter that no longer points at anything (its last share moved away) falls back to "all". */
 export function pruneFilters(
   folder: FolderFilter,

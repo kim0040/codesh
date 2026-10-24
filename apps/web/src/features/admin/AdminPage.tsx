@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { api, isApiError, rawRequest } from "../../lib/api";
+import { errorText } from "../../lib/errors";
 import { usePresence } from "../../lib/events";
 import { formatBytes } from "../../lib/format";
 import { useLocale, useT } from "../../lib/i18n";
@@ -304,7 +305,15 @@ function SettingsForm({ token, initial }: { token: string; initial: Settings }) 
       queryClient.setQueryData(["admin", "settings", token], saved);
       toast({ title: t("admin.saved"), tone: "success", duration: 2500 });
     },
-    onError: () => toast({ title: t("admin.saveFailed"), tone: "danger" }),
+    // The draft is kept, so the admin can fix the value and save again.
+    onError: (failure) => {
+      const text = isApiError(failure) ? errorText(failure) : null;
+      toast({
+        title: text ? t(text.title) : t("admin.saveFailed"),
+        description: text?.hint ? t(text.hint) : undefined,
+        tone: "danger",
+      });
+    },
   });
 
   const valid = [
