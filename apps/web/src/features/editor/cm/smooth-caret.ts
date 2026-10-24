@@ -12,7 +12,9 @@ import {
  * It is drawn in its own layer and moved with a CSS transform, so the compositor animates it and
  * layout never reruns; CodeMirror's own main cursor is hidden while this is on (editor.css). Typing,
  * deleting and keyboard moves glide; clicks, pastes, undo, remote edits, resizes and jumps of more
- * than a few lines snap. Under `prefers-reduced-motion` the CSS drops the transition.
+ * than a few lines snap. Under `prefers-reduced-motion` the CSS drops the transition. The layer is
+ * not a `.cm-cursorLayer`, so `.cm-cursorLayer .cm-cursor` still counts the selections; editor.css
+ * shows and blinks it the way CodeMirror does its own.
  */
 
 /** Vertical distance, in lines, up to which the cursor glides; a longer move jumps. */
@@ -83,13 +85,10 @@ export function smoothCaret(): Extension {
         !(update.geometryChanged && !update.docChanged);
       // Like CodeMirror's own cursor: a move restarts the blink, visible, by switching animations.
       if (update.transactions.some((tr) => tr.selection || tr.docChanged)) {
-        dom.style.animationName = dom.style.animationName === "cm-blink" ? "cm-blink2" : "cm-blink";
+        dom.style.animationName =
+          dom.style.animationName === "cm-smooth-blink" ? "cm-smooth-blink2" : "cm-smooth-blink";
       }
       return update.docChanged || update.selectionSet;
-    },
-    mount(dom) {
-      // CodeMirror shows `.cm-cursor` only inside a focused `.cm-cursorLayer` and blinks that layer.
-      dom.classList.add("cm-cursorLayer");
     },
   });
   return [caretLayer, EditorView.editorAttributes.of({ "data-smooth-typing": "on" })];

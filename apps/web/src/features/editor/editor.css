@@ -47,7 +47,7 @@
 
 /*
  * Its own layer draws the main cursor; CodeMirror's stays for the other selections. Vim's block
- * cursor (`cm-fat-cursor`) is not a `cm-cursor`, and vim mode hides both layers anyway.
+ * cursor (`cm-fat-cursor`) is not a `cm-cursor`.
  */
 .cm-editor[data-smooth-typing] .cm-cursor.cm-cursor-primary {
   visibility: hidden;
@@ -60,6 +60,32 @@
   will-change: transform;
   /* Only transform animates, on the compositor: no layout, no paint of the text. */
   transition: transform 90ms cubic-bezier(0.25, 0.8, 0.3, 1);
+}
+
+/* Vim draws its own block cursor and hides the other cursor layers. */
+.cm-scroller.cm-vimMode > .cm-smooth-caret-layer {
+  display: none;
+}
+
+/* As CodeMirror's `.cm-cursorLayer`: shown and blinking only while the editor has focus. */
+.cm-editor.cm-focused > .cm-scroller > .cm-smooth-caret-layer {
+  animation: steps(1) cm-smooth-blink 1.2s infinite;
+}
+
+.cm-editor.cm-focused > .cm-scroller > .cm-smooth-caret-layer .cm-smooth-caret {
+  display: block;
+}
+
+@keyframes cm-smooth-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes cm-smooth-blink2 {
+  50% {
+    opacity: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

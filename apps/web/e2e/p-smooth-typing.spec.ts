@@ -38,6 +38,8 @@ test("smooth typing glides the cursor and the setting turns it off", async ({ br
     expect(on?.property).toBe("transform");
     expect(Number.parseFloat(on?.duration ?? "0")).toBeGreaterThan(0);
     expect(await visibleMainCursors(owner.page)).toBe(1);
+    // CodeMirror's layer still holds one cursor per selection; the gliding one is not counted there.
+    await expect(owner.page.locator(".cm-cursorLayer .cm-cursor")).toHaveCount(1);
     // It sits where CodeMirror would draw the cursor.
     const [glided, native] = await owner.page.evaluate(() => {
       const caret = document.querySelector(".cm-smooth-caret") as HTMLElement;
@@ -140,7 +142,7 @@ test("vim mode keeps its own cursor with smooth typing on", async ({ browser }) 
     await createShare(owner.page);
     await owner.page.locator(".cm-content").click();
     await expect(owner.page.locator(".cm-editor")).toHaveAttribute("data-smooth-typing", "on");
-    // The block cursor of normal mode shows; the gliding cursor's layer is hidden like CodeMirror's.
+    // The block cursor of normal mode shows; the gliding cursor is hidden like CodeMirror's.
     await expect(owner.page.locator(".cm-fat-cursor").first()).toBeVisible();
     await expect(owner.page.locator(".cm-smooth-caret")).toBeHidden();
   } finally {
