@@ -7,6 +7,7 @@ const envSchema = z.object({
   NODE_ENV: z.string().default("development"),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3002),
+  DATABASE_URL: z.string().min(1).optional(),
   MONGO_URL: z.string().default("mongodb://localhost:27017/codesh"),
   VALKEY_URL: z.string().default("redis://localhost:6379"),
   COLLAB_SECRET: z.string().default(DEV_SECRET),
@@ -20,6 +21,7 @@ export interface Config {
   production: boolean;
   host: string;
   port: number;
+  databaseUrl: string;
   mongoUrl: string;
   valkeyUrl: string;
   collabSecret: string;
@@ -37,6 +39,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     production,
     host: parsed.HOST,
     port: parsed.PORT,
+    databaseUrl: parsed.DATABASE_URL ?? parsed.MONGO_URL,
     mongoUrl: parsed.MONGO_URL,
     valkeyUrl: parsed.VALKEY_URL,
     collabSecret: parsed.COLLAB_SECRET,

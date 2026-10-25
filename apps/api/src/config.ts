@@ -1,4 +1,5 @@
 import { UPDATE_CHANNELS, type UpdateChannel } from "@gachipad/shared";
+import { type StorageKind, storageKindFromUrl } from "@gachipad/storage";
 import { z } from "zod";
 import { isValidCidr, parseCidr } from "./net.js";
 
@@ -24,6 +25,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(0).max(65535).default(3001),
   /** `memory` keeps everything in the process: for local experiments, never for real data. */
   STORAGE: z.enum(["mongo", "memory"]).default("mongo"),
+  DATABASE_URL: z.string().min(1).optional(),
   MONGO_URL: z.string().default("mongodb://localhost:27017/codesh"),
   VALKEY_URL: z.string().default("redis://localhost:6379"),
   SESSION_SECRET: z.string().default(DEV_SECRET),
@@ -110,7 +112,9 @@ export interface Config {
   production: boolean;
   host: string;
   port: number;
-  storage: "mongo" | "memory";
+  storage: StorageKind;
+  databaseUrl: string;
+  databaseUrlSet: boolean;
   mongoUrl: string;
   valkeyUrl: string;
   sessionSecret: string;
@@ -126,6 +130,9 @@ export interface Config {
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const parsed = envSchema.parse(env);
+  const databaseUrl =
+    parsed.DATABASE_URL ?? (parsed.STORAGE === "memory" ? "memory:" : parsed.MONGO_URL);
+  const storage = storageKindFromUrl(databaseUrl);
   const production = parsed.NODE_ENV === "production";
   if (production) {
     if (parsed.ADMIN_TOKEN !== "" && parsed.ADMIN_TOKEN.length < 32)
@@ -140,7 +147,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     production,
     host: parsed.HOST,
     port: parsed.PORT,
-    storage: parsed.STORAGE,
+    storage,
+    databaseUrl,
+    databaseUrlSet: databaseUrl !== "",
     mongoUrl: parsed.MONGO_URL,
     valkeyUrl: parsed.VALKEY_URL,
     sessionSecret: parsed.SESSION_SECRET,

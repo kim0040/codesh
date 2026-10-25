@@ -4,6 +4,7 @@ import {
   API_PORT,
   BASE_URL,
   COLLAB_PORT,
+  DATABASE_URL,
   MONGO_URL,
   TOUR_SEEN_STORAGE,
   VALKEY_URL,
@@ -31,7 +32,12 @@ const TOUR = /w-[a-z-]+\.spec\.ts$/;
 const PERMISSIONS = /x-permissions\.spec\.ts$/;
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
-const shared = { MONGO_URL, VALKEY_URL, COLLAB_SECRET: secret, NODE_ENV: "development" };
+const shared = {
+  ...(DATABASE_URL ? { DATABASE_URL } : { MONGO_URL }),
+  VALKEY_URL,
+  COLLAB_SECRET: secret,
+  NODE_ENV: "development",
+};
 
 export default defineConfig({
   testDir: "e2e",
