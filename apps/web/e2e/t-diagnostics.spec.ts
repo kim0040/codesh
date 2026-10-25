@@ -116,10 +116,11 @@ test("admin operations tabs show live data and fit 320px; tokens stay out of que
     }
     await page.getByTestId("admin-nav-shares").click();
     const ownRow = page.getByTestId("admin-shares").getByRole("listitem").filter({ hasText: id });
-    await ownRow.getByRole("button", { name: "Lock", exact: true }).click();
+    // Row actions are named "<action>: <share title>".
+    await ownRow.getByRole("button", { name: /^Lock: / }).click();
     await expect(page.getByRole("dialog")).toContainText("Apply this action");
     await page.getByRole("dialog").getByRole("button", { name: "Lock", exact: true }).click();
-    await expect(ownRow.getByRole("button", { name: "Lock", exact: true })).toBeDisabled();
+    await expect(ownRow.getByRole("button", { name: /^Unlock: / })).toBeVisible();
     expect(
       await page.evaluate(async (token) => {
         const path = "/src/lib/query.ts";
