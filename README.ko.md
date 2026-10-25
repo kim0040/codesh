@@ -1,12 +1,12 @@
 [English](README.md) | [한국어](README.ko.md)
 
-# codesh
+# gachipad
 
 > 같은 네트워크에서 실시간으로 코드를 공유하고 함께 편집하는 셀프 호스팅 서비스
 
-codesh는 같은 네트워크에서 브라우저만으로 코드를 공유하고 실시간으로 함께 편집할 수 있는 셀프 호스팅 서비스예요. 회원가입이나 외부 클라우드, 분석 스크립트, CDN이 전혀 필요 없어요. 모든 글꼴과 아이콘, 스크립트를 자체 서버에서 직접 제공하기 때문에 인터넷이 연결되지 않은 오프라인 환경이나 내부망에서도 그대로 동작해요. Yjs CRDT를 통해 충돌 없이 안전하게 편집을 병합하고, 200개 이상의 프로그래밍 언어 문법 강조를 지원해요. 실습실 모드에서는 강사가 수강생 전원의 에디터를 실시간 격자 화면으로 한눈에 살펴볼 수 있어요.
+gachipad는 같은 네트워크에서 브라우저만으로 코드를 공유하고 실시간으로 함께 편집할 수 있는 셀프 호스팅 서비스예요. 회원가입이나 외부 클라우드, 분석 스크립트, CDN이 전혀 필요 없어요. 모든 글꼴과 아이콘, 스크립트를 자체 서버에서 직접 제공하기 때문에 인터넷이 연결되지 않은 오프라인 환경이나 내부 네트워크에서도 그대로 동작해요. Yjs CRDT를 통해 충돌 없이 안전하게 편집을 병합하고, 200개 이상의 프로그래밍 언어 문법 강조를 지원해요. 실습실 모드에서는 강사가 수강생 전원의 에디터를 실시간 격자 화면으로 한눈에 살펴볼 수 있어요.
 
-![다크 테마의 codesh: 네 사람이 한 TypeScript 파일을 함께 편집하며 이름이 붙은 커서가 보입니다](docs/images/editor-dark.png)
+![다크 테마의 gachipad: 네 사람이 한 TypeScript 파일을 함께 편집하며 이름이 붙은 커서가 보입니다](docs/images/editor-dark.png)
 
 ## 스크린샷
 
@@ -49,7 +49,7 @@ codesh는 같은 네트워크에서 브라우저만으로 코드를 공유하고
 - **편집 잠금**: 강사가 설명하는 동안 모든 수강생의 에디터를 읽기 전용으로 잠글 수 있어요.
 
 ### 권한과 개인정보
-- **보기 전용 링크**: 보기 전용 링크를 기본으로 공유하고, 편집 링크는 신뢰할 수 있는 사용자에게만 따로 줄 수 있어요. 편집 링크는 `#key=…`로 끝나며 브라우저는 이 프래그먼트 부분을 서버로 전송하지 않아요. codesh는 이 키를 주소창에서 즉시 지워줘요(기존 `?key=` 링크도 정상 작동하며 같은 방식으로 정리돼요).
+- **보기 전용 링크**: 보기 전용 링크를 기본으로 공유하고, 편집 링크는 신뢰할 수 있는 사용자에게만 따로 줄 수 있어요. 편집 링크는 `#key=…`로 끝나며 브라우저는 이 프래그먼트 부분을 서버로 전송하지 않아요. gachipad는 이 키를 주소창에서 즉시 지워줘요(기존 `?key=` 링크도 정상 작동하며 같은 방식으로 정리돼요).
 - **참여자 권한 설정**: 소유자는 공유 창(접근 설정)에서 참여자의 공유 이름 변경, 파일 추가·수정·삭제, 언어 변경 권한을 개별적으로 허용할 수 있어요(서버에서 강제 적용). 권한 변경으로 편집이 거부된 경우 작성 중이던 텍스트는 탭 메모리에 안전하게 보관돼요.
 - **PIN 잠금**: 4~32자리 PIN을 scrypt 해시로 안전하게 저장하며, 5번 틀리면 10분간 해당 주소의 입장이 차단돼요.
 - **대기실**: 새로 들어오려는 사용자를 소유자가 직접 확인하고 승인해야 입장할 수 있어요.
@@ -63,10 +63,10 @@ codesh는 같은 네트워크에서 브라우저만으로 코드를 공유하고
 - **가이드 페이지**: 워크플로, 기능, 네트워크, 보안, FAQ를 상세히 정리한 웹 가이드(`/guide`)를 제공해요.
 
 ### 터미널 CLI
-CLI는 `packages/cli`에 있으며 이 저장소에서 직접 빌드해요(`pnpm --filter @codesh/cli build`).
-- `codesh push <파일…>`: 파일, 폴더, 표준 입력을 공유하고 URL, 참여 코드, QR 코드를 출력해요.
-- `codesh open <코드|id>`: 브라우저에서 해당 공유를 바로 열어요.
-- `codesh pull <코드|id>`: 공유를 파일이나 `.zip`으로 내려받아요(잠긴 공유는 `--pin` 사용).
+CLI는 `packages/cli`에 있으며 이 저장소에서 직접 빌드해요(`pnpm --filter @gachipad/cli build`). `codesh` 명령어는 호환성을 위한 비권장 별칭으로 유지돼요.
+- `gachipad push <파일…>`: 파일, 폴더, 표준 입력을 공유하고 URL, 참여 코드, QR 코드를 출력해요.
+- `gachipad open <코드|id>`: 브라우저에서 해당 공유를 바로 열어요.
+- `gachipad pull <코드|id>`: 공유를 파일이나 `.zip`으로 내려받아요(잠긴 공유는 `--pin` 사용).
 
 ### 관리자 콘솔
 - **관리자 콘솔**(`/admin`, 관리자 토큰): 공유 유지 시간, 이력 보관 주기, 업로드 크기 제한, 게스트 접근 허용 여부, 근처 공유용 방 설정, 공용 템플릿 관리 등 전체 환경을 설정해요. `ADMIN_ALLOW_CIDR`로 접속 대역을 제한하고, 무차별 대입 방지 전역 토큰 버킷과 일반 HTTP 경고 배너로 보안을 강화했어요.
@@ -100,6 +100,8 @@ CLI는 `packages/cli`에 있으며 이 저장소에서 직접 빌드해요(`pnpm
 
 ## 설치
 
+codesh 1.0.x에서 업그레이드하시나요? [운영자 안내서의 이름 변경 안내](docs/OPERATIONS.md#16-codesh에서-gachipad로-이름-변경-10x에서-업그레이드)를 참고하세요.
+
 Docker Engine과 Docker Compose 플러그인(`docker compose`)이 설치된 Linux 서버면 바로 실행할 수 있습니다. 외부에 노출되는 포트는 Caddy의 HTTP(80)와 HTTPS(443)뿐입니다.
 
 | 규모 | 최소 | 권장 | 메모 |
@@ -110,7 +112,7 @@ Docker Engine과 Docker Compose 플러그인(`docker compose`)이 설치된 Linu
 ### 인터넷이 되는 서버: Docker Compose
 
 ```sh
-git clone https://github.com/kim0040/codesh.git && cd codesh/deploy
+git clone https://github.com/kim0040/gachipad.git && cd gachipad/deploy
 cp .env.example .env && ./generate-secrets.sh     # 한 번만. .env는 서버에만 둡니다
 docker compose pull && docker compose up -d       # ghcr.io/kim0040의 공개 이미지
 curl http://localhost/healthz
@@ -118,27 +120,27 @@ curl http://localhost/healthz
 
 ### 인터넷이 없는 서버: 오프라인 번들
 
-인터넷이 되는 PC에서 [GitHub 릴리스](https://github.com/kim0040/codesh/releases)의 `codesh-<버전>-linux-amd64.tar.gz`(또는 `-linux-arm64`)와 `.sha256` 파일을 받아 서버로 옮긴 뒤 실행합니다.
+인터넷이 되는 PC에서 [GitHub 릴리스](https://github.com/kim0040/gachipad/releases)의 `gachipad-<버전>-linux-amd64.tar.gz`(또는 `-linux-arm64`)와 `.sha256` 파일을 받아 서버로 옮긴 뒤 실행합니다.
 
 ```sh
-sha256sum -c codesh-<버전>-linux-amd64.tar.gz.sha256
-tar xzf codesh-<버전>-linux-amd64.tar.gz && cd codesh-<버전>-linux-amd64
-PUBLIC_URL=http://codesh.local ./install.sh       # 이미지 로드, 새 비밀키로 .env 작성, 시작, /healthz 대기
+sha256sum -c gachipad-<버전>-linux-amd64.tar.gz.sha256
+tar xzf gachipad-<버전>-linux-amd64.tar.gz && cd gachipad-<버전>-linux-amd64
+PUBLIC_URL=http://gachipad.local ./install.sh       # 이미지 로드, 새 비밀키로 .env 작성, 시작, /healthz 대기
 ```
 
-`install.sh`는 이미지를 올리기 전에 번들 안의 `SHA256SUMS`로 모든 파일을 검사합니다. 체크섬은 서명이 아닙니다. `.sha256` 값은 번들과 다른, 신뢰할 수 있는 경로로 받은 값과 대조하십시오. 릴리스 파일에는 빌드 출처 증명도 포함되어 있습니다(`gh attestation verify`, [RELEASING.md](RELEASING.md)). 번들에는 codesh 이미지와 함께 변경하지 않은 공식 MongoDB, Valkey, Caddy, Node 이미지와 `backup.sh`, `restore.sh`, `upgrade.sh`, `update.sh`가 들어 있습니다.
+`install.sh`는 이미지를 올리기 전에 번들 안의 `SHA256SUMS`로 모든 파일을 검사합니다. 체크섬은 서명이 아닙니다. `.sha256` 값은 번들과 다른, 신뢰할 수 있는 경로로 받은 값과 대조하십시오. 릴리스 파일에는 빌드 출처 증명도 포함되어 있습니다(`gh attestation verify`, [RELEASING.md](RELEASING.md)). 번들에는 gachipad 이미지와 함께 변경하지 않은 공식 MongoDB, Valkey, Caddy, Node 이미지와 `backup.sh`, `restore.sh`, `upgrade.sh`, `update.sh`가 들어 있습니다.
 
-오프라인 설치를 업그레이드할 때는 새 번들과 `.sha256` 파일을 같은 폴더에 두고 `./upgrade.sh ../codesh-<새 버전>-linux-amd64.tar.gz`를 실행합니다. 체크섬 검사, 데이터베이스 백업, 이미지 로드를 진행하며 기존 `.env`는 안전하게 유지됩니다.
+오프라인 설치를 업그레이드할 때는 새 번들과 `.sha256` 파일을 같은 폴더에 두고 `./upgrade.sh ../gachipad-<새 버전>-linux-amd64.tar.gz`를 실행합니다. 체크섬 검사, 데이터베이스 백업, 이미지 로드를 진행하며 기존 `.env`는 안전하게 유지됩니다.
 
 ### HTTPS
 
-`SITE_ADDRESS=:80`이면 일반 HTTP로 동작합니다. `codesh.local` 같은 호스트 이름을 쓰려면 `deploy/tls/*.caddy`에 `tls` 설정이 필요합니다. Caddy 내장 CA를 쓰려면 `tls internal`, 직접 준비한 인증서가 있다면 인증서와 키 경로를 적어줍니다. 설정이 없으면 Caddy가 공개 ACME CA 발급을 시도하므로 인터넷이 없는 환경에서는 실패합니다. 일반 HTTP는 같은 네트워크를 볼 수 있는 사람에게 문서 내용과 인증 정보를 그대로 노출하므로, 공용 네트워크에서는 HTTPS를 권장합니다. 자세한 설정과 클라이언트 루트 CA 등록 절차는 [deploy/tls/README.md](deploy/tls/README.md)에 있습니다.
+`SITE_ADDRESS=:80`이면 일반 HTTP로 동작합니다. `gachipad.local` 같은 호스트 이름을 쓰려면 `deploy/tls/*.caddy`에 `tls` 설정이 필요합니다. Caddy 내장 CA를 쓰려면 `tls internal`, 직접 준비한 인증서가 있다면 인증서와 키 경로를 적어줍니다. 설정이 없으면 Caddy가 공개 ACME CA 발급을 시도하므로 인터넷이 없는 환경에서는 실패합니다. 일반 HTTP는 같은 네트워크를 볼 수 있는 사람에게 문서 내용과 인증 정보를 그대로 노출하므로, 공용 네트워크에서는 HTTPS를 권장합니다. 자세한 설정과 클라이언트 루트 CA 등록 절차는 [deploy/tls/README.md](deploy/tls/README.md)에 있습니다.
 
 백업, 수평 확장, 모니터링, `.env` 설정 전체는 [운영자 안내서](docs/OPERATIONS.md)와 [deploy/README.md](deploy/README.md)(영어)에서 확인할 수 있습니다.
 
 ## 업데이트
 
-- **릴리스 확인**: `UPDATE_CHECK=on`(기본값)이면 API가 시작되고 몇 분 뒤, 그 뒤로 약 12시간마다 `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` 요청을 한 번 보냅니다. codesh가 외부로 보내는 유일한 요청이며 쿠키, 식별자, 사용 통계를 일절 보내지 않습니다. 다른 요청을 차단하지 않으며 인터넷이 없으면 5초 안에 조용히 시간 초과 처리됩니다. `.env`의 `UPDATE_CHECK=off`로 완전히 끌 수 있습니다. 새 릴리스는 관리자 콘솔에 표시됩니다.
+- **릴리스 확인**: `UPDATE_CHECK=on`(기본값)이면 API가 시작되고 몇 분 뒤, 그 뒤로 약 12시간마다 `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` 요청을 한 번 보냅니다. gachipad가 외부로 보내는 유일한 요청이며 쿠키, 식별자, 사용 통계를 일절 보내지 않습니다. 다른 요청을 차단하지 않으며 인터넷이 없으면 5초 안에 조용히 시간 초과 처리됩니다. `.env`의 `UPDATE_CHECK=off`로 완전히 끌 수 있습니다. 새 릴리스는 관리자 콘솔에 표시됩니다.
 - **되돌리기를 지원하는 수동 업데이트** (설치된 번들 폴더에서):
   ```sh
   ./update.sh --check              # 설치된 버전과 최신 릴리스 비교, 아무것도 바꾸지 않음
@@ -207,8 +209,8 @@ pnpm services:down
 
 - PIN은 scrypt로 해시하여 상수 시간으로 비교하며, 5번 연속 실패 시 해당 주소를 10분간 차단합니다.
 - 대기실 승인, 클라이언트 및 네트워크 주소 기준 내보내기와 차단, 서버로 전송되지 않는 URL 프래그먼트에 담아 접속 즉시 주소창에서 지우는 편집 키와 보기 전용 링크 분리를 제공합니다.
-- 브라우저 보안: Content Security Policy, `nosniff`, 프레임 차단, 그리고 상태를 바꾸는 모든 API 요청에 대해 외부 사이트의 폼 전송을 방지하는 `X-Codesh: 1` 헤더(또는 같은 출처의 `Origin`) 검증을 적용합니다.
-- API와 collab은 `codesh` 데이터베이스에만 `readWrite` 권한이 있는 `codesh_app` 계정으로 MongoDB에 접속합니다. root 계정은 초기화와 백업 스크립트에서만 제한적으로 사용합니다.
+- 브라우저 보안: Content Security Policy, `nosniff`, 프레임 차단, 그리고 상태를 바꾸는 모든 API 요청에 대해 외부 사이트의 폼 전송을 방지하는 `X-Gachipad: 1` 헤더(또는 같은 출처의 `Origin`) 검증을 적용합니다.
+- API와 collab은 `gachipad` 데이터베이스에만 `readWrite` 권한이 있는 `gachipad_app` 계정으로 MongoDB에 접속합니다. root 계정은 초기화와 백업 스크립트에서만 제한적으로 사용합니다.
 - API 호출, 참여 코드 입력, 공유 생성, 로그인에 주소별 속도 제한이 적용되며 IPv6는 /64 대역 단위로 함께 계산합니다.
 
 취약점을 발견하셨다면 공개 이슈가 아닌 비공개 채널로 제보해 주십시오. [SECURITY.md](SECURITY.md)를 확인해 주세요.

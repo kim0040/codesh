@@ -1,12 +1,12 @@
 [English](README.md) | [한국어](README.ko.md)
 
-# codesh
+# gachipad
 
 > Self-hosted, real-time code sharing for your own network.
 
-codesh lets everyone on the same network share and edit code together directly in the browser. There are no accounts to create, no external cloud services, no tracking analytics, and no CDNs: every font, icon, and script is served from your own server, so it runs completely offline or in an air-gapped environment. Edits merge without conflicts using Yjs CRDTs, syntax highlighting supports over 200 languages, and a lab mode provides teachers with a real-time grid of every student's editor.
+gachipad lets everyone on the same network share and edit code together directly in the browser. There are no accounts to create, no external cloud services, no tracking analytics, and no CDNs: every font, icon, and script is served from your own server, so it runs completely offline or in an air-gapped environment. Edits merge without conflicts using Yjs CRDTs, syntax highlighting supports over 200 languages, and a lab mode provides teachers with a real-time grid of every student's editor.
 
-![codesh in the dark theme: four people editing one TypeScript file, each with a named cursor](docs/images/editor-dark.png)
+![gachipad in the dark theme: four people editing one TypeScript file, each with a named cursor](docs/images/editor-dark.png)
 
 ## Screenshots
 
@@ -49,7 +49,7 @@ codesh lets everyone on the same network share and edit code together directly i
 - **Edit lock**: Freeze all student editors during explanations.
 
 ### Control and privacy
-- **View-only by default**: Share a view-only link freely and provide the separate edit link only to trusted collaborators. The edit link carries `#key=…` in the URL fragment, which browsers never send to the server; codesh removes it from the address bar immediately. Legacy `?key=` links continue to work and are cleaned the same way.
+- **View-only by default**: Share a view-only link freely and provide the separate edit link only to trusted collaborators. The edit link carries `#key=…` in the URL fragment, which browsers never send to the server; gachipad removes it from the address bar immediately. Legacy `?key=` links continue to work and are cleaned the same way.
 - **Participant permissions**: Owners control whether editors can rename the share, add or delete files, or change file languages, with server-side verification. If an edit is refused, unsent changes are kept in memory for recovery.
 - **PIN lock**: Protect shares with a 4–32 character PIN stored as a scrypt hash; 5 wrong attempts lock out the client address for 10 minutes.
 - **Waiting room**: Review and approve each newcomer before granting entry.
@@ -63,10 +63,10 @@ codesh lets everyone on the same network share and edit code together directly i
 - **In-app guide**: Comprehensive documentation under `/guide` for workflow, features, network topology, security, and FAQs.
 
 ### Terminal CLI
-The CLI lives in `packages/cli` and is built directly from this repository (`pnpm --filter @codesh/cli build`).
-- `codesh push <file…>`: Share files, folders, or standard input; outputs the URL, join code, and QR code.
-- `codesh open <code|id>`: Open a share in the browser.
-- `codesh pull <code|id>`: Download a share as individual files or a `.zip`, with `--pin` for locked shares.
+The CLI lives in `packages/cli` and is built directly from this repository (`pnpm --filter @gachipad/cli build`). The `codesh` command is retained as a deprecated alias.
+- `gachipad push <file…>`: Share files, folders, or standard input; outputs the URL, join code, and QR code.
+- `gachipad open <code|id>`: Open a share in the browser.
+- `gachipad pull <code|id>`: Download a share as individual files or a `.zip`, with `--pin` for locked shares.
 
 ### Admin
 - **Console** (`/admin`, admin token): Manage share lifetimes, history retention, upload size limits, guest access, rooms for nearby shares, and custom templates. Hardened with optional `ADMIN_ALLOW_CIDR`, a global guess rate limit, and cleartext HTTP warnings.
@@ -100,7 +100,9 @@ Press `?` outside a text field for the shortcuts of your operating system. The f
 
 ## Install
 
-codesh runs on any Linux host with Docker Engine and the Docker Compose plugin (`docker compose`). Only Caddy publishes ports: HTTP (80) and HTTPS (443).
+Upgrading an existing 1.0.x installation? See [Renaming codesh to gachipad (upgrading from 1.0.x)](docs/OPERATIONS.md#16-codesh에서-gachipad로-이름-변경-10x에서-업그레이드) in the Operations guide.
+
+gachipad runs on any Linux host with Docker Engine and the Docker Compose plugin (`docker compose`). Only Caddy publishes ports: HTTP (80) and HTTPS (443).
 
 | Scale | Minimum | Recommended | Notes |
 |---|---|---|---|
@@ -110,7 +112,7 @@ codesh runs on any Linux host with Docker Engine and the Docker Compose plugin (
 ### With internet: Docker Compose
 
 ```sh
-git clone https://github.com/kim0040/codesh.git && cd codesh/deploy
+git clone https://github.com/kim0040/gachipad.git && cd gachipad/deploy
 cp .env.example .env && ./generate-secrets.sh     # once; .env stays on the host
 docker compose pull && docker compose up -d       # public images from ghcr.io/kim0040
 curl http://localhost/healthz
@@ -118,27 +120,27 @@ curl http://localhost/healthz
 
 ### Without internet: the offline bundle
 
-Download `codesh-<version>-linux-amd64.tar.gz` (or `-linux-arm64`) and its `.sha256` file from [GitHub Releases](https://github.com/kim0040/codesh/releases) on a connected machine, carry both to the server, and run:
+Download `gachipad-<version>-linux-amd64.tar.gz` (or `-linux-arm64`) and its `.sha256` file from [GitHub Releases](https://github.com/kim0040/gachipad/releases) on a connected machine, carry both to the server, and run:
 
 ```sh
-sha256sum -c codesh-<version>-linux-amd64.tar.gz.sha256
-tar xzf codesh-<version>-linux-amd64.tar.gz && cd codesh-<version>-linux-amd64
-PUBLIC_URL=http://codesh.local ./install.sh       # loads the images, writes .env with new secrets, starts, waits for /healthz
+sha256sum -c gachipad-<version>-linux-amd64.tar.gz.sha256
+tar xzf gachipad-<version>-linux-amd64.tar.gz && cd gachipad-<version>-linux-amd64
+PUBLIC_URL=http://gachipad.local ./install.sh       # loads the images, writes .env with new secrets, starts, waits for /healthz
 ```
 
-`install.sh` checks every file of the bundle against the `SHA256SUMS` inside it before loading anything. A checksum is not a signature: compare the `.sha256` value with one you received over a trusted channel. Release files also carry build attestations (`gh attestation verify`, see [RELEASING.md](RELEASING.md)). The bundle contains the unmodified official MongoDB, Valkey, Caddy and Node images next to the codesh images, plus `backup.sh`, `restore.sh`, `upgrade.sh` and `update.sh`.
+`install.sh` checks every file of the bundle against the `SHA256SUMS` inside it before loading anything. A checksum is not a signature: compare the `.sha256` value with one you received over a trusted channel. Release files also carry build attestations (`gh attestation verify`, see [RELEASING.md](RELEASING.md)). The bundle contains the unmodified official MongoDB, Valkey, Caddy and Node images next to the gachipad images, plus `backup.sh`, `restore.sh`, `upgrade.sh` and `update.sh`.
 
-To upgrade an offline installation, copy the new bundle and its `.sha256` file next to each other and run `./upgrade.sh ../codesh-<newer>-linux-amd64.tar.gz` (it checks the checksum, backs up the database, loads the images and keeps your `.env`).
+To upgrade an offline installation, copy the new bundle and its `.sha256` file next to each other and run `./upgrade.sh ../gachipad-<newer>-linux-amd64.tar.gz` (it checks the checksum, backs up the database, loads the images and keeps your `.env`).
 
 ### HTTPS
 
-`SITE_ADDRESS=:80` serves plain HTTP. If you set a host name (such as `codesh.local`), Caddy needs a `tls` line in `deploy/tls/*.caddy`: `tls internal` for Caddy's own CA, or your certificate and key. Without it Caddy tries a public ACME CA, which fails on a network without internet. Plain HTTP exposes document content and credentials to anyone who can watch the traffic, so use HTTPS wherever the network is shared. Details and client CA trust steps: [deploy/tls/README.md](deploy/tls/README.md).
+`SITE_ADDRESS=:80` serves plain HTTP. If you set a host name (such as `gachipad.local`), Caddy needs a `tls` line in `deploy/tls/*.caddy`: `tls internal` for Caddy's own CA, or your certificate and key. Without it Caddy tries a public ACME CA, which fails on a network without internet. Plain HTTP exposes document content and credentials to anyone who can watch the traffic, so use HTTPS wherever the network is shared. Details and client CA trust steps: [deploy/tls/README.md](deploy/tls/README.md).
 
 Backups, scaling, monitoring and every `.env` setting are in the [Operations guide](docs/OPERATIONS.md) (Korean) and [deploy/README.md](deploy/README.md) (English).
 
 ## Updates
 
-- **Release check**: with `UPDATE_CHECK=on` (the default) the API asks `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` a few minutes after it starts and then about every 12 hours. This is the only outside request codesh ever makes. It sends no cookies, identifiers or statistics, never blocks a request, and fails quietly after 5 seconds when there is no internet. `UPDATE_CHECK=off` in `.env` turns it off completely. A newer release shows up in the admin console.
+- **Release check**: with `UPDATE_CHECK=on` (the default) the API asks `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` a few minutes after it starts and then about every 12 hours. This is the only outside request gachipad ever makes. It sends no cookies, identifiers or statistics, never blocks a request, and fails quietly after 5 seconds when there is no internet. `UPDATE_CHECK=off` in `.env` turns it off completely. A newer release shows up in the admin console.
 - **Manual update with rollback** (in an installed bundle):
   ```sh
   ./update.sh --check              # installed vs. newest release; changes nothing
@@ -207,8 +209,8 @@ The repository is a pnpm and Turborepo monorepo (`apps/web`, `apps/api`, `apps/c
 
 - PINs are hashed with scrypt and compared in constant time; repeated failures lock the address out for 10 minutes.
 - Waiting room, kick and ban (by client and network address), and view-only links with the edit key kept in the URL fragment, which is never sent to the server, and removed from the address bar.
-- Browser defences: Content Security Policy, `nosniff`, frame denial, and a required `X-Codesh: 1` header (or same-origin `Origin`) on every API request that changes something, against cross-site form posts.
-- The API and collab connect to MongoDB as `codesh_app`, with `readWrite` on the `codesh` database only; the root credentials are used by the initialisation and backup scripts.
+- Browser defences: Content Security Policy, `nosniff`, frame denial, and a required `X-Gachipad: 1` header (or same-origin `Origin`) on every API request that changes something, against cross-site form posts.
+- The API and collab connect to MongoDB as `gachipad_app`, with `readWrite` on the `gachipad` database only; the root credentials are used by the initialisation and backup scripts.
 - Rate limits per address on API calls, join-code attempts, share creation and sign-in; an IPv6 /64 is counted together.
 
 Please report vulnerabilities privately; see [SECURITY.md](SECURITY.md).

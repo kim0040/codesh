@@ -1,6 +1,6 @@
 # 운영자 안내서 (Operations Guide)
 
-이 문서는 codesh 서비스의 설치, 구성, 운영, 백업 및 모니터링을 담당하는 시스템 관리자를 위한 안내서입니다. 세부 명령어 목록과 빌드 구성은 [deploy/README.md](../deploy/README.md)를 함께 참고하십시오.
+이 문서는 gachipad 서비스의 설치, 구성, 운영, 백업 및 모니터링을 담당하는 시스템 관리자를 위한 안내서입니다. 세부 명령어 목록과 빌드 구성은 [deploy/README.md](../deploy/README.md)를 함께 참고하십시오.
 
 ---
 
@@ -28,24 +28,24 @@ Docker와 인터넷이 연결된 환경(또는 개발 박스)에서 번들 스�
 ```sh
 deploy/bundle.sh [버전]
 ```
-- 실행 결과로 `deploy/dist/codesh-<버전>.tar.gz`, 이미지가 없는 온라인 업데이트용 `codesh-deploy-<버전>.tar.gz`와 각각의 SHA256 체크섬 파일이 생성됩니다.
-- 직접 만들 필요 없이 [GitHub 릴리스](https://github.com/kim0040/codesh/releases)에서 `codesh-<버전>-linux-amd64.tar.gz`(또는 `-linux-arm64`)와 `.sha256` 파일을 받아도 됩니다. 릴리스 파일은 GitHub Actions가 만들고 빌드 출처 증명(attestation)이 붙습니다(15.8).
+- 실행 결과로 `deploy/dist/gachipad-<버전>.tar.gz`, 이미지가 없는 온라인 업데이트용 `gachipad-deploy-<버전>.tar.gz`와 각각의 SHA256 체크섬 파일이 생성됩니다.
+- 직접 만들 필요 없이 [GitHub 릴리스](https://github.com/kim0040/gachipad/releases)에서 `gachipad-<버전>-linux-amd64.tar.gz`(또는 `-linux-arm64`)와 `.sha256` 파일을 받아도 됩니다. 릴리스 파일은 GitHub Actions가 만들고 빌드 출처 증명(attestation)이 붙습니다(15.8).
 - 번들 아카이브 내부에는 모든 컨테이너 이미지(`images.tar`), 설정 예시(`.env.example`), 배포 파일(`docker-compose.yml`), 관리 스크립트(`install.sh`, `backup.sh`, `restore.sh`, `upgrade.sh` 등)가 포함됩니다.
 
 ### 2.2 오프라인 및 내부망 설치 절차
 생성된 번들과 `.sha256` 파일을 대상 서버로 복사하고, 체크섬을 확인한 다음 압축을 풀고 설치 스크립트를 실행합니다. 체크섬 값은 번들과 다른 신뢰할 수 있는 경로(예: 직접 전달한 메모)로 대조하십시오.
 ```sh
-sha256sum -c codesh-<버전>.tar.gz.sha256
-tar xzf codesh-<버전>.tar.gz
-cd codesh-<버전>        # 릴리스 파일은 이름이 codesh-<버전>-linux-amd64(또는 -arm64)입니다
-PUBLIC_URL=http://codesh.local ./install.sh
+sha256sum -c gachipad-<버전>.tar.gz.sha256
+tar xzf gachipad-<버전>.tar.gz
+cd gachipad-<버전>        # 릴리스 파일은 이름이 gachipad-<버전>-linux-amd64(또는 -arm64)입니다
+PUBLIC_URL=http://gachipad.local ./install.sh
 ```
 `install.sh` 스크립트는 다음 작업을 순차적으로 수행합니다.
 1. 번들 안의 `SHA256SUMS`로 모든 파일을 검사하고, 맞지 않으면 아무것도 하지 않고 중단.
 1. `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`).
 2. `.env` 파일이 없으면 `.env.example`을 복사하고 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
 3. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성.
-4. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 시작할 때마다 일회성 서비스 `mongo-users`가 앱 전용 MongoDB 사용자 `codesh_app`을 만들거나 비밀번호와 역할을 다시 맞춥니다.
+4. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 시작할 때마다 일회성 서비스 `mongo-users`가 앱 전용 MongoDB 사용자 `gachipad_app`을 만들거나 비밀번호와 역할을 다시 맞춥니다.
 
 ---
 
@@ -55,25 +55,25 @@ PUBLIC_URL=http://codesh.local ./install.sh
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
-| `CODESH_VERSION` | `1.0.0` | 실행할 codesh 릴리스(이미지 태그). `install.sh`, `upgrade.sh`, `update.sh`가 맞춰 줍니다. |
-| `CODESH_REGISTRY` | `ghcr.io/kim0040` | `docker compose pull`이 이미지를 받는 곳입니다. 공개 GitHub 패키지 또는 직접 운영하는 미러를 지정합니다. 오프라인 번들은 번들의 값으로 맞춥니다. |
+| `GACHIPAD_VERSION` | `1.0.1` | 실행할 gachipad 릴리스(이미지 태그). `install.sh`, `upgrade.sh`, `update.sh`가 맞춰 줍니다. |
+| `GACHIPAD_REGISTRY` | `ghcr.io/kim0040` | `docker compose pull`이 이미지를 받는 곳입니다. 공개 GitHub 패키지 또는 직접 운영하는 미러를 지정합니다. 오프라인 번들은 번들의 값으로 맞춥니다. |
 | `UPDATE_CHECK` | `on` | 새 릴리스 확인(15장). `off`이면 외부로 아무 요청도 보내지 않습니다. |
-| `UPDATE_REPO` | `kim0040/codesh` | 릴리스를 확인할 GitHub 저장소(`소유자/이름`)입니다. |
+| `UPDATE_REPO` | `kim0040/gachipad` | 릴리스를 확인할 GitHub 저장소(`소유자/이름`)입니다. |
 | `UPDATE_CHANNEL` | `stable` | `prerelease`로 바꾸면 릴리스 후보(`1.2.0-rc.1` 등)도 알려 줍니다. |
 | `HTTPS_PROXY` / `NO_PROXY` | 주석 처리됨 | 업데이트 확인이 거칠 HTTPS 프록시와 거치지 않을 호스트입니다(15.9). |
 | `HTTP_PORT` | `80` | Caddy 컨테이너가 호스트에 바인딩할 HTTP 포트입니다. |
 | `HTTPS_PORT` | `443` | Caddy 컨테이너가 호스트에 바인딩할 HTTPS 포트입니다. |
-| `SITE_ADDRESS` | `:80` | Caddy가 응답할 주소입니다. `:80`은 모든 IP/도메인의 일반 HTTP 요청을 처리합니다. 도메인(예: `codesh.local`)을 지정하면 HTTPS가 활성화됩니다. |
-| `PUBLIC_URL` | 비어 있음 | 사용자가 브라우저 주소창에 입력하는 기준 URL(예: `https://codesh.local`, 끝 슬래시 제외)입니다. 세션 쿠키의 Secure 플래그, OIDC 콜백 주소, CSRF 원본 검증에 사용됩니다. 일반 HTTP IP 접근 시 비워둘 수 있습니다. |
+| `SITE_ADDRESS` | `:80` | Caddy가 응답할 주소입니다. `:80`은 모든 IP/도메인의 일반 HTTP 요청을 처리합니다. 도메인(예: `gachipad.local`)을 지정하면 HTTPS가 활성화됩니다. |
+| `PUBLIC_URL` | 비어 있음 | 사용자가 브라우저 주소창에 입력하는 기준 URL(예: `https://gachipad.local`, 끝 슬래시 제외)입니다. 세션 쿠키의 Secure 플래그, OIDC 콜백 주소, CSRF 원본 검증에 사용됩니다. 일반 HTTP IP 접근 시 비워둘 수 있습니다. |
 | `NETWORK_SUBNET` | `172.29.88.0/24` | Compose 내부 브리지 네트워크 서브넷입니다. 호스트 내부 사설망과 대역이 충돌하는 경우에만 변경합니다. |
 | `TRUST_PROXY` | `NETWORK_SUBNET`과 동일 | API 앞단에 위치한 리버스 프록시(Caddy)의 CIDR 대역입니다. Caddy가 실행되는 네트워크 대역을 신뢰하여 `X-Forwarded-For` 헤더로부터 실제 클라이언트 IP를 추출합니다. 비워두면 모든 사용자가 동일 IP로 인식되어 레이트 리밋을 공유하게 됩니다. |
 | `CADDY_TRUSTED_PROXIES` | `127.0.0.1/32` | Caddy 앞단에 별도의 로드밸런서가 있을 때, 해당 프록시의 `X-Forwarded-For` 헤더를 신뢰하기 위한 CIDR 대역입니다. |
-| `SESSION_SECRET` | 자동 생성 | `codesh_sid` 쿠키 서명에 사용하는 최소 32자의 비밀키입니다. |
+| `SESSION_SECRET` | 자동 생성 | `gachipad_sid` 쿠키 서명에 사용하는 최소 32자의 비밀키입니다. |
 | `COLLAB_SECRET` | 자동 생성 | API 서버와 Collab 서버가 협업 세션 토큰(HMAC-SHA256)을 검증할 때 공유하는 최소 32자의 비밀키입니다. |
 | `ADMIN_TOKEN` | 비어 있음 | `/api/admin/*` 및 관리 콘솔 접근에 사용하는 Bearer 토큰입니다. 운영 환경에서는 32자 미만의 토큰이 거부됩니다. `openssl rand -hex 32`로 생성합니다. 토큰 교체 시 `deploy/.env`를 수정하고 API를 재시작(`docker compose up -d api`)합니다. 비워두면 관리자 기능이 비활성화됩니다. |
 | `ADMIN_ALLOW_CIDR` | 비어 있음 | 관리 콘솔 및 `/api/admin/*` 접근을 허용할 쉼표 구분 CIDR 목록입니다. 비워두면 모든 IP에서 토큰으로 접근할 수 있습니다. IPv4와 IPv6는 별개이므로 둘 다 사용 시 각각 명시해야 합니다(예: `10.0.0.0/8,fd00::/8`). Caddy 등 역방향 프록시 뒤에서는 실제 프록시 CIDR만 `TRUST_PROXY`에 설정해야 실제 클라이언트 IP로 평가됩니다. |
-| `MONGO_PASSWORD` | 자동 생성 | MongoDB root 사용자 `codesh`의 비밀번호입니다. `mongo-users`, `backup.sh`, `restore.sh`만 사용하고 API와 Collab은 사용하지 않습니다. 최초 컨테이너 구동 시 볼륨을 시딩하는 데 사용되며, 이후 변경은 `mongosh`로 수행해야 합니다. |
-| `MONGO_APP_PASSWORD` | 자동 생성 | API와 Collab이 접속하는 `codesh_app` 사용자(`codesh` DB의 `readWrite`만 보유)의 비밀번호입니다. `mongo-users`가 시작할 때마다 이 값으로 맞추므로, 바꾼 뒤 `docker compose up -d`만 하면 됩니다. |
+| `MONGO_PASSWORD` | 자동 생성 | MongoDB root 사용자 `gachipad`의 비밀번호입니다. `mongo-users`, `backup.sh`, `restore.sh`만 사용하고 API와 Collab은 사용하지 않습니다. 최초 컨테이너 구동 시 볼륨을 시딩하는 데 사용되며, 이후 변경은 `mongosh`로 수행해야 합니다. |
+| `MONGO_APP_PASSWORD` | 자동 생성 | API와 Collab이 접속하는 `gachipad_app` 사용자(`gachipad` DB의 `readWrite`만 보유)의 비밀번호입니다. `mongo-users`가 시작할 때마다 이 값으로 맞추므로, 바꾼 뒤 `docker compose up -d`만 하면 됩니다. |
 | `VALKEY_PASSWORD` | 자동 생성 | Valkey 서버 접근 비밀번호(`requirepass`)입니다. |
 | `COLLAB_REPLICAS` | `1` | Collab(실시간 협업 편집) 인스턴스 복제본 수입니다. |
 | `MONGO_CACHE_GB` | `2` | MongoDB의 WiredTiger 캐시 메모리 크기(GB)입니다. |
@@ -83,7 +83,7 @@ PUBLIC_URL=http://codesh.local ./install.sh
 | `RATE_LIMIT_CREATE_PER_MIN` | `60` | 클라이언트 IP당 분당 허용되는 공유 생성 요청 횟수입니다. |
 | `RATE_LIMIT_LOGIN_PER_MIN` | `10` | 클라이언트 IP당 분당 허용되는 인증/로그인 시도 횟수입니다. |
 | `COMPOSE_PROFILES` | 주석 처리됨 | `mdns`로 지정하면 로컬 네트워크용 mDNS 사이드카 컨테이너가 함께 실행됩니다. |
-| `MDNS_HOSTNAME` | `codesh.local` | mDNS를 통해 로컬 네트워크에 알릴 도메인 이름입니다. |
+| `MDNS_HOSTNAME` | `gachipad.local` | mDNS를 통해 로컬 네트워크에 알릴 도메인 이름입니다. |
 | `MDNS_IP` | 비어 있음 | 호스트에 여러 네트워크 카드가 있을 때 mDNS로 응답할 특정 IP 주소입니다. 비워두면 비루프백 IPv4 전체를 공지합니다. |
 
 ---
@@ -94,26 +94,26 @@ PUBLIC_URL=http://codesh.local ./install.sh
 
 ### 4.1 자체 인증서 적용
 인증기관(CA)에서 발급받은 인증서와 키를 사용하는 경우:
-1. 인증서 파일(`codesh.crt`)과 비밀키(`codesh.key`)를 `deploy/tls/`에 배치합니다.
+1. 인증서 파일(`gachipad.crt`)과 비밀키(`gachipad.key`)를 `deploy/tls/`에 배치합니다.
 2. `deploy/tls/tls.caddy` 파일을 생성하고 다음 내용을 작성합니다.
    ```caddy
-   tls /etc/caddy/tls/codesh.crt /etc/caddy/tls/codesh.key
+   tls /etc/caddy/tls/gachipad.crt /etc/caddy/tls/gachipad.key
    ```
-3. `.env` 파일에서 `SITE_ADDRESS=codesh.local` 및 `PUBLIC_URL=https://codesh.local`로 변경 후 컨테이너를 재시작합니다.
+3. `.env` 파일에서 `SITE_ADDRESS=gachipad.local` 및 `PUBLIC_URL=https://gachipad.local`로 변경 후 컨테이너를 재시작합니다.
 
 ### 4.2 Caddy 내장 로컬 CA 사용
 인터넷 없이 HTTPS를 제공하려면 Caddy 내장 CA를 사용합니다.
 1. `cp tls/internal.caddy.example tls/local.caddy`로 설정을 복사합니다(`tls internal`과 HTTPS 전용 HSTS).
-2. `.env`에 `SITE_ADDRESS=codesh.local`, `PUBLIC_URL=https://codesh.local`을 지정하고 `docker compose up -d caddy api`로 재시작합니다.
+2. `.env`에 `SITE_ADDRESS=gachipad.local`, `PUBLIC_URL=https://gachipad.local`을 지정하고 `docker compose up -d caddy api`로 재시작합니다.
 3. 루트 인증서만(`root.crt`, 비밀키 `root.key`는 절대 배포하지 않음) 추출하여 지문을 확인한 뒤 모든 클라이언트 기기에 신뢰할 수 있는 루트 인증서로 등록합니다.
 
 인증서 추출·지문 확인·운영체제별 등록 절차는 [TLS 안내](../deploy/tls/README.md)에 있습니다. CA 비밀키가 있는 `caddy-data` 볼륨은 보호하고 백업하십시오.
 
 ---
 
-## 5. mDNS (codesh.local) 옵션
+## 5. mDNS (gachipad.local) 옵션
 
-DNS 서버가 없는 독립 네트워크 환경에서 `http://codesh.local`로 접속할 수 있도록 mDNS 브로드캐스트 사이드카를 지원합니다.
+DNS 서버가 없는 독립 네트워크 환경에서 `http://gachipad.local`로 접속할 수 있도록 mDNS 브로드캐스트 사이드카를 지원합니다.
 - `.env`에서 `COMPOSE_PROFILES=mdns` 주석을 해제합니다.
 - 사이드카 컨테이너는 호스트 네트워크 모드(`network_mode: host`)로 동작하므로 Linux 호스트 환경에서만 지원됩니다.
 - 여러 IP가 할당된 서버에서는 `MDNS_IP`에 광고할 IP를 직접 지정할 수 있습니다.
@@ -141,8 +141,8 @@ docker compose up -d --scale collab=3
 - 헤더를 오른쪽(직전 홉)부터 역방향으로 탐색하여 신뢰할 수 없는 최초의 클라이언트 주소를 식별하므로, 헤더 스푸핑이 불가능합니다.
 - 리버스 프록시 뒤에서 `TRUST_PROXY`가 비어 있으면 경고 로그가 기록되며, 모든 사용자가 단일 프록시 IP로 집계되어 레이트 리밋과 PIN 실패 한도를 공유하는 문제가 발생합니다.
 
-### 7.2 CSRF 방어 (X-Codesh)
-- 브라우저 기반 CSRF 공격을 방지하기 위해, `/api/` 하위의 모든 변경 요청(POST, PATCH, DELETE 등)은 **`X-Codesh: 1`** 헤더를 반드시 포함하거나 앱 자체 Origin과 일치해야 합니다. 누락 시 403 `forbidden` 에러가 반환됩니다.
+### 7.2 CSRF 방어 (X-Gachipad)
+- 브라우저 기반 CSRF 공격을 방지하기 위해, `/api/` 하위의 모든 변경 요청(POST, PATCH, DELETE 등)은 **`X-Gachipad: 1`** 헤더를 반드시 포함하거나 앱 자체 Origin과 일치해야 합니다. 누락 시 403 `forbidden` 에러가 반환됩니다.
 - 관리자 API(`/api/admin/*`)는 Bearer 토큰으로 인증되므로 이 검사에서 제외됩니다.
 
 ### 7.3 네트워크 그룹과 방 (Rooms)
@@ -192,7 +192,7 @@ docker compose up -d --scale collab=3
    - 영구 삭제: 즉시 데이터베이스 및 스토리지를 정리하며 대상 확인 대화상자를 거칩니다.
 3. **진단 (Diagnostics)**:
    - 실시간 진단 이벤트 필터링: 심각도(`전체`, `warn`, `error`), 출처(`전체`, `api`, `collab`), 기간(`전체`, `최근 24시간`).
-   - 서버 진단 번들 내보내기 버튼: 클릭 시 `codesh-server-diagnostics-<버전>.json` 파일을 즉시 내려받습니다.
+   - 서버 진단 번들 내보내기 버튼: 클릭 시 `gachipad-server-diagnostics-<버전>.json` 파일을 즉시 내려받습니다.
 4. **보안 (Security)**:
    - 보안 설정 현황: `ADMIN_ALLOW_CIDR` 적용 여부, `TRUST_PROXY` 적용 여부, 분당 로그인 및 API 요청 한도.
    - 실패한 관리자 로그인 감사 목록: 프로세스당 1분에 최대 1건씩 HMAC으로 단방향 해시된 클라이언트 주소와 함께 기록되며, 원시 IP나 입력된 추측 토큰은 보관되지 않습니다.
@@ -232,13 +232,13 @@ docker compose up -d --scale collab=3
 ./backup.sh [저장디렉터리]
 ```
 - 기본 저장 디렉터리는 `./backups`입니다.
-- 실행 중인 MongoDB 컨테이너 내부에서 `mongodump`를 실행하여 `codesh-<타임스탬프>.archive.gz` 아카이브 파일로 백업합니다.
+- 실행 중인 MongoDB 컨테이너 내부에서 `mongodump`를 실행하여 `gachipad-<타임스탬프>.archive.gz` 아카이브 파일로 백업합니다.
 - 백업 파일은 `0600`, 새로 만드는 백업 디렉터리는 `0700`으로 생성됩니다. root 비밀번호는 컨테이너 안의 임시 설정 파일로만 전달되고 명령행 인자에 나타나지 않습니다.
 - Valkey(참여 코드, 접속자 상태, 승인·차단, 카운터)는 백업 대상에서 제외됩니다. 볼륨을 유지하고 운영 중 flush하지 마십시오.
 
 ### 9.2 백업 복원
 ```sh
-./restore.sh backups/codesh-<타임스탬프>.archive.gz [--yes]
+./restore.sh backups/gachipad-<타임스탬프>.archive.gz [--yes]
 ```
 - Collab 및 API 컨테이너를 일시 정지하여 진행 중인 쓰기 작업을 안전하게 플러시합니다.
 - `mongorestore --drop`을 사용하여 기존 데이터베이스를 백업 데이터로 대체한 후 서비스를 다시 시작합니다.
@@ -246,7 +246,7 @@ docker compose up -d --scale collab=3
 ### 9.3 새 버전으로 업그레이드
 인터넷이 되는 서버는 `./update.sh`로 업데이트합니다(15.4). 인터넷이 없는 서버는 새 번들로 업그레이드합니다.
 ```sh
-./upgrade.sh ../codesh-<새버전>.tar.gz
+./upgrade.sh ../gachipad-<새버전>.tar.gz
 ```
 - 번들 옆에 `.sha256` 파일이 있어야 합니다. 압축을 풀기 전에 아카이브 체크섬을, 이미지를 로드하기 전에 번들 안의 `SHA256SUMS`를 검사하며, 하나라도 다르면 백업·이미지 로드·파일 교체 없이 중단합니다.
 - 기존 데이터베이스를 자동으로 사전 백업합니다.
@@ -305,19 +305,19 @@ Caddy는 보안을 위해 루프백과 전용 Compose 서브넷의 요청에 대
 운영 구성(`deploy/docker-compose.yml`) 그대로 측정하려면 기존 스택과 겹치지 않는 임시 스택을 띄웁니다(프로젝트 이름, env 디렉터리, 이미지 태그, 포트 8850, 서브넷이 따로이고, 한 호스트에서 모든 가상 사용자가 접속하므로 속도 제한과 할당량을 올려 둡니다).
 
 ```sh
-PERF_DIR=/srv/codesh-perf scripts/load/perf-stack.sh up
-pnpm load -- --url http://localhost:8850 --scenario single-share-50 --docker-project codesh-perf --label before
-pnpm load -- --url http://localhost:8850 --scenario reconnect-storm --docker-project codesh-perf \
-  --storm restart --restart-cmd "PERF_DIR=/srv/codesh-perf scripts/load/perf-stack.sh restart-collab"
+PERF_DIR=/srv/gachipad-perf scripts/load/perf-stack.sh up
+pnpm load -- --url http://localhost:8850 --scenario single-share-50 --docker-project gachipad-perf --label before
+pnpm load -- --url http://localhost:8850 --scenario reconnect-storm --docker-project gachipad-perf \
+  --storm restart --restart-cmd "PERF_DIR=/srv/gachipad-perf scripts/load/perf-stack.sh restart-collab"
 pnpm load:report
-PERF_DIR=/srv/codesh-perf scripts/load/perf-stack.sh down
+PERF_DIR=/srv/gachipad-perf scripts/load/perf-stack.sh down
 ```
 
 `PERF_COLLAB_ENV="COLLAB_BROADCAST_WINDOW_MS=0"`처럼 collab 환경 변수를 바꿔 `up`하면 같은 스택에서 설정끼리 비교할 수 있습니다. 운영 중인 서버에 직접 걸 때는 속도 제한(`RATE_LIMIT_*`)에 걸리지 않도록 먼저 올려 두십시오.
 
 ### 11.3 브라우저 측정
 
-`pnpm --filter @codesh/web test:perf`는 실제 Chromium 한 개를 열고, 같은 공유에 가상 참여자 49명(`apps/web/perf/sim-clients.ts`: 작성자 9명, 보기 40명)을 붙인 채 입력하면서 단계별로 측정합니다. 첫 번째 테스트: 혼자 / 49명이 가만히 있음 / 40명이 커서를 움직임 / 9명 입력 + 40명 이동 / 같은 상황에서 보기만 함. 여기서 작성자는 글 끝에 계속 이어 쓰고 보기 사용자는 글 전체에서 커서를 옮기므로, 49명이 접속했다는 것(참여자 목록의 "+46")만 확인하고 그 커서가 모두 화면 안에 있는지는 확인하지 않습니다. 두 번째 테스트(화면 안 49명)는 한 화면에 들어가는 24줄짜리 고정 코드에서, 작성자 9명이 각자 자기 줄을 고쳐 쓰고 보기 사용자 40명이 줄 안에서 커서를 옮기며 그중 10명은 선택 영역을 잡고 있습니다. 브라우저는 마지막 빈 줄에 짧은 줄을 쳤다 지웁니다. 단계 동안 2초마다 편집기 스크롤 영역과 겹치는 원격 커서·선택 영역 수를 세어 기록하고, 커서가 49개가 아니면(선택은 작성자가 그 줄을 비울 때 잠깐 접히므로 5개 미만이면) 실패합니다. 세 번째 테스트는 학생 50명이 입력하는 실습의 교사 화면입니다. 단계마다 긴 작업(`longtask`), 긴 애니메이션 프레임과 그 스크립트, 키 입력 → 다음 프레임 시간, 프레임 간격, Chromium 성능 지표(스크립트·레이아웃·스타일 시간, 메인 스레드 CPU 시간, 스타일·레이아웃 계산 횟수)를 `.box-out/perf/browser-*.json`에 남깁니다. "키 입력 → 다음 프레임"은 keydown 뒤 다음 애니메이션 프레임에서 큐에 넣은 작업이 도는 시각까지의 시간으로, 어떤 입력이 편집기에 반영돼 글자가 화면에 나타난 시각을 재는 것이 아니라 메인 스레드가 키 입력에 얼마나 늦게 반응하는지 보는 대용 지표입니다(예전 결과 파일에는 `inputToPaintMs`라는 이름으로 남아 있습니다). IME 조합은 이 지표로 재지 않습니다. 모든 단계에 긴 작업 50 ms 이하, 이 지표 p95 50 ms 미만, 55 fps 이상(60 fps에 5 fps 오차)을 요구합니다. VM이 다른 작업으로 붐비면(부하 평균 4.5–7) 같은 단계가 50–55 fps, 긴 작업 1–8개(52–87 ms), 이 지표 p95 50–79 ms까지 밀려 실패할 수 있으므로, 부하 평균이 2 아래로 내려간 뒤 다시 돌립니다. 개발 서버의 React 개발 빌드는 수치를 왜곡하므로 운영 빌드(`E2E_PERF_URL`, 기본값은 위 임시 스택 `http://localhost:8850`)에 대고 돌립니다. `E2E_PERF_SMOOTH=off`는 부드러운 타이핑을 끄고 잽니다.
+`pnpm --filter @gachipad/web test:perf`는 실제 Chromium 한 개를 열고, 같은 공유에 가상 참여자 49명(`apps/web/perf/sim-clients.ts`: 작성자 9명, 보기 40명)을 붙인 채 입력하면서 단계별로 측정합니다. 첫 번째 테스트: 혼자 / 49명이 가만히 있음 / 40명이 커서를 움직임 / 9명 입력 + 40명 이동 / 같은 상황에서 보기만 함. 여기서 작성자는 글 끝에 계속 이어 쓰고 보기 사용자는 글 전체에서 커서를 옮기므로, 49명이 접속했다는 것(참여자 목록의 "+46")만 확인하고 그 커서가 모두 화면 안에 있는지는 확인하지 않습니다. 두 번째 테스트(화면 안 49명)는 한 화면에 들어가는 24줄짜리 고정 코드에서, 작성자 9명이 각자 자기 줄을 고쳐 쓰고 보기 사용자 40명이 줄 안에서 커서를 옮기며 그중 10명은 선택 영역을 잡고 있습니다. 브라우저는 마지막 빈 줄에 짧은 줄을 쳤다 지웁니다. 단계 동안 2초마다 편집기 스크롤 영역과 겹치는 원격 커서·선택 영역 수를 세어 기록하고, 커서가 49개가 아니면(선택은 작성자가 그 줄을 비울 때 잠깐 접히므로 5개 미만이면) 실패합니다. 세 번째 테스트는 학생 50명이 입력하는 실습의 교사 화면입니다. 단계마다 긴 작업(`longtask`), 긴 애니메이션 프레임과 그 스크립트, 키 입력 → 다음 프레임 시간, 프레임 간격, Chromium 성능 지표(스크립트·레이아웃·스타일 시간, 메인 스레드 CPU 시간, 스타일·레이아웃 계산 횟수)를 `.box-out/perf/browser-*.json`에 남깁니다. "키 입력 → 다음 프레임"은 keydown 뒤 다음 애니메이션 프레임에서 큐에 넣은 작업이 도는 시각까지의 시간으로, 어떤 입력이 편집기에 반영돼 글자가 화면에 나타난 시각을 재는 것이 아니라 메인 스레드가 키 입력에 얼마나 늦게 반응하는지 보는 대용 지표입니다(예전 결과 파일에는 `inputToPaintMs`라는 이름으로 남아 있습니다). IME 조합은 이 지표로 재지 않습니다. 모든 단계에 긴 작업 50 ms 이하, 이 지표 p95 50 ms 미만, 55 fps 이상(60 fps에 5 fps 오차)을 요구합니다. VM이 다른 작업으로 붐비면(부하 평균 4.5–7) 같은 단계가 50–55 fps, 긴 작업 1–8개(52–87 ms), 이 지표 p95 50–79 ms까지 밀려 실패할 수 있으므로, 부하 평균이 2 아래로 내려간 뒤 다시 돌립니다. 개발 서버의 React 개발 빌드는 수치를 왜곡하므로 운영 빌드(`E2E_PERF_URL`, 기본값은 위 임시 스택 `http://localhost:8850`)에 대고 돌립니다. `E2E_PERF_SMOOTH=off`는 부드러운 타이핑을 끄고 잽니다.
 
 ### 11.4 측정 결과
 
@@ -392,58 +392,58 @@ VM이 다른 작업으로 포화(부하 평균 41, 호스트 CPU 96%)됐을 때 
 
 | 지표 | 정상 | 조치 |
 |---|---|---|
-| `codesh_collab_nodejs_eventloop_lag_p99_seconds` | 0.01–0.03 (10 ms 해상도로 재므로 유휴 시에도 0.01 안팎) | 5분 넘게 0.05 초과: collab이 포화. 복제본 추가 |
-| `rate(codesh_collab_ws_messages_sent_total[1m])`, `rate(codesh_collab_ws_bytes_sent_total[1m])` | 50명 공유 하나에 약 5,000건/s, 4.5 MB/s | 사용자 수에 비해 급증하면 커서 폭주를 의심 |
-| `codesh_collab_slow_client_closes_total` | 거의 증가하지 않음 | 계속 증가: 수신이 느린 클라이언트(버퍼 4 MB 초과, 4408 종료 후 재접속). 네트워크 확인 |
-| `codesh_collab_awareness_dropped_total` | 0 | 증가: 연결당 초당 30회를 넘는 커서 갱신을 버리는 중(비정상 클라이언트) |
-| `codesh_collab_flush_errors_total`, `codesh_collab_flush_seconds` | 오류 0, p99 < 0.1 s | 오류 증가: MongoDB 쓰기 실패. 편집은 메모리에 남아 재시도되지만 MongoDB를 바로 점검 |
+| `gachipad_collab_nodejs_eventloop_lag_p99_seconds` | 0.01–0.03 (10 ms 해상도로 재므로 유휴 시에도 0.01 안팎) | 5분 넘게 0.05 초과: collab이 포화. 복제본 추가 |
+| `rate(gachipad_collab_ws_messages_sent_total[1m])`, `rate(gachipad_collab_ws_bytes_sent_total[1m])` | 50명 공유 하나에 약 5,000건/s, 4.5 MB/s | 사용자 수에 비해 급증하면 커서 폭주를 의심 |
+| `gachipad_collab_slow_client_closes_total` | 거의 증가하지 않음 | 계속 증가: 수신이 느린 클라이언트(버퍼 4 MB 초과, 4408 종료 후 재접속). 네트워크 확인 |
+| `gachipad_collab_awareness_dropped_total` | 0 | 증가: 연결당 초당 30회를 넘는 커서 갱신을 버리는 중(비정상 클라이언트) |
+| `gachipad_collab_flush_errors_total`, `gachipad_collab_flush_seconds` | 오류 0, p99 < 0.1 s | 오류 증가: MongoDB 쓰기 실패. 편집은 메모리에 남아 재시도되지만 MongoDB를 바로 점검 |
 | 컨테이너 CPU(`docker stats`) | collab이 1코어의 70% 미만 | 계속 넘으면 `COLLAB_REPLICAS` 증가 |
 
 설정으로 바꿀 수 있는 것: 연결이 8개 이상인 문서는 커서만 바뀐 변경을 30 ms 창으로 묶어 보냅니다(편집은 즉시 나감, ARCHITECTURE.md §4). `COLLAB_BROADCAST_WINDOW_MS`로 창을 바꿀 수 있고(0–200 정수, 0이면 끔) 비교 측정 외에는 기본값을 권장합니다. `deploy/.env`(또는 셸 환경)에 적으면 Compose가 collab 컨테이너로 넘기고(`deploy/docker-compose.yml`), 적지 않으면 기본값 30입니다. 값을 바꾼 뒤 `docker compose up -d collab`으로 collab을 다시 만들어야 적용되며 `docker compose exec collab printenv COLLAB_BROADCAST_WINDOW_MS`로 확인합니다. 창이 길수록 메시지는 줄지만 다른 사람의 커서가 최대 창 길이만큼 늦게 보이고, 편집 지연은 그대로이며, 창을 쓰는 문서 크기(연결 8개 이상)는 바뀌지 않습니다.
 
 ---
 
-## 12. CLI 도구 (codesh CLI)
+## 12. CLI 도구 (gachipad CLI)
 
-터미널 환경에서 코드를 즉시 공유하고 내려받을 수 있는 CLI 도구(`packages/cli`)를 제공합니다.
+터미널 환경에서 코드를 즉시 공유하고 내려받을 수 있는 CLI 도구(`packages/cli`)를 제공합니다. `codesh` 명령어는 호환성을 위한 비권장 별칭으로 유지됩니다.
 
 ### 12.1 연결 설정
 CLI는 다음 순서로 대상 서버 URL을 찾습니다.
 1. 명령행 플래그: `--url <URL>`
-2. 환경 변수: `CODESH_URL`
-3. 설정 파일: Windows는 `%APPDATA%\codesh\codesh.json`, Linux/macOS는 `~/.config/codesh.json`의 `"url"` 필드
+2. 환경 변수: `GACHIPAD_URL` (구버전 호환: `CODESH_URL`)
+3. 설정 파일: Windows는 `%APPDATA%\gachipad\gachipad.json`, Linux/macOS는 `~/.config/gachipad/gachipad.json`의 `"url"` 필드 (구버전 호환: `%APPDATA%\codesh\codesh.json`, `~/.config/codesh.json`)
 
 Windows에서 저장소를 내려받은 뒤 Node.js 22 이상과 Corepack을 준비하고 다음 명령으로 CLI를 빌드해 전역 링크를 등록할 수 있습니다.
 ```powershell
 corepack pnpm install --filter @gachipad/cli...
 corepack pnpm --filter @gachipad/cli build
 corepack pnpm --filter @gachipad/cli link --global
-$env:CODESH_URL = "http://192.168.1.20"
-codesh push .\sample-project --no-qr
-codesh open 123456
-codesh pull 123456 -o .\received
+$env:GACHIPAD_URL = "http://192.168.1.20"
+gachipad push .\sample-project --no-qr
+gachipad open 123456
+gachipad pull 123456 -o .\received
 ```
-폴더 공유는 폴더 이름을 포함한 상대 경로로 보관하고, 경로 구분자는 공유 안에서 `/`로 정규화됩니다. 내려받은 텍스트 파일의 줄바꿈 바이트는 변경하지 않습니다. `codesh open`은 Windows 기본 브라우저를 열며, QR 출력은 ANSI 색상 코드 없이 표시합니다. `Ctrl+C`는 실행 중인 CLI를 종료합니다.
+폴더 공유는 폴더 이름을 포함한 상대 경로로 보관하고, 경로 구분자는 공유 안에서 `/`로 정규화됩니다. 내려받은 텍스트 파일의 줄바꿈 바이트는 변경하지 않습니다. `gachipad open`은 Windows 기본 브라우저를 열며, QR 출력은 ANSI 색상 코드 없이 표시합니다. `Ctrl+C`는 실행 중인 CLI를 종료합니다.
 
 ### 12.2 주요 명령어
-- **코드 및 파일 공유 (`codesh push`)**:
+- **코드 및 파일 공유 (`gachipad push`)**:
   ```sh
-  codesh push main.py utils.py --title "서버 로직"
-  codesh push - --name snippet.py < snippet.py      # 표준 입력(stdin) 전달
-  codesh push README.md --view-only                 # 보기 전용으로 공유
+  gachipad push main.py utils.py --title "서버 로직"
+  gachipad push - --name snippet.py < snippet.py      # 표준 입력(stdin) 전달
+  gachipad push README.md --view-only                 # 보기 전용으로 공유
   ```
   성공 시 터미널에 아스키 QR 코드(생략 시 `--no-qr`), 접속 URL, 6자리 참여 코드가 출력됩니다.
-- **브라우저에서 열기 (`codesh open`)**:
+- **브라우저에서 열기 (`gachipad open`)**:
   ```sh
-  codesh open 123456          # 6자리 코드로 열기
-  codesh open abcd1234        # 8자리 공유 ID로 열기
-  codesh open 123456 --print  # 브라우저를 띄우지 않고 URL만 출력
+  gachipad open 123456          # 6자리 코드로 열기
+  gachipad open abcd1234        # 8자리 공유 ID로 열기
+  gachipad open 123456 --print  # 브라우저를 띄우지 않고 URL만 출력
   ```
-- **코드 및 아카이브 다운로드 (`codesh pull`)**:
+- **코드 및 아카이브 다운로드 (`gachipad pull`)**:
   ```sh
-  codesh pull 123456 -o ./project              # 디렉터리에 파일들로 풀기
-  codesh pull 123456 --zip -o archive.zip      # ZIP 파일로 저장
-  codesh pull 123456 --pin 1234                # PIN 잠금 해제 후 다운로드
+  gachipad pull 123456 -o ./project              # 디렉터리에 파일들로 풀기
+  gachipad pull 123456 --zip -o archive.zip      # ZIP 파일로 저장
+  gachipad pull 123456 --pin 1234                # PIN 잠금 해제 후 다운로드
   ```
 
 ---
@@ -476,10 +476,10 @@ docker compose logs -f valkey    # 캐시/메시징 로그
 - **웹소켓 4429 종료 (Document update rate exceeded)**:
   - 클라이언트가 비정상적으로 빠른 속도로 문서 업데이트를 전송하는 경우 발생합니다. Collab 서버는 웹소켓 연결당 토큰 버킷(버스트 200회, 초당 50회 지속 리필)을 적용하며, 한도를 초과하면 4429 코드로 연결을 닫습니다. 일반적인 타이핑이나 단일 대용량 붙여넣기(1회 업데이트로 처리)는 한도를 초과하지 않습니다.
 - **403 `forbidden` (CSRF / Origin 불일치)**:
-  - API 상태 변경 요청에 `X-Codesh: 1` 헤더가 누락되었거나 허용되지 않은 출처에서 전송된 경우 차단됩니다. API 연동 스크립트 작성 시 해당 헤더를 추가하십시오.
+  - API 상태 변경 요청에 `X-Gachipad: 1` 헤더가 누락되었거나 허용되지 않은 출처에서 전송된 경우 차단됩니다. API 연동 스크립트 작성 시 해당 헤더를 추가하십시오.
 
 ### 13.3 진단 (Diagnostics) 데이터와 심볼리케이션
-codesh는 운영 및 버그 재현을 위해 개인정보가 철저히 배제된 내부 진단 링 버퍼를 제공합니다.
+gachipad는 운영 및 버그 재현을 위해 개인정보가 철저히 배제된 내부 진단 링 버퍼를 제공합니다.
 
 - **수집 항목**:
   - 표준화된 오류 범주(safe error categories) 및 프레임워크/라이브러리 소스 위치.
@@ -498,10 +498,10 @@ codesh는 운영 및 버그 재현을 위해 개인정보가 철저히 배제된
   - 사용자는 에디터 **설정 → 진단 → 내보내기**에서 브라우저 로컬 진단 JSON 파일을 수집합니다.
   - 운영자는 관리 콘솔 **진단 → 내보내기**(`GET /api/admin/diagnostics/export`)에서 서버 진단 번들을 수집합니다.
 - **클라이언트 스택 심볼리케이션 (Symbolication)**:
-  - 배포 빌드 이미지의 용량 절감 및 보안을 위해 런타임 웹 이미지에는 소스 맵이 포함되지 않습니다. 대신 릴리스 시점에 `codesh-web-sourcemaps-<버전>.tar.gz` 파일이 GitHub 릴리스 자산으로 분리되어 배포됩니다.
+  - 배포 빌드 이미지의 용량 절감 및 보안을 위해 런타임 웹 이미지에는 소스 맵이 포함되지 않습니다. 대신 릴리스 시점에 `gachipad-web-sourcemaps-<버전>.tar.gz` 파일이 GitHub 릴리스 자산으로 분리되어 배포됩니다.
   - 운영자는 클라이언트 진단 JSON 파일을 전달받은 후, 소스 맵 아카이브를 풀어 저장소에 포함된 `scripts/symbolicate.mjs`를 실행하여 원본 코드 위치를 복원할 수 있습니다:
     ```sh
-    tar xzf codesh-web-sourcemaps-<버전>.tar.gz -C /tmp/sourcemaps
+    tar xzf gachipad-web-sourcemaps-<버전>.tar.gz -C /tmp/sourcemaps
     node scripts/symbolicate.mjs /path/to/client-diagnostics.json /tmp/sourcemaps
     ```
 
@@ -547,7 +547,7 @@ codesh는 운영 및 버그 재현을 위해 개인정보가 철저히 배제된
 | `PENDING_MAX_PER_SHARE` | 100 | 공유별 승인 대기 수 |
 | `BROADCASTS_PER_MIN` | 5 | 주소 및 네트워크 그룹별 분당 전체 알림 수 |
 | `BROADCAST_FANOUT_MAX` | 500 | 전체 알림 대상 접속자 상한 |
-| `MONGO_APP_PASSWORD` | 생성됨 | 앱 DB 사용자 `codesh_app`의 비밀번호 |
+| `MONGO_APP_PASSWORD` | 생성됨 | 앱 DB 사용자 `gachipad_app`의 비밀번호 |
 
 `*_PER_IP` 값은 주소 하나의 한도이며, IPv6 /64 전체에는 그 16배가 적용됩니다.
 
@@ -558,7 +558,7 @@ GridFS 전역 바이트 예약은 Mongo의 `storage_quotas`에 보관됩니다. 
 ```sh
 ./backup.sh
 docker compose stop api collab
-docker compose exec -T mongo sh -c 'mongosh --quiet -u codesh -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin codesh --eval "db.storage_quotas.deleteOne({ _id: \"uploads\" })"'
+docker compose exec -T mongo sh -c 'mongosh --quiet -u gachipad -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin gachipad --eval "db.storage_quotas.deleteOne({ _id: \"uploads\" })"'
 docker compose start api collab
 ```
 
@@ -566,7 +566,7 @@ docker compose start api collab
 
 ### 14.1 MongoDB 최소 권한 사용자
 
-API와 Collab은 `codesh` DB의 `readWrite` 역할만 가진 `codesh_app` 사용자로 접속합니다. root 사용자 `codesh`(`MONGO_PASSWORD`)는 일회성 서비스 `mongo-users`, `backup.sh`, `restore.sh`만 사용합니다. `mongo-users`는 `docker compose up` 때마다 root로 인증해 `codesh_app`을 만들거나 비밀번호(`MONGO_APP_PASSWORD`)와 역할을 다시 맞추고 종료하며, API와 Collab은 그 성공 후에 시작합니다.
+API와 Collab은 `gachipad` DB의 `readWrite` 역할만 가진 `gachipad_app` 사용자로 접속합니다. root 사용자 `gachipad`(`MONGO_PASSWORD`)는 일회성 서비스 `mongo-users`, `backup.sh`, `restore.sh`만 사용합니다. `mongo-users`는 `docker compose up` 때마다 root로 인증해 `gachipad_app`을 만들거나 비밀번호(`MONGO_APP_PASSWORD`)와 역할을 다시 맞추고 종료하며, API와 Collab은 그 성공 후에 시작합니다.
 
 이 사용자가 없던 이전 버전의 설치도 따로 전환할 필요가 없습니다. 이전 버전의 `upgrade.sh`로 이 버전 번들을 적용하면 새 `.env.example`의 `MONGO_APP_PASSWORD`가 추가되고 새 `generate-secrets.sh`가 값을 채운 뒤, 시작할 때 `mongo-users`가 기존 볼륨에 사용자를 만듭니다. 저장소에서 직접 `docker compose up`하는 설치는 먼저 `./generate-secrets.sh`를 한 번 실행하십시오(값이 없으면 Compose가 이를 안내하며 시작하지 않습니다).
 
@@ -580,9 +580,9 @@ API와 Collab은 `codesh` DB의 `readWrite` 역할만 가진 `codesh_app` 사용
 
 ### 15.1 업데이트 확인: 무엇이 언제 밖으로 나가나
 - `UPDATE_CHECK=on`(기본값)이면 API 서버가 시작하고 3~5분 뒤, 그 뒤로 약 12시간(±30분)마다 한 번 확인합니다. API 인스턴스가 여러 개여도 Valkey 잠금으로 배포 전체에서 한 번만 요청합니다. 시작과 요청 처리를 막지 않는 백그라운드 작업입니다.
-- 보내는 것: `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` 하나(`UPDATE_CHANNEL=prerelease`이면 `/releases?per_page=20`). 헤더는 `User-Agent: codesh/<현재 버전>`, `Accept`, `X-GitHub-Api-Version`, 그리고 이전 응답의 `If-None-Match`(ETag)뿐입니다. 인증 정보, 쿠키, 설치 식별자, 사용 통계는 보내지 않습니다. GitHub는 요청을 보낸 서버의 공인 IP를 볼 수 있습니다.
+- 보내는 것: `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` 하나(`UPDATE_CHANNEL=prerelease`이면 `/releases?per_page=20`). 헤더는 `User-Agent: gachipad/<현재 버전>`, `Accept`, `X-GitHub-Api-Version`, 그리고 이전 응답의 `If-None-Match`(ETag)뿐입니다. 인증 정보, 쿠키, 설치 식별자, 사용 통계는 보내지 않습니다. GitHub는 요청을 보낸 서버의 공인 IP를 볼 수 있습니다.
 - 인터넷이 없으면 5초 안에 실패하고 콘솔에 "인터넷에 연결되지 않아 확인할 수 없어요"가 표시됩니다. 서비스 동작에는 영향이 없습니다.
-- 인증 없는 GitHub API는 IP당 시간당 60회까지 허용합니다. codesh는 12시간에 한 번(관리 콘솔의 "지금 확인"은 배포 전체에서 1분에 한 번) 요청하고, 한도에 걸리면 GitHub가 알려 준 재설정 시각까지 다시 묻지 않습니다. 같은 공인 IP를 쓰는 다른 프로그램이 한도를 다 쓴 경우에도 같은 방식으로 기다립니다.
+- 인증 없는 GitHub API는 IP당 시간당 60회까지 허용합니다. gachipad는 12시간에 한 번(관리 콘솔의 "지금 확인"은 배포 전체에서 1분에 한 번) 요청하고, 한도에 걸리면 GitHub가 알려 준 재설정 시각까지 다시 묻지 않습니다. 같은 공인 IP를 쓰는 다른 프로그램이 한도를 다 쓴 경우에도 같은 방식으로 기다립니다.
 - 결과(현재·최신 버전, 출시일, 릴리스 노트, 확인 시각, 상태)는 Valkey `update:state`에 보관합니다. 릴리스 노트는 최대 4000자의 일반 텍스트로만 저장하고 표시하며 HTML이나 Markdown으로 렌더링하지 않습니다.
 
 ### 15.2 업데이트 확인 끄기
@@ -591,7 +591,7 @@ API와 Collab은 `codesh` DB의 `readWrite` 역할만 가진 `codesh_app` 사용
 ### 15.3 관리 콘솔
 관리 콘솔(관리자 토큰 필요)의 **업데이트** 탭에서 설치된 버전과 최신 릴리스, 출시일, 릴리스 노트, 릴리스 페이지 링크(새 탭), "지금 확인" 버튼, 서버에서 실행할 명령, 자동 업데이트 상태와 마지막 실행 결과를 봅니다. 새 버전이 있으면 탭 이름 옆에 "새 버전" 배지가 붙습니다. 관리자가 아닌 사용자에게는 업데이트 관련 정보가 보이지 않으며, 공개된 것은 `GET /api/version`의 현재 버전 번호뿐입니다.
 
-API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1분에 한 번)를 제공합니다. 자동 업데이트 상태는 `update.sh`가 쓰는 `state/update.json`을 API 컨테이너에 읽기 전용으로 연결(`./state:/codesh-state:ro`)해서 보여 줍니다. 어떤 컨테이너도 Docker 소켓에 접근하지 않으므로 콘솔에서 업데이트를 실행할 수는 없습니다.
+API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1분에 한 번)를 제공합니다. 자동 업데이트 상태는 `update.sh`가 쓰는 `state/update.json`을 API 컨테이너에 읽기 전용으로 연결(`./state:/gachipad-state:ro`)해서 보여 줍니다. 어떤 컨테이너도 Docker 소켓에 접근하지 않으므로 콘솔에서 업데이트를 실행할 수는 없습니다.
 
 열려 있는 브라우저 탭은 서버의 `/api/version`이 자기 빌드와 다르면 "새 버전이 있어요 · 새로고침" 알림을 띄웁니다(탭을 열 때, 다시 볼 때, 30분마다, 실시간 연결이 다시 붙을 때 확인). 새로고침을 누른 탭만 다시 불러오며, 다른 탭은 그대로 유지됩니다. 승인한 탭도 열려 있는 문서의 미전송 변경을 서버가 확인할 때까지 기다리고, 5초 안에 확인되지 않으면 새로고침하지 않습니다. 연결을 복구한 뒤 다시 시도하십시오. "나중에"를 누르면 다음 버전이 나올 때까지 숨깁니다. 다른 탭의 승인으로 서비스 워커가 교체되거나 이전 lazy chunk 로드가 실패하면 다시 알립니다. 탭별 새로고침 승인은 30초 뒤 만료됩니다.
 
@@ -606,7 +606,7 @@ API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1
 ```
 `update.sh`는 다음 순서로 진행하며, 앞 단계가 실패하면 그 뒤는 실행하지 않습니다.
 1. 설치 단위 공통 잠금을 취득한 뒤 현재 버전을 읽고 대상 릴리스를 고릅니다. `stable`은 draft와 prerelease 플래그 또는 접미사가 있는 버전을 제외합니다. JSON 파싱에는 호스트의 Node, Python3, jq 순으로 사용하고, 없으면 **현재 설치된 API 이미지의 Node**를 일회성 컨테이너로 사용합니다(`--pull never`). 이미지가 없으면 파서 오류와 복구 방법을 표시하며, 오프라인 번들은 먼저 load한 후보 API 이미지를 사용합니다.
-2. 릴리스의 `SHA256SUMS`와 배포 파일 `codesh-deploy-<버전>.tar.gz`를 받고 외부·내부 체크섬을 확인합니다. 새 파일·설정은 임시 폴더에서 준비합니다. MongoDB 이미지가 달라지면(주 버전뿐 아니라 모든 이미지 변경) 지원되는 별도 마이그레이션 경로가 필요하므로 백업·서비스 중지 전에 거절합니다.
+2. 릴리스의 `SHA256SUMS`와 배포 파일 `gachipad-deploy-<버전>.tar.gz`를 받고 외부·내부 체크섬을 확인합니다. 새 파일·설정은 임시 폴더에서 준비합니다. MongoDB 이미지가 달라지면(주 버전뿐 아니라 모든 이미지 변경) 지원되는 별도 마이그레이션 경로가 필요하므로 백업·서비스 중지 전에 거절합니다.
 3. 설치 파일을 바꾸지 않은 채 새 이미지를 모두 pull하고 `IMAGES`의 digest와 비교합니다. 다운로드·검증 중에는 기존 서버가 계속 쓰기를 받습니다. 실패하면 서비스는 그대로 유지됩니다.
 4. 마지막 DB 백업 크기의 2배 이상 여유 공간이 있는지 확인합니다(첫 백업 전에는 비교 기준이 없습니다). 현재 파일·`.env`·문서·TLS 설정을 API에 마운트되지 않는 `rollback/`에 보관하고 `state/transaction`에 대상·단계·백업 경로를 기록한 뒤 maintenance에 들어갑니다. 기존 스냅샷은 `rollback.previous.<시각>.<PID>/`로 보존합니다. Caddy를 먼저 멈추고 API·Collab을 정지합니다. Collab의 SIGTERM flush 및 API·Collab의 정상 종료를 기다린 뒤 `backup.sh`로 백업하고 gzip 무결성을 확인하므로 다운로드 중 받은 쓰기와 종료 직전 편집도 백업에 들어갑니다.
 5. 파일·설정을 교체하고 새 앱을 기동합니다. Caddy는 정지한 채 컨테이너 내부 `/healthz`·`/readyz`의 2xx 응답을 확인합니다(`UPDATE_HEALTH_TIMEOUT`, 기본 180초; 각 요청도 남은 시간으로 제한). 검증 후 ingress를 엽니다.
@@ -615,10 +615,10 @@ API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1
 모든 실행은 `state/update.log`(1 MiB에서 교체, 이전 파일 3개 보관)에 남고, 결과는 `state/update.json`에 기록되어 콘솔에 표시됩니다. 비밀값은 명령행 인자로 전달하지 않으며, GHCR 공개 이미지는 로그인 없이 받습니다. 복구가 끝난 뒤 상태 파일 기록이 실패해도 서비스는 유지되며 잠금은 해제됩니다. `rollback/`과 `rollback.previous.*`에는 `.env`·TLS 개인 키가 있으므로 설치 폴더 접근 권한을 제한하고 보관 정책에 따라 정리하십시오. 구버전의 `state/rollback/`도 다음 업데이트에서 `rollback.legacy.*`로 옮깁니다. 이전 버전의 이미지는 되돌리기를 위해 남겨 두므로 여유 공간이 부족하면 확인 후 `docker image prune`으로 정리하십시오.
 
 ### 15.5 오프라인 업데이트 (인터넷이 없는 서버)
-인터넷이 되는 컴퓨터에서 [릴리스 페이지](https://github.com/kim0040/codesh/releases)의 번들(`codesh-<버전>-linux-amd64.tar.gz` 또는 `-linux-arm64.tar.gz`)과 릴리스의 `SHA256SUMS` 파일을 받아 서버의 설치 폴더 옆에 복사한 뒤 실행합니다.
+인터넷이 되는 컴퓨터에서 [릴리스 페이지](https://github.com/kim0040/gachipad/releases)의 번들(`gachipad-<버전>-linux-amd64.tar.gz` 또는 `-linux-arm64.tar.gz`)과 릴리스의 `SHA256SUMS` 파일을 받아 서버의 설치 폴더 옆에 복사한 뒤 실행합니다.
 ```sh
-./upgrade.sh ../codesh-<버전>-linux-amd64.tar.gz
-./update.sh --bundle ../codesh-<버전>-linux-amd64.tar.gz    # 같은 잠금·검증·복구 경로
+./upgrade.sh ../gachipad-<버전>-linux-amd64.tar.gz
+./update.sh --bundle ../gachipad-<버전>-linux-amd64.tar.gz    # 같은 잠금·검증·복구 경로
 ```
 `upgrade.sh`와 `update.sh --bundle`은 같은 업데이트 엔진을 사용합니다. 번들 옆의 `<번들>.sha256` 또는 릴리스 `SHA256SUMS`를 확인하고 내부 체크섬으로 `images.tar`를 검증합니다. 이미지를 먼저 load한 뒤 온라인과 같은 maintenance·백업·자동 복구를 수행합니다. Docker load는 registry digest를 보존하지 않으므로 오프라인 무결성 검증은 아카이브·내용 체크섬을 사용합니다. 주 버전 변경에는 `--allow-major`가 필요합니다. 추출된 `images.tar`는 후보 폴더에 다시 복사하지 않습니다. 임시 공간이 작으면 `TMPDIR=/충분한/공간 ./upgrade.sh ...`로 번들 추출 위치를 지정하십시오.
 
@@ -631,7 +631,7 @@ sudo ./update.sh --enable-auto --dry-run                     # 무엇을 설치�
 sudo ./update.sh --disable-auto                              # 끄기
 ```
 - systemd 서비스는 `KillMode=mixed`, `TimeoutStopSec=30min`으로 복구 중 자식 프로세스를 보존하며, Docker보다 뒤에 시작하여 종료 시 Docker보다 먼저 멈춥니다. 복구 중 추가 HUP/INT/TERM은 무시합니다. 대형 DB에서 복구가 30분을 넘으면 서비스 override로 stop timeout을 늘리십시오.
-- systemd가 있으면 `/etc/systemd/system/codesh-update.service`와 `.timer`(매일 `--at` 시각, 최대 15분 무작위 지연, 꺼져 있던 동안 놓친 실행은 켜질 때 한 번)를 설치하고, 없으면 현재 사용자의 crontab에 한 줄을 추가합니다. 한 호스트에 설치 하나를 기준으로 합니다.
+- systemd가 있으면 `/etc/systemd/system/gachipad-update.service`와 `.timer`(매일 `--at` 시각, 최대 15분 무작위 지연, 꺼져 있던 동안 놓친 실행은 켜질 때 한 번)를 설치하고, 없으면 현재 사용자의 crontab에 한 줄을 추가합니다. 한 호스트에 설치 하나를 기준으로 합니다.
 - 자동 업데이트 설치 경로는 영문자·숫자·`/ . _ -`만 허용합니다. 공백·작은따옴표·`%` 등이 있는 경로는 systemd/cron 파일을 쓰기 전에 거절합니다.
 - 타이머는 `./update.sh --auto`를 실행합니다. 정책에 맞는 릴리스만 적용하며, 주 버전이 바뀌는 업데이트는 정책과 상관없이 자동으로 적용하지 않습니다.
   - `patch`(기본값): 같은 `x.y`의 버그 수정 릴리스만(1.2.0 → 1.2.3).
@@ -648,8 +648,8 @@ sudo ./update.sh --disable-auto                              # 끄기
 ### 15.8 릴리스 확인과 출처 증명
 릴리스의 모든 파일과 GHCR 이미지에는 GitHub의 빌드 출처 증명이 붙습니다. GitHub CLI로 확인할 수 있습니다(인터넷 필요).
 ```sh
-gh attestation verify codesh-<버전>-linux-amd64.tar.gz --repo kim0040/codesh
-gh attestation verify oci://ghcr.io/kim0040/codesh-api:<버전> --repo kim0040/codesh
+gh attestation verify gachipad-<버전>-linux-amd64.tar.gz --repo kim0040/gachipad
+gh attestation verify oci://ghcr.io/kim0040/gachipad-api:<버전> --repo kim0040/gachipad
 ```
 `SHA256SUMS`와 `.sha256`은 손상과 바뀐 파일을 찾아내지만 서명은 아닙니다. HTTPS로 GitHub에서 직접 받거나 출처 증명을 확인하십시오.
 
@@ -657,13 +657,50 @@ gh attestation verify oci://ghcr.io/kim0040/codesh-api:<버전> --repo kim0040/c
 서버가 프록시를 거쳐야 인터넷에 나갈 수 있으면 `.env`에 `HTTPS_PROXY=http://프록시:포트`를 씁니다. Compose가 이 값과 `NODE_USE_ENV_PROXY=1`을 API 컨테이너에 전달합니다(Node 22의 `fetch`는 이 설정이 있어야 `HTTPS_PROXY`를 사용합니다). OIDC 로그인처럼 API가 내부 서버에 접속하는 경우가 있으면 그 호스트를 `NO_PROXY`에 넣으십시오. `update.sh`는 `curl`을 사용하므로 실행하는 셸의 `HTTPS_PROXY`를 따릅니다. 이미지 다운로드는 Docker 데몬의 프록시 설정을 따릅니다.
 
 ### 15.10 비용
-- GitHub 릴리스(파일 보관과 다운로드), GHCR의 공개 패키지(저장과 전송), 공개 저장소의 GitHub Actions 실행과 빌드 출처 증명, 인증 없는 GitHub REST API는 모두 무료입니다. 인증 없는 API는 IP당 시간당 60회로 제한되며 codesh의 확인 주기(12시간)는 이 한도보다 훨씬 적습니다.
+- GitHub 릴리스(파일 보관과 다운로드), GHCR의 공개 패키지(저장과 전송), 공개 저장소의 GitHub Actions 실행과 빌드 출처 증명, 인증 없는 GitHub REST API는 모두 무료입니다. 인증 없는 API는 IP당 시간당 60회로 제한되며 gachipad의 확인 주기(12시간)는 이 한도보다 훨씬 적습니다.
 - 유료 서비스나 계정, 토큰이 필요하지 않습니다. 자동 업데이트도 서버 자신의 systemd 타이머 또는 cron으로 동작합니다.
 
 ### 15.11 소스에서 설치한 경우
 저장소에서 직접 실행하는 설치(`deploy/`에서 `docker compose`)는 `update.sh`가 저장소 파일을 덮어쓰지 않도록 거절합니다. 다음 중 하나를 사용합니다.
 ```sh
 git pull && docker compose build && docker compose up -d     # 소스에서 다시 빌드
-docker compose pull && docker compose up -d                  # .env의 CODESH_VERSION 릴리스 이미지를 받아 실행
+docker compose pull && docker compose up -d                  # .env의 GACHIPAD_VERSION 릴리스 이미지를 받아 실행
 ```
+
+---
+
+<a id="codesh에서-gachipad로-이름-변경-10x에서-업그레이드"></a>
+<a id="16-codesh에서-gachipad로-이름-변경-10x에서-업그레이드"></a>
+## 16. codesh에서 gachipad로 이름 변경 (1.0.x에서 업그레이드)
+
+제품 이름이 codesh에서 gachipad로 변경되었어요. 기존 1.0.x 설치 환경을 최신 버전으로 업그레이드할 때 운영자가 알아두어야 할 사항을 안내해요.
+
+### 16.1 일반 업그레이드 시 주의사항
+기존 1.0.x 환경에서 `./update.sh` 또는 `./upgrade.sh`를 실행해 정상 업그레이드하는 경우, 운영자가 수동으로 데이터를 마이그레이션할 필요는 없어요.
+- **데이터 및 볼륨 보존**: 기존 데이터 볼륨, MongoDB 데이터베이스 이름(`codesh`), 데이터베이스 애플리케이션 사용자(`codesh_app`), Docker Compose 프로젝트 이름(`codesh`), 기존 시크릿은 해당 설치에 고정(pinned)되어 그대로 유지돼요.
+- **서비스 중단 없는 전환**: 데이터베이스나 볼륨 이름을 강제로 바꾸지 않으므로 데이터 유실이나 분실 위험 없이 안전하게 업그레이드돼요.
+
+### 16.2 눈에 띄는 변경 사항
+업그레이드 후 다음과 같은 항목들이 변경되어 나타나요:
+- **`.env` 환경 변수**: `./update.sh`나 `./generate-secrets.sh` 실행 시 기존 `CODESH_*` 환경 변수는 `# migrated to GACHIPAD_*: CODESH_...` 형태로 주석 처리되고, 동일한 설정이 신규 `GACHIPAD_*` 키로 자동 마이그레이션돼요.
+- **systemd 유닛 및 cron 태그**: 기존에 자동 업데이트가 켜져 있던 환경은 기존 이름(`codesh-update.service`, `codesh-update.timer` 또는 crontab의 `# codesh-update` 태그)이 그대로 유지되어 스케줄 연속성이 보장돼요. 신규 설치는 `gachipad-update` 유닛을 사용해요.
+- **mDNS 로컬 주소**: 기존 `codesh.local` 주소가 레거시 별칭으로 계속 응답하며, 신규 기본 주소인 `gachipad.local`이 함께 응답해요. 기존 북마크나 바로가기를 그대로 사용할 수 있어요.
+- **Prometheus 메트릭 이름**: `codesh_*` 접두사로 제공되던 모든 메트릭이 `gachipad_*` 접두사로 변경되었어요(예: `gachipad_http_request_duration_seconds`, `gachipad_collab_connections` 등). Prometheus 수집 설정, 대시보드(Grafana 등), 알림 규칙(alert rules)을 운영 중이라면 새 메트릭 이름으로 쿼리를 업데이트해야 해요.
+
+### 16.3 운영자의 조치가 필요한 경우
+다음 특정 환경에서는 업그레이드 전후 운영자의 수동 조치가 필요해요:
+- **내부 레지스트리 미러 운영**: 인터넷이 분리된 내부 네트워크에서 자체 Docker 레지스트리 미러를 사용하는 경우, 대상 버전의 `gachipad-*` 이미지(`gachipad-web`, `gachipad-api`, `gachipad-collab`, `gachipad-mdns`)를 미러에 미리 올려 두어야 해요.
+- **셸 환경 변수 `CODESH_REGISTRY`**: 이전에 `.env`에 적지 않고 셸에서 `export CODESH_REGISTRY=...`로 전달하던 경우, 새 버전에서는 셸 변수를 읽지 않으므로 `.env` 파일 안에 직접 `GACHIPAD_REGISTRY=...`로 작성해야 해요.
+- **소스 체크아웃 설치**: git 저장소를 직접 clone하여 운영하는 환경이라면, `git pull` 이후 `docker compose build && docker compose up -d`를 실행하기 전에 반드시 `./generate-secrets.sh .env`를 한 번 실행해야 해요. 이를 통해 신규 `GACHIPAD_*` 환경 변수와 필수 `MONGO_APP_PASSWORD`가 올바르게 생성돼요.
+- **운영자 자체 TLS 인증서**: Caddy 내장 로컬 CA(`tls internal`)는 `codesh.local`과 `gachipad.local`을 자동으로 함께 처리해요. 하지만 자체 발급 인증서(`tls <cert> <key>`)를 사용하는 경우, `.env`의 `SITE_ALIASES=, gachipad.local`(쉼표 뒤 공백 포함)을 적용하기 전에 인증서의 SAN(Subject Alternative Name)에 `gachipad.local`이 포함되어 있는지 먼저 확인하고 갱신해야 해요.
+- **신규 설치 거절 가드와 `GACHIPAD_NEW_INSTALL=1`**: 기존 설치 데이터를 덮어쓰거나 고아 볼륨으로 방치하는 사고를 방지하기 위해, `install.sh`는 현재 디렉터리에 `.env`가 없는데 기존 Docker 볼륨 `codesh_mongo-data`가 존재하면 설치를 거절해요. 기존 설치를 업그레이드하려면 기존 `.env`를 복사해 온 뒤 `./generate-secrets.sh .env`를 실행해야 해요. 이전 볼륨을 무시하고 해당 호스트에 완전히 새로운 별도 스택을 설치하려는 경우에만 `GACHIPAD_NEW_INSTALL=1 ./install.sh`를 지정해서 실행해요.
+
+### 16.4 레거시 호환성 유지 정책
+운영과 연동의 연속성을 위해 레거시 이름 호환성은 **2.0 릴리스까지** 계속 유지돼요:
+- `codesh` CLI 명령: 폐기 경고(stderr: `codesh is deprecated, use gachipad instead`)를 출력하고 `gachipad` 명령으로 안전하게 전달돼요.
+- 세션 쿠키: 클라이언트 요청에 `gachipad_sid`가 없으면 `codesh_sid`를 fallback으로 인식하며, 응답 시 `gachipad_sid`를 발급해요.
+- CSRF 헤더: `X-Gachipad` 헤더 외에 기존 `X-Codesh` 헤더도 계속 허용해요.
+- 헬스 체크: `GET /healthz/gachipad` 외에 기존 `GET /healthz/codesh` 엔드포인트도 정상 응답해요.
+- 백업 복원: `restore.sh`는 아카이브 내부 경로 구조를 자동 감지하여 codesh 형식 백업과 gachipad 형식 백업을 모두 투명하게 복원해요.
+
 

@@ -1,11 +1,35 @@
 # Changelog
 
-All notable changes to codesh are recorded here. The format follows
+All notable changes to gachipad are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a version is the
 text of its GitHub release (RELEASING.md).
 
-## [Unreleased]
+## [1.1.0] - Unreleased
+
+### Changed
+
+- Renamed product from codesh to gachipad (Korean reading 같이패드).
+- Repository URL updated to `https://github.com/kim0040/gachipad`.
+- Monorepo package scope renamed from `@codesh/*` to `@gachipad/*`.
+- Primary CLI binary renamed to `gachipad` (`codesh` retained as a deprecated alias). CLI configuration resolves from `gachipad.json` (and `GACHIPAD_CONFIG` / `GACHIPAD_URL`) with fallback to `codesh.json` (and `CODESH_CONFIG` / `CODESH_URL`).
+- Container images renamed on GitHub Container Registry to `ghcr.io/kim0040/gachipad-web`, `gachipad-api`, `gachipad-collab`, and `gachipad-mdns`.
+- Release asset archives renamed to `gachipad-deploy-<version>.tar.gz`, `gachipad-<version>-linux-<arch>.tar.gz`, and `gachipad-web-sourcemaps-<version>.tar.gz` (legacy-named aliases continue to be published for 1.0.x updaters).
+- Deployment environment variables migrated from `CODESH_*` to `GACHIPAD_*` (`GACHIPAD_VERSION`, `GACHIPAD_REGISTRY`, `GACHIPAD_PROJECT`, `GACHIPAD_NS`, `GACHIPAD_DATA_DIR`). Upgraded `.env` files comment out old `CODESH_*` lines; real exported `CODESH_*` variables fall back with a deprecation warning.
+- Default mDNS host changed to `gachipad.local` (`codesh.local` retained as an alias for upgraded installations).
+- Systemd unit and cron scheduler renamed to `gachipad-update` (existing `codesh-update` installations retain their unit name and timer until 2.0).
+- CSRF protection header updated to `X-Gachipad: 1` (exact legacy `X-Codesh: 1` header accepted until 2.0).
+- Session cookie renamed to `gachipad_sid` (signed `codesh_sid` fallback accepted and cleared on rotation until 2.0).
+- In-browser IndexedDB and communication channels use `gachipad:*` names on fresh profiles; upgraded browser profiles safely retain `codesh:*` databases and `codesh:device` BroadcastChannel to prevent data fragmentation with legacy tabs.
+- Renamed Prometheus metrics:
+  - API: `codesh_http_request_duration_seconds` -> `gachipad_http_request_duration_seconds`, `codesh_shares_created_total` -> `gachipad_shares_created_total`, `codesh_rate_limited_total` -> `gachipad_rate_limited_total`, `codesh_sse_connections` -> `gachipad_sse_connections`, default collection prefix `codesh_api_*` -> `gachipad_api_*`.
+  - Collab: `codesh_collab_connections` -> `gachipad_collab_connections`, `codesh_collab_documents_loaded` -> `gachipad_collab_documents_loaded`, `codesh_collab_flush_seconds` -> `gachipad_collab_flush_seconds`, `codesh_collab_flush_errors_total` -> `gachipad_collab_flush_errors_total`, `codesh_collab_updates_total` -> `gachipad_collab_updates_total`, `codesh_collab_slow_client_closes_total` -> `gachipad_collab_slow_client_closes_total`, `codesh_collab_refused_too_large_total` -> `gachipad_collab_refused_too_large_total`, `codesh_collab_ws_messages_sent_total` -> `gachipad_collab_ws_messages_sent_total`, `codesh_collab_ws_bytes_sent_total` -> `gachipad_collab_ws_bytes_sent_total`, `codesh_collab_awareness_dropped_total` -> `gachipad_collab_awareness_dropped_total`, default collection prefix `codesh_collab_*` -> `gachipad_collab_*`.
+- Upgrades via `./update.sh` or `./upgrade.sh` preserve existing data, Docker volumes, MongoDB database name (`codesh`), user (`codesh_app`), and secrets without manual data migration.
+- Registry mirrors must carry `gachipad-*` images at the release version.
+- Exported-only `CODESH_REGISTRY` must be added to `.env` as `GACHIPAD_REGISTRY`.
+- Source checkouts must run `./generate-secrets.sh .env` once after `git pull` before rebuilding containers.
+- Operator-provided TLS certificates require `gachipad.local` in Subject Alternative Names (SAN) before setting `SITE_ALIASES=, gachipad.local`.
+- `install.sh` refuses fresh installation when legacy `codesh_mongo-data` volume is detected without `.env` unless `GACHIPAD_NEW_INSTALL=1` is specified.
 
 ## [1.0.2] - 2026-10-25
 
@@ -100,7 +124,7 @@ The first release: real-time code sharing for one network, with no outside servi
   edit keys in every open tab. Shares with a PIN or approval load their copy only after the server
   accepts the connection. Lab previews never keep copies.
 
-[Unreleased]: https://github.com/kim0040/codesh/compare/v1.0.2...HEAD
+[1.1.0]: https://github.com/kim0040/gachipad/compare/v1.0.2...HEAD
 [1.0.2]: https://github.com/kim0040/codesh/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/kim0040/codesh/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kim0040/codesh/releases/tag/v1.0.0

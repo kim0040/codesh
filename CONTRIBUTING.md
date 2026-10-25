@@ -1,4 +1,4 @@
-# Contributing to codesh
+# Contributing to gachipad
 
 Thank you for helping. Bug reports, documentation updates, and improvements are welcome; for a
 larger change, please open an issue first so we can agree on the direction.
@@ -36,7 +36,7 @@ Keep one logical change per commit, and explain the motivation in the commit bod
 
 ## Licence
 
-codesh is released under the [MIT License](LICENSE). By contributing, you agree that your
+gachipad is released under the [MIT License](LICENSE). By contributing, you agree that your
 contribution is licensed under the same terms (inbound = outbound).
 
 Security problems go through [SECURITY.md](SECURITY.md), not through public issues.
