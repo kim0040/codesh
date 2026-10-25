@@ -411,7 +411,7 @@ VM이 다른 작업으로 포화(부하 평균 41, 호스트 CPU 96%)됐을 때 
 CLI는 다음 순서로 대상 서버 URL을 찾습니다.
 1. 명령행 플래그: `--url <URL>`
 2. 환경 변수: `GACHIPAD_URL` (구버전 호환: `CODESH_URL`)
-3. 설정 파일: Windows는 `%APPDATA%\gachipad\gachipad.json`, Linux/macOS는 `~/.config/gachipad/gachipad.json`의 `"url"` 필드 (구버전 호환: `%APPDATA%\codesh\codesh.json`, `~/.config/codesh.json`)
+3. 설정 파일: Windows는 `%APPDATA%\gachipad\gachipad.json`, Linux/macOS는 `~/.config/gachipad.json`(`XDG_CONFIG_HOME`가 있으면 그 아래)의 `"url"` 필드 (구버전 호환: `%APPDATA%\codesh\codesh.json`, `~/.config/codesh.json`)
 
 Windows에서 저장소를 내려받은 뒤 Node.js 22 이상과 Corepack을 준비하고 다음 명령으로 CLI를 빌드해 전역 링크를 등록할 수 있습니다.
 ```powershell
@@ -690,17 +690,16 @@ docker compose pull && docker compose up -d                  # .env의 GACHIPAD_
 ### 16.3 운영자의 조치가 필요한 경우
 다음 특정 환경에서는 업그레이드 전후 운영자의 수동 조치가 필요해요:
 - **내부 레지스트리 미러 운영**: 인터넷이 분리된 내부 네트워크에서 자체 Docker 레지스트리 미러를 사용하는 경우, 대상 버전의 `gachipad-*` 이미지(`gachipad-web`, `gachipad-api`, `gachipad-collab`, `gachipad-mdns`)를 미러에 미리 올려 두어야 해요.
-- **셸 환경 변수 `CODESH_REGISTRY`**: 이전에 `.env`에 적지 않고 셸에서 `export CODESH_REGISTRY=...`로 전달하던 경우, 새 버전에서는 셸 변수를 읽지 않으므로 `.env` 파일 안에 직접 `GACHIPAD_REGISTRY=...`로 작성해야 해요.
+- **셸 환경 변수 `CODESH_REGISTRY`**: 레지스트리를 `.env`에 적지 않고 셸에서 `export CODESH_REGISTRY=...`로만 넘기던 경우, 1.0.x 업데이터가 새 버전을 준비할 때 Compose가 그 값을 보지 못해 기본 레지스트리에서 이미지를 받으려 해요(이미지를 받는 단계에서 멈추고, 실행 중인 서비스는 그대로예요). 업데이트 전에 `.env`에 `GACHIPAD_REGISTRY=...`를 적어 두세요.
 - **소스 체크아웃 설치**: git 저장소를 직접 clone하여 운영하는 환경이라면, `git pull` 이후 `docker compose build && docker compose up -d`를 실행하기 전에 반드시 `./generate-secrets.sh .env`를 한 번 실행해야 해요. 이를 통해 신규 `GACHIPAD_*` 환경 변수와 필수 `MONGO_APP_PASSWORD`가 올바르게 생성돼요.
-- **운영자 자체 TLS 인증서**: Caddy 내장 로컬 CA(`tls internal`)는 `codesh.local`과 `gachipad.local`을 자동으로 함께 처리해요. 하지만 자체 발급 인증서(`tls <cert> <key>`)를 사용하는 경우, `.env`의 `SITE_ALIASES=, gachipad.local`(쉼표 뒤 공백 포함)을 적용하기 전에 인증서의 SAN(Subject Alternative Name)에 `gachipad.local`이 포함되어 있는지 먼저 확인하고 갱신해야 해요.
+- **운영자 자체 TLS 인증서**: `tls/*.caddy`에 `tls internal`(Caddy 내장 로컬 CA)이 있으면 업그레이드할 때 `gachipad.local` 별칭이 자동으로 추가돼요. 하지만 자체 발급 인증서(`tls <cert> <key>`)를 사용하는 경우, `.env`의 `SITE_ALIASES=, gachipad.local`(쉼표 뒤 공백 포함)을 적용하기 전에 인증서의 SAN(Subject Alternative Name)에 `gachipad.local`이 포함되어 있는지 먼저 확인하고 갱신해야 해요.
 - **신규 설치 거절 가드와 `GACHIPAD_NEW_INSTALL=1`**: 기존 설치 데이터를 덮어쓰거나 고아 볼륨으로 방치하는 사고를 방지하기 위해, `install.sh`는 현재 디렉터리에 `.env`가 없는데 기존 Docker 볼륨 `codesh_mongo-data`가 존재하면 설치를 거절해요. 기존 설치를 업그레이드하려면 기존 `.env`를 복사해 온 뒤 `./generate-secrets.sh .env`를 실행해야 해요. 이전 볼륨을 무시하고 해당 호스트에 완전히 새로운 별도 스택을 설치하려는 경우에만 `GACHIPAD_NEW_INSTALL=1 ./install.sh`를 지정해서 실행해요.
 
 ### 16.4 레거시 호환성 유지 정책
 운영과 연동의 연속성을 위해 레거시 이름 호환성은 **2.0 릴리스까지** 계속 유지돼요:
-- `codesh` CLI 명령: 폐기 경고(stderr: `codesh is deprecated, use gachipad instead`)를 출력하고 `gachipad` 명령으로 안전하게 전달돼요.
+- `codesh` CLI 명령: 폐기 경고(stderr: `codesh is deprecated; use gachipad`)를 출력하고 `gachipad` 명령으로 안전하게 전달돼요.
 - 세션 쿠키: 클라이언트 요청에 `gachipad_sid`가 없으면 `codesh_sid`를 fallback으로 인식하며, 응답 시 `gachipad_sid`를 발급해요.
 - CSRF 헤더: `X-Gachipad` 헤더 외에 기존 `X-Codesh` 헤더도 계속 허용해요.
-- 헬스 체크: `GET /healthz/gachipad` 외에 기존 `GET /healthz/codesh` 엔드포인트도 정상 응답해요.
 - 백업 복원: `restore.sh`는 아카이브 내부 경로 구조를 자동 감지하여 codesh 형식 백업과 gachipad 형식 백업을 모두 투명하게 복원해요.
 
 
