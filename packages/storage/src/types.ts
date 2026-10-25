@@ -241,6 +241,10 @@ export interface DiagnosticsStore {
 }
 
 export interface Stores {
+  /** Optional bounded expiry/orphan/retention cleanup; other backends use the existing sweeper calls. */
+  maintenance?: {
+    sweep(now: Date, renew: () => Promise<void>): Promise<{ orphans: number }>;
+  };
   diagnostics: DiagnosticsStore;
   shares: ShareStore;
   updates: UpdateLog;

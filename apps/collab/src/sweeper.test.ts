@@ -1,5 +1,6 @@
 import { defaultSettings, generateClientId, keys } from "@gachipad/shared";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createMemoryStores } from "@gachipad/storage";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ValkeyLock } from "./lock.js";
 import { sweep } from "./sweeper.js";
 import { Harness, servicesAvailable } from "./testing/harness.js";
@@ -111,5 +112,56 @@ describe.runIf(available)("sweeper", () => {
     } finally {
       await holder.release(keys.sweeperLock);
     }
+  });
+});
+
+describe("sweeper maintenance selection", () => {
+  function lock() {
+    return {
+      acquire: vi.fn(async () => true),
+      renew: vi.fn(async () => true),
+      release: vi.fn(async () => true),
+    };
+  }
+
+  it("uses bounded maintenance when available", async () => {
+    const stores = createMemoryStores();
+    const held = lock();
+    const shareIds = vi.spyOn(stores.updates, "shareIds");
+    stores.maintenance = {
+      sweep: vi.fn(async (_now, renew) => {
+        await renew();
+        return { orphans: 3 };
+      }),
+    };
+    expect(await sweep(stores, held as unknown as ValkeyLock)).toEqual({ orphans: 3 });
+    expect(shareIds).not.toHaveBeenCalled();
+    expect(held.renew).toHaveBeenCalledWith(keys.sweeperLock);
+    expect(held.release).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the existing store calls for backends without maintenance", async () => {
+    const stores = createMemoryStores();
+    const held = lock();
+    const shareIds = vi.spyOn(stores.updates, "shareIds");
+    const clientIds = vi.spyOn(stores.labels, "clientIds");
+    expect(await sweep(stores, held as unknown as ValkeyLock)).toEqual({ orphans: 0 });
+    expect(shareIds).toHaveBeenCalledOnce();
+    expect(clientIds).toHaveBeenCalledOnce();
+    expect(held.release).toHaveBeenCalledOnce();
+  });
+
+  it("stops bounded maintenance and releases a lost lease", async () => {
+    const stores = createMemoryStores();
+    const held = lock();
+    held.renew.mockResolvedValue(false);
+    stores.maintenance = {
+      sweep: async (_now, renew) => {
+        await renew();
+        return { orphans: 0 };
+      },
+    };
+    await expect(sweep(stores, held as unknown as ValkeyLock)).rejects.toThrow("sweeper lock lost");
+    expect(held.release).toHaveBeenCalledOnce();
   });
 });
