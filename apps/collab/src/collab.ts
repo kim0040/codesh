@@ -61,6 +61,7 @@ import type {
   onDisconnectPayload,
   onLoadDocumentPayload,
 } from "@hocuspocus/server";
+import { OutgoingMessage } from "@hocuspocus/server";
 import type { Redis } from "ioredis";
 import * as Y from "yjs";
 import { validCommentAuthors } from "./comments.js";
@@ -264,6 +265,8 @@ export class Collab implements Extension<CollabContext> {
   private timers: NodeJS.Timeout[] = [];
   private readonly refused = new WeakSet<Connection>();
   private readonly initialSync = new WeakSet<Connection>();
+  /** Updates held back before the first SyncStep2, each answered "not saved" (see `beforeSync`). */
+  private readonly heldBack = new WeakMap<Connection, number>();
   private readonly awarenessBudget = new WeakMap<Connection, { tokens: number; at: number }>();
   private readonly updateBudget = new WeakMap<Connection, { tokens: number; at: number }>();
   /** Perm messages received so far, and the recent ones per share (see `catchUp`). */
@@ -622,6 +625,7 @@ export class Collab implements Extension<CollabContext> {
     // before SyncStep2 supplies their missing prefix; wait without poisoning the local doc.
     // Nothing is applied or queued in Yjs here. The complete sync still passes every guard.
     if (type === 2 && !this.initialSync.has(connection)) {
+      this.heldBack.set(connection, (this.heldBack.get(connection) ?? 0) + 1);
       this.refused.add(connection);
       connection.readOnly = true;
       return;
@@ -664,6 +668,16 @@ export class Collab implements Extension<CollabContext> {
   }
 
   async afterHandleMessage({ connection, document }: afterHandleMessagePayload<CollabContext>) {
+    const held = this.heldBack.get(connection);
+    if (held && this.initialSync.has(connection) && !this.refused.has(connection)) {
+      // The accepted first SyncStep2 carried what was held back: settle the provider's count of
+      // unsaved changes, or the tab keeps believing it has unsent edits.
+      this.heldBack.delete(connection);
+      const ack = new OutgoingMessage(connection.messageAddress)
+        .writeSyncStatus(true)
+        .toUint8Array();
+      for (let i = 0; i < held; i++) connection.send(ack);
+    }
     if (!this.refused.has(connection)) return;
     this.refused.delete(connection);
     const state = this.docs.get(document.name);

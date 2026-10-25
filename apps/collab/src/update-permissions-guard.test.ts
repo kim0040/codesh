@@ -37,6 +37,8 @@ describe("beforeSync document state", () => {
         readOnly: kind === "viewer",
         context: { role: kind === "viewer" ? "view" : "edit", controller: false },
         sendStateless: vi.fn(),
+        send: vi.fn(),
+        messageAddress: doc.name,
       };
       const local = new Y.Doc();
       Y.applyUpdate(local, Y.encodeStateAsUpdate(doc));
@@ -64,6 +66,8 @@ describe("beforeSync document state", () => {
       if (kind === "text") {
         expect(doc.getText("file:main").toString()).toBe("base first second");
         expect(connection.sendStateless).not.toHaveBeenCalled();
+        // The held-back update was answered "not saved"; the accepted sync confirms it once.
+        expect(connection.send).toHaveBeenCalledTimes(1);
         local.getText("file:main").insert(17, " third");
         await handle(2, updates.at(-1) as Uint8Array);
         expect(doc.getText("file:main").toString()).toBe("base first second third");
@@ -72,6 +76,7 @@ describe("beforeSync document state", () => {
         expect(connection.sendStateless).toHaveBeenCalledWith(
           JSON.stringify({ type: "permission_refused" }),
         );
+        expect(connection.send).not.toHaveBeenCalled();
       }
       expect(doc.getMap("meta").get("title")).toBe("Original");
       local.destroy();

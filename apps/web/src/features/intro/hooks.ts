@@ -152,7 +152,7 @@ export function useScrollReveal(root: RefObject<HTMLElement | null>, reduced: bo
       }
     };
     const onScroll = () => {
-      if (!frame) frame = requestAnimationFrame(revealPassed);
+      if (!frame && waiting.size > 0) frame = requestAnimationFrame(revealPassed);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
