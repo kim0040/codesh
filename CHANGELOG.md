@@ -11,7 +11,7 @@ text of its GitHub release (RELEASING.md).
 
 ### Added
 
-- Code completion: optional word and keyword autocompletion in the editor (Tab or 350 ms typing pause), pulling language keywords and in-document words; disabled for viewers or when turned off in Settings.
+- Code completion: optional keyword and word suggestions in the editor that appear after a short pause in typing (or Ctrl+Space) and are accepted with Tab or Enter, drawn from language keywords and words in the document; disabled for viewers or when turned off in Settings.
 - Language suggestion: automatic programming language detection while typing plain text, displaying a suggestion badge in the status bar with one-click acceptance or dismissal.
 - First-run tutorial and replay: a lazy-loaded step-by-step tour with a spotlight overlay guiding new users through key controls on their first editor visit, replayable anytime from Settings.
 - Guide pages: dedicated in-app documentation under `/guide` covering workflow, features, network topology, privacy/security, and FAQs, with lazy per-language copy and redirection from legacy home-page section anchors.
@@ -41,7 +41,7 @@ text of its GitHub release (RELEASING.md).
 - Server-side participant permissions: collab update guard verifies all operation roots against document state and rejects unauthorized file additions, renames, deletions, and language changes before broadcast or persistence.
 - Diagnostics privacy scrubbing: strict field scrubber replaces property keys and exception messages with safe categories/templates, excludes document contents, file names, PINs, and auth tokens, and enforces byte and group limits.
 - Collab update rate limiting: per-connection token bucket (burst 200 updates, sustained refill of 50 updates/second) protecting collab instances against update flooding.
-- Admin token enforcement: production startup rejects nonempty admin tokens shorter than 32 characters, and documented zero-downtime token rotation via `openssl rand -hex 32`.
+- Admin token enforcement: production startup rejects nonempty admin tokens shorter than 32 characters, and documented token rotation via `openssl rand -hex 32` and an API restart.
 
 ## [1.0.1] - 2026-10-25
 

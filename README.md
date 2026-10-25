@@ -29,7 +29,7 @@ codesh lets everyone on the same network share and edit code together directly i
 - **Conflict-free sync**: Concurrent typing merges automatically with Yjs and Hocuspocus; offline edits merge cleanly when the connection returns.
 - **Presence and following**: Every cursor and selection shows a distinct colour and name; click any participant to follow their view in real time. Remote edits do not disrupt local cursor blinking, and remote name tags stay stable.
 - **Smooth typing**: The caret glides with a 100 ms decelerating transition and smooth opacity blinking; it stays solid when reduced motion is preferred.
-- **Code completion & language suggestions**: Optional word and keyword autocompletion (Tab or 350 ms typing pause); automatic language detection offers one-click language assignment while typing plain text.
+- **Code completion & language suggestions**: Optional keyword and word suggestions after a short pause in typing, accepted with Tab; automatic language detection offers one-click language assignment while typing plain text.
 - **Multi-file workspaces**: Organize up to 100 files per share in folder paths (`src/index.ts`), with automatic language detection from file names.
 - **200+ languages and accessible themes**: Syntax highlighting for 200+ languages across four editor themes (Slate, Graphite, Paper, Sand) with token colours verified for WCAG 2.2 AA contrast. Keymaps include Default, Vim, Emacs, and Sublime.
 - **Anchored comments**: Attach discussions to a line or range; comments hold their place as surrounding code moves.

@@ -59,7 +59,7 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - 에디터 내 모든 문법 토큰 색상은 WCAG 2.2 AA 기준(배경 대비 4.5:1 이상)을 충족합니다.
 
 ### 2.4 코드 자동 완성 및 부드러운 입력
-- **코드 자동 완성**: 에디터에서 단어를 입력하는 도중 `Tab` 키를 누르거나 입력을 잠시 멈추면(350ms) 현재 언어의 키워드 및 문서 내 단어를 기반으로 자동 완성 팝업이 표시됩니다. 방향키와 `Tab` 또는 `Enter`로 원하는 항목을 선택할 수 있으며, 설정에서 켜거나 끌 수 있습니다(보기 전용 상태에서는 비활성화).
+- **코드 자동 완성**: 에디터에서 입력을 잠시 멈추면(350ms) 현재 언어의 키워드와 문서 안의 단어로 자동 완성 목록이 표시됩니다(`Ctrl + Space`로 바로 열 수도 있습니다). 방향키로 고르고 `Tab` 또는 `Enter`로 넣습니다. 설정에서 켜거나 끌 수 있으며, 보기 전용 상태에서는 동작하지 않습니다.
 - **타이핑 중 언어 제안**: 일반 텍스트(`Plain Text`) 상태에서 코드를 작성하면 내용에 맞는 언어가 감지될 때 하단 상태 표시줄에 언어 제안 배지(`{language} 코드로 보여요`)가 나타납니다. **적용** 버튼을 누르면 즉시 해당 언어로 전환되고 **제안 닫기** 버튼으로 닫을 수 있습니다.
 - **부드러운 입력 (Smooth Caret)**: 타이핑 시 커서가 100ms 감속 곡선으로 부드럽게 글자를 따라 이동하며, 1.2초 주기의 페이드 깜빡임이 적용됩니다. 원격 참여자가 동시에 편집해도 로컬 커서의 깜빡임 리듬은 깨지지 않습니다. 운영체제의 모션 줄이기(Reduced Motion)가 켜져 있으면 움직임 없이 고정된 커서로 동작합니다.
 
@@ -313,7 +313,7 @@ Mac에서 `⌘⌥`는 브라우저 개발자 도구와 macOS(다른 앱 가리�
 ### Collaboration & Editing
 - **Real-Time Sync**: Conflict-free concurrent typing powered by Yjs CRDT with remote cursors and selection highlights.
 - **Smooth Typing & Carets**: Carets glide smoothly with a 100 ms decelerating curve; remote edits do not disrupt local cursor blinking or name tags.
-- **Completion & Suggestions**: Code completion via `Tab` or typing pause; automatic language suggestion badges appear in the status bar while typing plain text.
+- **Completion & Suggestions**: Code completion after a short typing pause, accepted with `Tab` or `Enter`; automatic language suggestion badges appear in the status bar while typing plain text.
 - **Multiple Files**: Support for up to 100 files and folder paths. Automatic language detection by file extension.
 - **Comments**: Anchor comments to lines or selections (`⌃⌘M` on a Mac, `Ctrl+Alt+M` elsewhere). Comments track document edits using relative positions.
 - **History & Restore**: Owners can inspect timeline snapshots, play back edits at 1x/2x/4x, compare a version with the current text, and restore it.
