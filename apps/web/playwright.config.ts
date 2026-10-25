@@ -11,7 +11,8 @@ import {
 
 /**
  * Chromium runs every spec. Firefox and WebKit run the cross-OS spec (shortcuts, labels, IME,
- * OS-dependent features), so a Mac or Linux visitor's engine is covered too, and the device spec.
+ * OS-dependent features), so a Mac or Linux visitor's engine is covered too, the device spec, and
+ * the motion and guide pages specs.
  * They need `pnpm exec playwright install firefox webkit` once; `E2E_BROWSERS=chromium` skips them.
  */
 const ENGINES = (process.env.E2E_BROWSERS ?? "chromium,firefox,webkit").split(",");
@@ -19,6 +20,10 @@ const CROSS_OS = /o-cross-os\.spec\.ts$/;
 // Offline copies on Firefox and WebKit too: their IndexedDB differs (databases(), deletion while
 // open, Safari's storage lifecycle).
 const DEVICE = /r-edit-key-and-device\.spec\.ts$/;
+// The caret, remote cursors and projector fullscreen are drawn and timed by each engine.
+const MOTION = /(?:p-smooth-typing|s-projector|s-remote-cursors)\.spec\.ts$/;
+// The marketing pages: their layout and menu differ per engine.
+const GUIDE = /(?:l-intro-header|m-intro-detail|u-guide-pages)\.spec\.ts$/;
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
 const shared = { MONGO_URL, VALKEY_URL, COLLAB_SECRET: secret, NODE_ENV: "development" };
@@ -45,7 +50,7 @@ export default defineConfig({
           {
             name: "firefox",
             use: { browserName: "firefox" as const },
-            testMatch: [CROSS_OS, DEVICE],
+            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE],
           },
         ]
       : []),
@@ -54,7 +59,7 @@ export default defineConfig({
           {
             name: "webkit",
             use: { browserName: "webkit" as const },
-            testMatch: [CROSS_OS, DEVICE],
+            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE],
           },
         ]
       : []),
