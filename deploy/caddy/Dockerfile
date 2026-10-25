@@ -21,7 +21,8 @@ RUN version="$(node -p 'require("./package.json").version')" \
 RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store \
     pnpm install --offline --frozen-lockfile --filter @codesh/web... \
     && pnpm --filter @codesh/web build \
-    && node deploy/caddy/csp.mjs
+    && node deploy/caddy/csp.mjs \
+    && find apps/web/dist -type f -name '*.map' -delete
 
 FROM ${CADDY_IMAGE} AS runtime
 ARG CODESH_VERSION
@@ -31,8 +32,8 @@ LABEL org.opencontainers.image.title="codesh-web" \
 COPY --from=web /repo/Caddyfile.production /etc/caddy/Caddyfile
 COPY --from=web /repo/apps/web/dist /srv
 COPY --from=web /repo/LICENSE /repo/THIRD_PARTY_NOTICES.md /usr/share/doc/codesh/
-RUN find /srv -type f -name '*.map' -delete \
-    && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+# Source maps are published with the release, never served (removed in the build stage above).
+RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 EXPOSE 80 443
 # The admin endpoint listens on localhost only; a 200 means the config is loaded.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
