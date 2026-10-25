@@ -151,6 +151,38 @@ async function closeSettings(page: Page) {
   }).toPass();
 }
 
+test("navigation after load does not race legacy database detection", async ({ page }) => {
+  await page.addInitScript(() => {
+    const databases = indexedDB.databases.bind(indexedDB);
+    indexedDB.databases = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return databases();
+    };
+  });
+  // Keep the initial lazy route in flight: Firefox cancels it when the next navigation starts.
+  const initialRoute = "**/src/routes/index.tsx?tsr-split=component";
+  await page.route(initialRoute, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
+  let requested = false;
+  let requestedBeforeLoad = false;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/src/routes/index.tsx?tsr-split=component")) requested = true;
+  });
+  page.once("load", () => {
+    requestedBeforeLoad = requested;
+  });
+  await page.goto("/");
+  // A top-level await in main.tsx lets load fire before the router requests its first chunk.
+  expect(requestedBeforeLoad).toBe(true);
+  await page.goto("/me");
+  await expect(page).toHaveURL(/\/me$/);
+  await expect(page.locator("#root")).not.toBeEmpty();
+  await page.goBack();
+  await expect(page.getByTestId("new-share")).toBeVisible();
+});
+
 test("an edit link carries the key in the fragment, never in the query", async ({ browser }) => {
   const owner = await newUser(browser, "Owner");
   try {
