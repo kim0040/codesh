@@ -8,7 +8,9 @@ export type Role = (typeof ROLES)[number];
 export const ACCESS_LEVELS = ["edit", "view"] as const;
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
 
-export const SESSION_COOKIE = "codesh_sid";
+export const SESSION_COOKIE = "gachipad_sid";
+// legacy codesh name (1.0.x); remove in 2.0
+export const LEGACY_SESSION_COOKIE = "codesh_sid";
 
 // §3 join codes
 export const JOIN_CODE_LENGTH = 6;

@@ -7,7 +7,7 @@ const envSchema = z.object({
   NODE_ENV: z.string().default("development"),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(0).max(65535).default(3002),
-  MONGO_URL: z.string().default("mongodb://localhost:27017/codesh"),
+  MONGO_URL: z.string().default("mongodb://localhost:27017/gachipad"),
   VALKEY_URL: z.string().default("redis://localhost:6379"),
   COLLAB_SECRET: z.string().default(DEV_SECRET),
   /** Must stay the same across restarts of one instance and differ between instances. */

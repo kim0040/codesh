@@ -68,12 +68,13 @@ export default defineConfig({
           /^\/licenses\//,
         ],
         cleanupOutdatedCaches: true,
+        importScripts: ["legacy-sw.js"],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.endsWith(".woff2"),
             handler: "CacheFirst",
             options: {
-              cacheName: "codesh-fonts",
+              cacheName: "gachipad-fonts",
               expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 365 },
             },
           },

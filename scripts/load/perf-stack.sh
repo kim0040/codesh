@@ -41,7 +41,7 @@ case "${1:-}" in
       (umask 077 && cp "$ROOT/deploy/.env.example" "$ENV_FILE")
       "$ROOT/deploy/generate-secrets.sh" "$ENV_FILE" >/dev/null
     fi
-    set_env CODESH_VERSION "$PROJECT"
+    set_env GACHIPAD_VERSION "$PROJECT"
     set_env HTTP_PORT "$HTTP_PORT"
     set_env HTTPS_PORT "$((HTTP_PORT + 1))"
     set_env NETWORK_SUBNET "$SUBNET"

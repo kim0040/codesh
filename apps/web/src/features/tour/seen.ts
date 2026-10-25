@@ -3,7 +3,7 @@ import { createStore, useStore } from "../../lib/store";
 /** Raise it when the tour changes enough that people who saw the old one should see it again. */
 export const TOUR_VERSION = 1;
 /** localStorage key holding the highest tour version this browser has seen. */
-export const TOUR_STORAGE_KEY = "codesh.tour";
+export const TOUR_STORAGE_KEY = "gachipad.tour";
 
 /** Seen in this page's lifetime; the only memory there is when storage is blocked. */
 let seenHere = 0;

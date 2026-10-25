@@ -173,7 +173,7 @@ async function person(
   const context = await browser.newContext({
     baseURL: BASE_URL,
     locale: "en-US",
-    extraHTTPHeaders: { "X-Codesh": "1" },
+    extraHTTPHeaders: { "X-Gachipad": "1" },
     colorScheme: theme,
     // Remote name flags fade out after three seconds; with reduced motion they stay visible.
     reducedMotion: "reduce",
@@ -184,7 +184,7 @@ async function person(
   });
   await context.addInitScript((value) => {
     try {
-      localStorage.setItem("codesh.theme", value);
+      localStorage.setItem("gachipad.theme", value);
     } catch {
       // Storage may be blocked; the screenshot then follows the colour scheme of the context.
     }
@@ -344,7 +344,7 @@ test.describe("README screenshots", () => {
         for (const input of root.querySelectorAll("input")) {
           input.value = input.value.replace(location.host, host);
         }
-      }, "codesh.local");
+      }, "gachipad.local");
       await page.waitForTimeout(500);
       await shot(page, "share-dialog");
     } finally {
@@ -487,15 +487,15 @@ test.describe("README screenshots", () => {
       const current: AdminUpdateResponse = {
         current: "1.0.0",
         latest: "1.0.0",
-        url: "https://github.com/kim0040/codesh/releases/tag/v1.0.0",
+        url: "https://github.com/kim0040/gachipad/releases/tag/v1.0.0",
         publishedAt: new Date(Date.now() - 6 * 86_400_000).toISOString(),
         notes: "First public release.",
         checkedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
         status: "ok",
         updateAvailable: false,
-        repo: "kim0040/codesh",
+        repo: "kim0040/gachipad",
         channel: "stable",
-        releasesUrl: "https://github.com/kim0040/codesh/releases",
+        releasesUrl: "https://github.com/kim0040/gachipad/releases",
         updater: {
           auto: { enabled: true, at: "04:00", policy: "patch" },
           lastRun: null,

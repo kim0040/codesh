@@ -15,7 +15,7 @@ describe("serviceOf", () => {
   it("names the compose service of a container in the project", () => {
     expect(serviceOf("gachipad-perf-collab-1", "gachipad-perf")).toBe("collab");
     expect(serviceOf("gachipad-perf-mongo-users-1", "gachipad-perf")).toBe("mongo-users");
-    expect(serviceOf("codesh-preview-collab-1", "gachipad-perf")).toBeNull();
+    expect(serviceOf("gachipad-preview-collab-1", "gachipad-perf")).toBeNull();
   });
 });
 

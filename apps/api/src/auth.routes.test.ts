@@ -176,7 +176,7 @@ describe.skipIf(!integration)("optional login", () => {
 
       const logout = await client.post("/api/auth/logout");
       expect(logout.json()).toEqual({ ok: true });
-      expect(logout.cookies.map((c) => c.name)).toContain("codesh_sid");
+      expect(logout.cookies.map((c) => c.name)).toContain("gachipad_sid");
       const next = await client.clientId();
       expect(next).not.toBe(loggedIn);
       expect(next).not.toBe(first);

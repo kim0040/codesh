@@ -1,13 +1,13 @@
 # gachipad production stack (docs/ARCHITECTURE.md §1).
 #
 #   cp .env.example .env && ./generate-secrets.sh     # once
-#   docker compose pull && docker compose up -d       # released images of CODESH_VERSION from CODESH_REGISTRY
+#   docker compose pull && docker compose up -d       # released images of GACHIPAD_VERSION from GACHIPAD_REGISTRY
 #   docker compose build && docker compose up -d      # or build them from this source tree instead
 #   docker compose up -d --scale collab=3             # more collab instances (or COLLAB_REPLICAS in .env)
 #
 # Offline bundles carry the same images (docker load) and this file without the build sections.
 # Only Caddy publishes ports. MongoDB, Valkey, api and collab are reachable on the internal network.
-name: codesh
+name: ${GACHIPAD_PROJECT:-gachipad}
 
 x-logging: &logging
   driver: json-file
@@ -24,8 +24,8 @@ x-hardening: &hardening
 
 x-app-env: &app-env
   NODE_ENV: production
-  # readWrite on database codesh only (mongo-users); the root user stays inside the mongo containers.
-  MONGO_URL: mongodb://codesh_app:${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}@mongo:27017/codesh?authSource=codesh
+  # readWrite on database gachipad only (mongo-users); the root user stays inside the mongo containers.
+  MONGO_URL: mongodb://${MONGO_APP_USER:-gachipad_app}:${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}@mongo:27017/${MONGO_DATABASE:-gachipad}?authSource=${MONGO_DATABASE:-gachipad}
   VALKEY_URL: redis://:${VALKEY_PASSWORD:?run ./generate-secrets.sh}@valkey:6379
   COLLAB_SECRET: ${COLLAB_SECRET:?run ./generate-secrets.sh}
 
@@ -35,10 +35,11 @@ services:
     build:
       context: ..
       dockerfile: deploy/caddy/Dockerfile
-    image: ${CODESH_REGISTRY:-ghcr.io/kim0040}/codesh-web:${CODESH_VERSION:?set CODESH_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-web:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
     cap_add: [NET_BIND_SERVICE]
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      SITE_ALIASES: ${SITE_ALIASES:-}
       METRICS_SUBNET: ${NETWORK_SUBNET:-172.29.88.0/24}
       TRUSTED_PROXIES: ${CADDY_TRUSTED_PROXIES:-127.0.0.1/32}
     ports:
@@ -59,7 +60,7 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    image: ${CODESH_REGISTRY:-ghcr.io/kim0040}/codesh-api:${CODESH_VERSION:?set CODESH_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-api:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
     read_only: true
     tmpfs: [/tmp]
     environment:
@@ -89,16 +90,16 @@ services:
       BROADCAST_FANOUT_MAX: ${BROADCAST_FANOUT_MAX:-500}
       # The update check, the only outbound request (docs/OPERATIONS.md "업데이트"): on|off.
       UPDATE_CHECK: ${UPDATE_CHECK:-on}
-      UPDATE_REPO: ${UPDATE_REPO:-kim0040/codesh}
+      UPDATE_REPO: ${UPDATE_REPO:-kim0040/gachipad}
       UPDATE_CHANNEL: ${UPDATE_CHANNEL:-stable}
-      UPDATE_STATUS_FILE: /codesh-state/update.json
+      UPDATE_STATUS_FILE: /gachipad-state/update.json
       # Node's fetch uses HTTPS_PROXY only with NODE_USE_ENV_PROXY=1, set here when a proxy is.
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-}
       NODE_USE_ENV_PROXY: ${HTTPS_PROXY:+1}
     volumes:
       # Status of deploy/update.sh (last run, auto-update), shown in the admin console.
-      - ./state:/codesh-state:ro
+      - ./state:/gachipad-state:ro
     expose: ["3001"]
     stop_grace_period: 20s
     depends_on:
@@ -114,7 +115,7 @@ services:
     build:
       context: ..
       dockerfile: apps/collab/Dockerfile
-    image: ${CODESH_REGISTRY:-ghcr.io/kim0040}/codesh-collab:${CODESH_VERSION:?set CODESH_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-collab:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
     read_only: true
     tmpfs: [/tmp]
     environment:
@@ -142,7 +143,8 @@ services:
     image: mongo:8.0.34
     command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-2}"]
     environment:
-      MONGO_INITDB_ROOT_USERNAME: codesh
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-gachipad}
+      MONGO_DATABASE: ${MONGO_DATABASE:-gachipad}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?run ./generate-secrets.sh}
     ulimits:
       nofile:
@@ -170,6 +172,9 @@ services:
     image: mongo:8.0.34
     environment:
       HOME: /tmp
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER:-gachipad}
+      MONGO_DATABASE: ${MONGO_DATABASE:-gachipad}
+      MONGO_APP_USER: ${MONGO_APP_USER:-gachipad_app}
       MONGO_ROOT_PASSWORD: ${MONGO_PASSWORD:?run ./generate-secrets.sh}
       MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}
     # Passwords come from the environment, never from command arguments.
@@ -180,12 +185,12 @@ services:
       - mongo
       - --eval
       - >-
-        db.getSiblingDB("admin").auth("codesh", process.env.MONGO_ROOT_PASSWORD);
-        const app = db.getSiblingDB("codesh");
-        const spec = { pwd: process.env.MONGO_APP_PASSWORD, roles: [{ role: "readWrite", db: "codesh" }] };
-        if (app.getUser("codesh_app")) app.updateUser("codesh_app", spec);
-        else app.createUser({ user: "codesh_app", ...spec });
-        print("mongo-users: codesh_app has readWrite on codesh");
+        db.getSiblingDB("admin").auth(process.env.MONGO_ROOT_USER, process.env.MONGO_ROOT_PASSWORD);
+        const app = db.getSiblingDB(process.env.MONGO_DATABASE);
+        const spec = { pwd: process.env.MONGO_APP_PASSWORD, roles: [{ role: "readWrite", db: process.env.MONGO_DATABASE }] };
+        if (app.getUser(process.env.MONGO_APP_USER)) app.updateUser(process.env.MONGO_APP_USER, spec);
+        else app.createUser({ user: process.env.MONGO_APP_USER, ...spec });
+        print("mongo-users: application user ready");
     depends_on:
       mongo:
         condition: service_healthy
@@ -216,21 +221,22 @@ services:
       timeout: 3s
       retries: 12
 
-  # Optional: advertises codesh.local on the LAN (COMPOSE_PROFILES=mdns). Linux hosts only (host network).
+  # Optional: advertises gachipad.local on the LAN (COMPOSE_PROFILES=mdns). Linux hosts only (host network).
   mdns:
     profiles: [mdns]
     restart: unless-stopped
     build:
       context: ..
       dockerfile: deploy/mdns/Dockerfile
-    image: ${CODESH_REGISTRY:-ghcr.io/kim0040}/codesh-mdns:${CODESH_VERSION:?set CODESH_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-mdns:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
     network_mode: host
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     logging: *logging
     environment:
-      MDNS_HOSTNAME: ${MDNS_HOSTNAME:-codesh.local}
+      MDNS_HOSTNAME: ${MDNS_HOSTNAME:-gachipad.local}
+      MDNS_ALIASES: ${MDNS_ALIASES:-}
       MDNS_PORT: ${HTTP_PORT:-80}
       MDNS_IP: ${MDNS_IP:-}
 

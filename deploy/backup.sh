@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dumps the codesh database (mongodump inside the mongo container) to <dir>/codesh-<time>.archive.gz.
+# Dumps the gachipad database (mongodump inside the mongo container) to <dir>/gachipad-<time>.archive.gz.
 #
 #   ./backup.sh [dir]        default dir: ./backups
 #

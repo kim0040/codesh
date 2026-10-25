@@ -7,7 +7,7 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "CODESH_REQUIRE_SERVICES=1 vitest run"
+    "test": "GACHIPAD_REQUIRE_SERVICES=1 vitest run"
   },
   "dependencies": {
     "@gachipad/shared": "workspace:*",

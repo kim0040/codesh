@@ -1,5 +1,6 @@
 import { isThemeId, type ThemeId } from "@gachipad/highlight";
 import { useSyncExternalStore } from "react";
+import { LEGACY_STORAGE_PREFIX, mirrorLegacy, readMigratedKey } from "./storage-migration";
 
 /** Editor preferences, kept on this device (localStorage) and applied live. */
 
@@ -50,7 +51,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
   offlineCopy: "undecided",
 };
 
-const STORAGE_KEY = "codesh.prefs";
+const STORAGE_KEY = "gachipad.prefs";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -91,7 +92,7 @@ export function sanitizePrefs(input: unknown): EditorPrefs {
 
 function load(): EditorPrefs {
   try {
-    const text = localStorage.getItem(STORAGE_KEY);
+    const text = readMigratedKey(STORAGE_KEY);
     return sanitizePrefs(text ? JSON.parse(text) : {});
   } catch {
     return DEFAULT_PREFS;
@@ -116,6 +117,7 @@ export function setPrefs(patch: Partial<EditorPrefs>): boolean {
   let stored = true;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+    mirrorLegacy(STORAGE_KEY, JSON.stringify(current));
   } catch {
     stored = false;
   }
@@ -131,7 +133,7 @@ export function resetPrefs(): void {
 export function subscribePrefs(listener: () => void): () => void {
   listeners.add(listener);
   const onStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY) {
+    if (event.key === STORAGE_KEY || event.key === `${LEGACY_STORAGE_PREFIX}prefs`) {
       current = load();
       listener();
     }

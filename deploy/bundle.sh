@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Packs the images with the compose file and the admin scripts into one tar.gz for a host without
 # internet (install with install.sh inside the archive), and the same files without
-# the images into codesh-deploy-<version>.tar.gz, which update.sh fetches on hosts that pull images.
+# the images into gachipad-deploy-<version>.tar.gz, which update.sh fetches on hosts that pull images.
 #
 #   deploy/bundle.sh [version]                     builds the images from this tree
 #   BUNDLE_SOURCE=registry deploy/bundle.sh 1.2.3  pulls the released images instead (release.yml)
 #   BUNDLE_SUFFIX=-linux-arm64                     is appended to the offline bundle's name
-#   CODESH_REGISTRY=ghcr.io/<owner>                image names (default ghcr.io/kim0040)
+#   GACHIPAD_REGISTRY=ghcr.io/<owner>                image names (default ghcr.io/kim0040)
 #
-#   -> deploy/dist/codesh-<version><suffix>.tar.gz and codesh-deploy-<version>.tar.gz (+ .sha256)
+#   -> deploy/dist/gachipad-<version><suffix>.tar.gz and gachipad-deploy-<version>.tar.gz (+ .sha256)
 #
 # Runs where docker and internet access are available.
 set -euo pipefail
@@ -20,9 +20,9 @@ VERSION="${1:-$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' ../package.json)}"
 VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '-')"
 [ -n "$VERSION" ] || die "no version given and none in package.json"
 SOURCE="${BUNDLE_SOURCE:-build}"
-REGISTRY="${CODESH_REGISTRY:-ghcr.io/kim0040}"
-NAME="codesh-$VERSION${BUNDLE_SUFFIX:-}"
-DEPLOY_NAME="codesh-deploy-$VERSION"
+REGISTRY="${GACHIPAD_REGISTRY:-ghcr.io/kim0040}"
+NAME="gachipad-$VERSION${BUNDLE_SUFFIX:-}"
+DEPLOY_NAME="gachipad-deploy-$VERSION"
 STAGE="dist/$NAME"
 # GitHub refuses release assets of 2 GiB or more.
 MAX_BYTES=$((2 * 1024 * 1024 * 1024 - 1))
@@ -36,11 +36,11 @@ COLLAB_SECRET=build
 MONGO_PASSWORD=build
 MONGO_APP_PASSWORD=build
 VALKEY_PASSWORD=build
-CODESH_VERSION=$VERSION
-CODESH_REGISTRY=$REGISTRY
+GACHIPAD_VERSION=$VERSION
+GACHIPAD_REGISTRY=$REGISTRY
 ENV
 compose() { docker compose --env-file "$BUILD_ENV" --profile mdns -f docker-compose.yml "$@"; }
-CODESH_SERVICES="api collab caddy mdns"
+GACHIPAD_SERVICES="api collab caddy mdns"
 
 case "$SOURCE" in
   build)
@@ -51,7 +51,7 @@ case "$SOURCE" in
   registry)
     echo "bundle: pulling gachipad $VERSION from $REGISTRY"
     # shellcheck disable=SC2086
-    compose pull $CODESH_SERVICES mongo valkey
+    compose pull $GACHIPAD_SERVICES mongo valkey
     ;;
   *) die "BUNDLE_SOURCE must be build or registry" ;;
 esac
@@ -71,7 +71,7 @@ awk '
   skip && /^      / { next }
   { skip = 0; print }
 ' docker-compose.yml >"$STAGE/docker-compose.yml"
-sed -e "s/^CODESH_VERSION=.*/CODESH_VERSION=$VERSION/" -e "s|^CODESH_REGISTRY=.*|CODESH_REGISTRY=$REGISTRY|" \
+sed -e "s/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=$VERSION/" -e "s|^GACHIPAD_REGISTRY=.*|GACHIPAD_REGISTRY=$REGISTRY|" \
   .env.example >"$STAGE/.env.example"
 cp lib.sh generate-secrets.sh install.sh upgrade.sh update.sh backup.sh restore.sh "$STAGE/"
 touch "$STAGE/state/.gitkeep"
@@ -85,7 +85,7 @@ printf '%s\n' "$VERSION" >"$STAGE/VERSION"
 # mirror that keeps them. One line per image: <name> sha256:<digest>.
 if [ "$SOURCE" = registry ]; then
   # The names of docker-compose.yml (`config --images <service>` also lists the dependencies).
-  for name in codesh-api codesh-collab codesh-web codesh-mdns; do
+  for name in gachipad-api gachipad-collab gachipad-web gachipad-mdns; do
     ref="$REGISTRY/$name:$VERSION"
     digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" |
       grep -m 1 "^$REGISTRY/$name@sha256:")" || die "no registry digest for $ref"
@@ -96,6 +96,10 @@ fi
 # Without images first: the online update archive.
 sums "$STAGE"
 archive "$DEPLOY_NAME"
+# legacy codesh name (1.0.x); remove in 2.0
+# The already-installed 1.0.1 updater requests this exact filename, then reads the NEW compose.
+cp "dist/$DEPLOY_NAME.tar.gz" "dist/codesh-deploy-$VERSION.tar.gz"
+(cd dist && sha256sum "codesh-deploy-$VERSION.tar.gz" >"codesh-deploy-$VERSION.tar.gz.sha256")
 
 IMAGES="$(compose config --images | sort -u)"
 echo "bundle: saving $(echo "$IMAGES" | tr '\n' ' ')"

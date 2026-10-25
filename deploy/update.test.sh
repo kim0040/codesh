@@ -22,11 +22,11 @@ fail() {
   exit 1
 }
 
-mkdir -p "$F/bin" "$F/srv/api/repos/kim0040/codesh" "$F/install" "$F/systemd"
+mkdir -p "$F/bin" "$F/srv/api/repos/kim0040/gachipad" "$F/install" "$F/systemd"
 port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 base="http://127.0.0.1:$port"
 
-# --- fake docker: logs every call; compose reads CODESH_VERSION from ./.env like the real one ----
+# --- fake docker: logs every call; compose reads GACHIPAD_VERSION from ./.env like the real one ----
 cat >"$F/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -43,8 +43,8 @@ if [ "$1" = compose ]; then
       *) shift ;;
     esac
   done
-  version="$(sed -n 's/^CODESH_VERSION=//p' "$envfile" | tail -1)"
-  registry="$(sed -n 's/^CODESH_REGISTRY=//p' "$envfile" | tail -1)"
+  version="$(sed -n 's/^GACHIPAD_VERSION=//p' "$envfile" | tail -1)"
+  registry="$(sed -n 's/^GACHIPAD_REGISTRY=//p' "$envfile" | tail -1)"
   registry="${registry:-ghcr.io/kim0040}"
   case "$1" in
     version) exit 0 ;;
@@ -52,7 +52,7 @@ if [ "$1" = compose ]; then
       if [[ "$*" == *--format* ]]; then
         mongo="$(sed -n 's/^    image: \(mongo:[^ ]*\).*/\1/p' "$compose_file" | head -1)"
         printf '{"services":{"mongo":{"image":"%s"}}}\n' "$mongo"
-      else for n in web api collab; do printf '%s/codesh-%s:%s\n' "$registry" "$n" "$version"; done; fi ;;
+      else for n in web api collab; do printf '%s/gachipad-%s:%s\n' "$registry" "$n" "$version"; done; fi ;;
     run)
       if [ -n "${FAKE_NO_API_IMAGE:-}" ]; then echo 'installed API image is missing' >&2; exit 125; fi
       while [ "$1" != -e ]; do shift; done
@@ -87,7 +87,7 @@ if [ "$1" = compose ]; then
           printf 'incompatible-schema\n' >"$FAKE_DB"
           [ -z "${FAKE_STATUS_FAIL:-}" ] || mkdir -p state/update.json.tmp
           if [ -n "${FAKE_CORRUPT_BACKUP:-}" ]; then
-            printf corrupt >"$(ls -t backups/codesh-*.archive.gz | head -n 1)"
+            printf corrupt >"$(ls -t backups/gachipad-*.archive.gz | head -n 1)"
           fi
           echo "container api is unhealthy" >&2; exit 1
         fi
@@ -138,7 +138,7 @@ digest() { printf '%s' "$1" | sha256sum | cut -c1-64; }
 # --- releases: deploy archives laid out as release.yml publishes them ----------------------------
 # release <version> [bad-checksum|bad-digest]
 release() {
-  local v="$1" dir="$F/srv/dl/kim0040/codesh/releases/download/v$1" stage="$F/stage/codesh-$1"
+  local v="$1" dir="$F/srv/dl/kim0040/gachipad/releases/download/v$1" stage="$F/stage/gachipad-$1"
   mkdir -p "$dir" "$stage/docs" "$stage/tls" "$stage/state"
   cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml} "$stage/"
   cp "$root/deploy/README.md" "$stage/README.md"
@@ -146,17 +146,17 @@ release() {
   printf '# tls\n' >"$stage/tls/tls.example"
   [ "${2:-}" != mongo-change ] || sed -i 's/mongo:8.0.34/mongo:9.0.0/g' "$stage/docker-compose.yml"
   printf '# release %s\n' "$v" >>"$stage/update.sh"
-  sed "s/^CODESH_VERSION=.*/CODESH_VERSION=$v/" "$root/deploy/.env.example" >"$stage/.env.example"
+  sed "s/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=$v/" "$root/deploy/.env.example" >"$stage/.env.example"
   printf 'NEW_IN_%s=yes\n' "${v//./_}" >>"$stage/.env.example"
   printf '%s\n' "$v" >"$stage/VERSION"
   for n in web api collab mdns; do
-    if [ "${2:-}" = bad-digest ]; then printf 'codesh-%s sha256:%s\n' "$n" "$(digest "other-$n")"
-    else printf 'codesh-%s sha256:%s\n' "$n" "$(digest "codesh-$n")"; fi
+    if [ "${2:-}" = bad-digest ]; then printf 'gachipad-%s sha256:%s\n' "$n" "$(digest "other-$n")"
+    else printf 'gachipad-%s sha256:%s\n' "$n" "$(digest "gachipad-$n")"; fi
   done >"$stage/IMAGES"
   # shellcheck disable=SC2094 # manifest is excluded from find
   (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
-  tar czf "$dir/codesh-deploy-$v.tar.gz" -C "$F/stage" "codesh-$v"
-  (cd "$dir" && sha256sum "codesh-deploy-$v.tar.gz" >SHA256SUMS)
+  tar czf "$dir/gachipad-deploy-$v.tar.gz" -C "$F/stage" "gachipad-$v"
+  (cd "$dir" && sha256sum "gachipad-deploy-$v.tar.gz" >SHA256SUMS)
   if [ "${2:-}" = bad-checksum ]; then
     sed -i "s/^[0-9a-f]\{64\}/$(digest tampered)/" "$dir/SHA256SUMS"
   fi
@@ -176,12 +176,12 @@ releases_json() {
   for v in "$@"; do
     [ "$first" = 1 ] || printf ','
     first=0
-    printf '{"tag_name":"v%s","name":"codesh %s","draft":false,"prerelease":%s,"body":"has tag_name inside"}' \
+    printf '{"tag_name":"v%s","name":"gachipad %s","draft":false,"prerelease":%s,"body":"has tag_name inside"}' \
       "$v" "$v" "$([[ "$v" == *-* ]] && echo true || echo false)"
   done
   printf ']'
 }
-releases_json 2.0.0 1.2.0-rc.1 1.1.0 1.0.5 1.0.4 1.0.3 1.0.2 1.0.1 1.0.0 >"$F/srv/api/repos/kim0040/codesh/releases"
+releases_json 2.0.0 1.2.0-rc.1 1.1.0 1.0.5 1.0.4 1.0.3 1.0.2 1.0.1 1.0.0 >"$F/srv/api/repos/kim0040/gachipad/releases"
 touch "$F/srv/healthz" "$F/srv/readyz"
 python3 -m http.server --bind 127.0.0.1 --directory "$F/srv" "$port" >/dev/null 2>&1 &
 server=$!
@@ -190,7 +190,7 @@ for _ in $(seq 50); do curl -fs "$base/healthz" >/dev/null 2>&1 && break; sleep 
 # --- an installation of 1.0.0 --------------------------------------------------------------------
 I="$F/install"
 cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml,.env.example,README.md} "$I/"
-sed -e 's/^CODESH_VERSION=.*/CODESH_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" "$I/.env.example" >"$I/.env"
+sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" "$I/.env.example" >"$I/.env"
 (cd "$I" && ./generate-secrets.sh .env >/dev/null)
 envv() { sed -n "s/^$1=//p" "$I/.env" | tail -n 1; }
 status() { cat "$I/state/update.json"; }
@@ -203,7 +203,7 @@ grep -q 'installed 1.0.0, newest 2.0.0' "$F/run.log" || fail "--check did not na
 grep -q 'update with ./update.sh (to 1.1.0) or ./update.sh --allow-major (to 2.0.0)' "$F/run.log" || fail "--check advice"
 grep -q 9.9.9 "$F/run.log" && fail "read a tag from inside a release body"
 [ -f "$I/state/update.json" ] && fail "--check wrote a status"
-[ "$(envv CODESH_VERSION)" = 1.0.0 ] || fail "version changed"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.0 ] || fail "version changed"
 ok "--check: 1.1.0 within 1.x, 2.0.0 needs --allow-major; pre-release 1.2.0-rc.1 not offered"
 
 step "a major version is refused"
@@ -216,22 +216,22 @@ ok "2.0.0 refused without --allow-major, recorded"
 step "checksum mismatch: refused before backup or pull"
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.2 --yes && fail "accepted a tampered archive"
-grep -q 'checksum mismatch: codesh-deploy-1.0.2.tar.gz' "$F/run.log" || fail "wrong refusal"
+grep -q 'checksum mismatch: gachipad-deploy-1.0.2.tar.gz' "$F/run.log" || fail "wrong refusal"
 calls | grep -q 'exec -T mongo' && fail "backup ran"
 calls | grep -q 'pull$' && fail "pulled"
-[ "$(envv CODESH_VERSION)" = 1.0.0 ] || fail "version changed"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.0 ] || fail "version changed"
 status | grep -q '"result":"failed","from":"1.0.0","to":"1.0.2"' || fail "failure not recorded"
 ok "1.0.2 with a wrong checksum refused; no backup, no pull, .env unchanged"
 
 step "happy path 1.0.0 -> 1.0.1"
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.1 --yes || fail "update failed"
-[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "CODESH_VERSION not 1.0.1"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "GACHIPAD_VERSION not 1.0.1"
 [ "$(envv NEW_IN_1_0_1)" = yes ] || fail "new setting not added"
 [ "$(cat "$I/VERSION")" = 1.0.1 ] || fail "files not installed"
 tail -n 1 "$I/update.sh" | grep -q '^# release 1.0.1' || fail "update.sh not replaced"
 grep -q 'exec -T mongo' "$DOCKER_CALLS" || fail "no backup"
-ls "$I"/backups/codesh-*.archive.gz >/dev/null || fail "no backup file"
+ls "$I"/backups/gachipad-*.archive.gz >/dev/null || fail "no backup file"
 grep -q 'pull$' "$DOCKER_CALLS" || fail "no pull"
 grep -q '^compose up -d --wait' "$DOCKER_CALLS" || fail "no up"
 status | grep -q '"result":"updated","from":"1.0.0","to":"1.0.1"' || fail "status not updated"
@@ -246,7 +246,7 @@ ok "1.0.1 installed: files, setting, backup, pull, up, status, log"
 step "a downgrade is refused"
 run ./update.sh --version 1.0.0 --yes && fail "downgrade accepted"
 grep -q 'older than 1.0.1' "$F/run.log" || fail "downgrade message"
-[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "version changed"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "version changed"
 ok "1.0.0 refused on 1.0.1"
 
 step "pulled images with other digests: nothing restarts, files go back"
@@ -254,7 +254,7 @@ step "pulled images with other digests: nothing restarts, files go back"
 run ./update.sh --version 1.0.3 --yes && fail "accepted wrong image digests"
 grep -q 'is not the released image' "$F/run.log" || fail "digest message"
 grep -q '^compose up' "$DOCKER_CALLS" && fail "restarted with unverified images"
-[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "version not put back"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "version not put back"
 [ "$(cat "$I/VERSION")" = 1.0.1 ] || fail "files not put back"
 ok "1.0.3 refused after pull; 1.0.1 files and version back, no restart"
 
@@ -262,7 +262,7 @@ step "health check fails: rollback to the previous version and the backup"
 : >"$DOCKER_CALLS"
 if FAKE_UNHEALTHY=1.0.4 run ./update.sh --version 1.0.4 --yes; then fail "unhealthy update reported success"; fi
 grep -q 'rolling back to 1.0.1' "$F/run.log" || fail "no rollback"
-[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "version not rolled back"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "version not rolled back"
 [ "$(cat "$I/VERSION")" = 1.0.1 ] || fail "files not rolled back"
 tail -n 1 "$I/update.sh" | grep -q '^# release 1.0.1' || fail "update.sh not rolled back"
 grep -q '^restored' "$DOCKER_CALLS" || fail "backup not restored"
@@ -270,7 +270,7 @@ grep -q '^restored' "$DOCKER_CALLS" || fail "backup not restored"
 status | grep -q '"result":"rolled-back","from":"1.0.1","to":"1.0.4"' || fail "rollback not recorded"
 grep -q '^initial-data$' "$FAKE_DB" || fail "backup data lost"
 grep -q '^shutdown-flushed$' "$FAKE_DB" || fail "collab flush not in backup"
-grep -q '^CODESH_VERSION=1.0.0$' "$I"/rollback.previous.*/.env || fail "previous snapshot was discarded"
+grep -q '^GACHIPAD_VERSION=1.0.0$' "$I"/rollback.previous.*/.env || fail "previous snapshot was discarded"
 python3 - "$DOCKER_CALLS" <<'ORDER'
 import sys
 s=open(sys.argv[1]).read().splitlines()
@@ -300,7 +300,7 @@ ok "gzip and dry-run failures retain DB; restore tolerates crashed writers and t
 step "status write failure after successful recovery keeps ingress open and releases lock"
 : >"$DOCKER_CALLS"
 FAKE_STATUS_FAIL=1 FAKE_UNHEALTHY=1.0.4 run ./update.sh --version 1.0.4 --yes && fail "bad update succeeded"
-[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "status failure prevented rollback"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "status failure prevented rollback"
 [ ! -e "$I/state/install.lock.d" ] || fail "status failure leaked lock"
 [ ! -e "$I/state/transaction" ] || fail "finished recovery left marker"
 grep -q 'recovery complete but status could not be written' "$F/run.log" || fail "status warning missing"
@@ -334,41 +334,41 @@ ok "API and Collab exit 137 each refuse the backup boundary and safely recover"
 step "automatic updates: off by default, patch policy, systemd timer"
 run ./update.sh --auto && fail "--auto ran without being enabled"
 grep -q 'automatic updates are off' "$F/run.log" || fail "--auto refusal"
-CODESH_INIT=systemd CODESH_SYSTEMD_DIR="$F/systemd" run ./update.sh --enable-auto --at 03:30 --policy patch --dry-run ||
+GACHIPAD_INIT=systemd GACHIPAD_SYSTEMD_DIR="$F/systemd" run ./update.sh --enable-auto --at 03:30 --policy patch --dry-run ||
   fail "dry run failed"
 grep -q 'OnCalendar=\*-\*-\* 03:30:00' "$F/run.log" || fail "dry run timer"
-grep -q 'dry-run: systemctl enable --now codesh-update.timer' "$F/run.log" || fail "dry run enable"
-[ -e "$F/systemd/codesh-update.timer" ] && fail "dry run wrote the timer"
+grep -q 'dry-run: systemctl enable --now gachipad-update.timer' "$F/run.log" || fail "dry run enable"
+[ -e "$F/systemd/gachipad-update.timer" ] && fail "dry run wrote the timer"
 [ -e "$I/state/auto.conf" ] && fail "dry run enabled auto"
 : >"$DOCKER_CALLS"
-CODESH_INIT=systemd CODESH_SYSTEMD_DIR="$F/systemd" run ./update.sh --enable-auto --at 03:30 --policy patch || fail "enable failed"
-grep -q "ExecStart=$I/update.sh --auto" "$F/systemd/codesh-update.service" || fail "service unit"
-grep -q '^KillMode=mixed$' "$F/systemd/codesh-update.service" || fail "systemd kills recovery children"
-grep -q '^TimeoutStopSec=30min$' "$F/systemd/codesh-update.service" || fail "systemd recovery budget"
-grep -q 'OnCalendar=\*-\*-\* 03:30:00' "$F/systemd/codesh-update.timer" || fail "timer unit"
-grep -q 'systemctl enable --now codesh-update.timer' "$DOCKER_CALLS" || fail "timer not enabled"
+GACHIPAD_INIT=systemd GACHIPAD_SYSTEMD_DIR="$F/systemd" run ./update.sh --enable-auto --at 03:30 --policy patch || fail "enable failed"
+grep -q "ExecStart=$I/update.sh --auto" "$F/systemd/gachipad-update.service" || fail "service unit"
+grep -q '^KillMode=mixed$' "$F/systemd/gachipad-update.service" || fail "systemd kills recovery children"
+grep -q '^TimeoutStopSec=30min$' "$F/systemd/gachipad-update.service" || fail "systemd recovery budget"
+grep -q 'OnCalendar=\*-\*-\* 03:30:00' "$F/systemd/gachipad-update.timer" || fail "timer unit"
+grep -q 'systemctl enable --now gachipad-update.timer' "$DOCKER_CALLS" || fail "timer not enabled"
 status | grep -q '"auto":{"enabled":true,"at":"03:30","policy":"patch"}' || fail "auto not in status"
 status | grep -q '"lastRun":{"at":' || fail "enable lost the last run"
 # 1.0.5 is the newest patch of 1.0; 1.1.0 is a minor update the patch policy leaves alone.
 run ./update.sh --auto || fail "--auto failed"
-[ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "--auto did not pick 1.0.5"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.5 ] || fail "--auto did not pick 1.0.5"
 run ./update.sh --auto || fail "second --auto failed"
 grep -q 'gachipad 1.0.5 is up to date' "$F/run.log" || fail "--auto went past the patch policy"
-CODESH_INIT=systemd CODESH_SYSTEMD_DIR="$F/systemd" run ./update.sh --disable-auto || fail "disable failed"
-[ -e "$F/systemd/codesh-update.timer" ] && fail "timer left behind"
-grep -q 'systemctl disable --now codesh-update.timer' "$DOCKER_CALLS" || fail "timer not disabled"
+GACHIPAD_INIT=systemd GACHIPAD_SYSTEMD_DIR="$F/systemd" run ./update.sh --disable-auto || fail "disable failed"
+[ -e "$F/systemd/gachipad-update.timer" ] && fail "timer left behind"
+grep -q 'systemctl disable --now gachipad-update.timer' "$DOCKER_CALLS" || fail "timer not disabled"
 status | grep -q '"auto":{"enabled":false' || fail "auto still on in status"
 ok "systemd timer on and off; --auto took 1.0.5 and left 1.1.0"
 
 step "cron when there is no systemd"
 printf '0 1 * * * echo keep-me\n' >"$CRONTAB_FILE"
-CODESH_INIT=cron run ./update.sh --enable-auto --at 04:05 --policy minor || fail "cron enable failed"
+GACHIPAD_INIT=cron run ./update.sh --enable-auto --at 04:05 --policy minor || fail "cron enable failed"
 grep -q "^5 4 \* \* \* cd '$I' && ./update.sh --auto" "$CRONTAB_FILE" || fail "cron entry"
 grep -q keep-me "$CRONTAB_FILE" || fail "other cron entries lost"
-CODESH_INIT=cron run ./update.sh --enable-auto --at 04:05 --policy minor || fail "cron re-enable failed"
-[ "$(grep -c 'codesh-update' "$CRONTAB_FILE")" = 1 ] || fail "duplicate cron entries"
-CODESH_INIT=cron run ./update.sh --disable-auto || fail "cron disable failed"
-grep -q codesh-update "$CRONTAB_FILE" && fail "cron entry left behind"
+GACHIPAD_INIT=cron run ./update.sh --enable-auto --at 04:05 --policy minor || fail "cron re-enable failed"
+[ "$(grep -c 'gachipad-update' "$CRONTAB_FILE")" = 1 ] || fail "duplicate cron entries"
+GACHIPAD_INIT=cron run ./update.sh --disable-auto || fail "cron disable failed"
+grep -q gachipad-update "$CRONTAB_FILE" && fail "cron entry left behind"
 grep -q keep-me "$CRONTAB_FILE" || fail "other cron entries lost on disable"
 run ./update.sh --enable-auto --at 25:00 && fail "accepted --at 25:00"
 ok "cron entry added once, removed, other entries kept; bad time refused"
@@ -378,7 +378,7 @@ step "Mongo image changes are refused before maintenance and backup"
 run ./update.sh --version 1.0.6 --yes && fail "Mongo major change accepted"
 grep -q 'supported migration' "$F/run.log" || fail "no Mongo migration refusal"
 grep -q 'stop\|dump' "$DOCKER_CALLS" && fail "stopped or backed up before Mongo refusal"
-[ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "Mongo refusal changed files"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.5 ] || fail "Mongo refusal changed files"
 ok "Mongo image change refused before any writes or backup"
 
 step "insufficient backup space refuses maintenance"
@@ -395,8 +395,8 @@ rm "$F/bin/df"
 ok "twice the last backup size required before stopping ingress or writers"
 
 step "stable parses objects, not tag-like text, and excludes draft/flag-only prerelease"
-cp "$F/srv/api/repos/kim0040/codesh/releases" "$F/releases.original"
-cat >"$F/srv/api/repos/kim0040/codesh/releases" <<'JSON'
+cp "$F/srv/api/repos/kim0040/gachipad/releases" "$F/releases.original"
+cat >"$F/srv/api/repos/kim0040/gachipad/releases" <<'JSON'
 [{"tag_name":"v8.0.0","prerelease":true},{"tag_name":"v9.0.0","draft":true},
  {"tag_name":"v3.0.0-rc.1"},{"tag_name":"v5.0.0-01"},{"tag_name":"v06.0.0"},
  {"tag_name":"v7.0.0-rc..1"},{"tag_name":"v4.0.0","prerelease":"false"},{"tag_name":"v7.0.0","draft":null},
@@ -422,7 +422,7 @@ done
 FAKE_NO_API_IMAGE=1 run ./update.sh --check || fail "host parser requires an API image"
 BASH_ENV="$F/parser-env" HIDE_PARSERS=node,python3,jq FAKE_NO_API_IMAGE=1 run ./update.sh --check && fail "missing parser/image accepted"
 grep -q 'install host node/python3/jq or load the installed API image' "$F/run.log" || fail "missing API image advice"
-mv "$F/releases.original" "$F/srv/api/repos/kim0040/codesh/releases"
+mv "$F/releases.original" "$F/srv/api/repos/kim0040/gachipad/releases"
 ok "mixed JSON list channel rules and semver validation"
 
 step "writes during download/pull and the shutdown flush survive a failed update"
@@ -456,7 +456,7 @@ INJECT
   chmod +x "$F/bin/$([[ "$injection" = mv ]] && echo mv || echo cp)"
   : >"$DOCKER_CALLS"
   INJECT_ONCE="$F/inject-$injection" INJECT_MODE="$injection" run ./update.sh --version 1.1.0 --yes && fail "injected $injection succeeded"
-  [ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "env not restored"
+  [ "$(envv GACHIPAD_VERSION)" = 1.0.5 ] || fail "env not restored"
   [ "$(cat "$I/VERSION")" = 1.0.5 ] || fail "partial swap not restored"
   status | grep -q '"result":"rolled-back"' || fail "transaction state unclear"
   grep -q '^restored$' "$DOCKER_CALLS" && fail "restored DB before new app touched it"
@@ -489,7 +489,7 @@ with open(log, "w") as out:
     finally:
         if p.poll() is None: os.killpg(p.pid, signal.SIGKILL); p.wait()
 SIGNAL
-  [ "$(envv CODESH_VERSION)" = 1.0.5 ] || fail "$signal did not restore version"
+  [ "$(envv GACHIPAD_VERSION)" = 1.0.5 ] || fail "$signal did not restore version"
   grep -q '^initial-data$' "$FAKE_DB" || fail "$signal lost data"
   grep -q '^restored$' "$DOCKER_CALLS" || fail "$signal skipped DB recovery"
   status | grep -q '"result":"rolled-back"' || fail "$signal skipped status"
@@ -512,11 +512,11 @@ ok "unfinished marker blocks rerun and preserves previous snapshot and status"
 
 step "offline release SHA256SUMS and a shared lock for every entry point"
 # Make an offline archive whose scripts are the same transaction engine.
-offline="$F/stage/codesh-1.1.0"
+offline="$F/stage/gachipad-1.1.0"
 printf 'images\n' >"$offline/images.tar"
 # shellcheck disable=SC2094 # manifest is excluded from find
 (cd "$offline" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS)
-tar czf "$F/offline.tar.gz" -C "$F/stage" codesh-1.1.0
+tar czf "$F/offline.tar.gz" -C "$F/stage" gachipad-1.1.0
 (cd "$F" && sha256sum offline.tar.gz >SHA256SUMS)
 (cd "$I" && . ./lib.sh; install_lock; trap install_unlock EXIT; touch "$F/lock-held"; sleep 3) &
 holder=$!
@@ -558,7 +558,7 @@ rm "$I/state/install.lock.d/owner" && rmdir "$I/state/install.lock.d"
 cat >"$F/bin/cp" <<'COPY'
 #!/usr/bin/env bash
 for arg in "$@"; do
-  case "$arg" in *images.tar|*/candidate/*|*/codesh-1.1.0/.) echo 'duplicated offline image tree' >&2; exit 1 ;; esac
+  case "$arg" in *images.tar|*/candidate/*|*/gachipad-1.1.0/.) echo 'duplicated offline image tree' >&2; exit 1 ;; esac
 done
 exec /bin/cp "$@"
 COPY
@@ -573,7 +573,7 @@ load = next(i for i, x in enumerate(s) if x.startswith("load -i "))
 parsers = [i for i, x in enumerate(s) if " run --rm --no-deps --pull never" in x]
 assert parsers and all(i > load and "--env-file " in s[i] for i in parsers), s
 LOAD
-[ "$(envv CODESH_VERSION)" = 1.1.0 ] || fail "offline update version"
+[ "$(envv GACHIPAD_VERSION)" = 1.1.0 ] || fail "offline update version"
 [ ! -e "$I/state/install.lock.d" ] || fail "nested mkdir lock leaked"
 ok "flock + mkdir contention, nested offline upgrade, released SHA256SUMS (no sidecar)"
 
@@ -609,8 +609,8 @@ printf '%s\n' "$*" >>"$HEALTH_CALLS"
 printf 204
 CURL
 chmod +x "$F/bin/curl"
-HEALTH_CALLS="$F/health.args" run bash -c '. ./lib.sh; env_set SITE_ADDRESS https://codesh.corp; env_set HTTPS_PORT 8443; wait_healthy 3 /readyz' || fail "HTTPS health"
-grep -q -- '--resolve codesh.corp:8443:127.0.0.1.*--connect-timeout 3 --max-time 3.*https://codesh.corp:8443/readyz' "$F/health.args" || fail "Host/SNI or bounded timeout missing"
+HEALTH_CALLS="$F/health.args" run bash -c '. ./lib.sh; env_set SITE_ADDRESS https://gachipad.corp; env_set HTTPS_PORT 8443; wait_healthy 3 /readyz' || fail "HTTPS health"
+grep -q -- '--resolve gachipad.corp:8443:127.0.0.1.*--connect-timeout 3 --max-time 3.*https://gachipad.corp:8443/readyz' "$F/health.args" || fail "Host/SNI or bounded timeout missing"
 rm "$F/bin/curl"
 ok "stalled response bounded, 302 refused, only 2xx accepted, correct HTTPS origin/SNI"
 
@@ -620,7 +620,7 @@ for suffix in 'with space' "apostrophe'path" 'percent%path'; do
   mkdir "$special"
   cp "$I"/{update.sh,lib.sh,.env} "$special/"
   for init in systemd cron; do
-    (cd "$special" && CODESH_INIT="$init" ./update.sh --enable-auto --dry-run) >"$F/run.log" 2>&1 && fail "accepted scheduler path $suffix"
+    (cd "$special" && GACHIPAD_INIT="$init" ./update.sh --enable-auto --dry-run) >"$F/run.log" 2>&1 && fail "accepted scheduler path $suffix"
     grep -q 'automatic updates require an install path' "$F/run.log" || fail "path refusal message"
   done
 done
@@ -636,7 +636,7 @@ ok "refused with the git pull / docker compose build hint"
 step "a partly opened ingress must not trigger a DB rollback that discards accepted writes"
 : >"$DOCKER_CALLS"
 FAKE_INGRESS_FAIL=1.1.1 run ./update.sh --version 1.1.1 --yes && fail "failed ingress reported success"
-[ "$(envv CODESH_VERSION)" = 1.1.1 ] || fail "verified version was put back after ingress opened"
+[ "$(envv GACHIPAD_VERSION)" = 1.1.1 ] || fail "verified version was put back after ingress opened"
 grep -q '^accepted-at-ingress$' "$FAKE_DB" || fail "write accepted while ingress opened was lost"
 grep -q '^restored$' "$DOCKER_CALLS" && fail "restored an old DB after ingress could accept writes"
 status | grep -q 'current files and DB retained' || fail "ingress recovery state unclear"

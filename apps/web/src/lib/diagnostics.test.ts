@@ -82,7 +82,7 @@ describe("local diagnostics", () => {
     const values = new Map<string, string>();
     const at = new Date().toISOString();
     values.set(
-      "codesh.diagnostics.v1",
+      "gachipad.diagnostics.v1",
       JSON.stringify([
         {
           source: "client",
@@ -107,7 +107,7 @@ describe("local diagnostics", () => {
     const d = await import("./diagnostics");
     expect(d.diagnosticsState().count).toBe(1);
     d.clearDiagnostics();
-    expect(values.has("codesh.diagnostics.v1")).toBe(false);
+    expect(values.has("gachipad.diagnostics.v1")).toBe(false);
   });
   it("merges another tab's stored events before persisting", async () => {
     vi.useFakeTimers();
@@ -121,7 +121,7 @@ describe("local diagnostics", () => {
     d.recordDiagnostic("api_failure", { status: 503, code: "unavailable" });
     const at = new Date().toISOString();
     values.set(
-      "codesh.diagnostics.v1",
+      "gachipad.diagnostics.v1",
       JSON.stringify({
         events: [
           {
@@ -138,7 +138,7 @@ describe("local diagnostics", () => {
       }),
     );
     await vi.advanceTimersByTimeAsync(1000);
-    const saved = JSON.parse(values.get("codesh.diagnostics.v1") ?? "{}");
+    const saved = JSON.parse(values.get("gachipad.diagnostics.v1") ?? "{}");
     expect(saved.events.map((event: { kind: string }) => event.kind).sort()).toEqual([
       "api_failure",
       "disconnect",

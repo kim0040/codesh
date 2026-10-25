@@ -60,6 +60,7 @@ jobs:
         run: |
           bash deploy/security-scripts.test.sh
           bash deploy/update.test.sh
+          bash deploy/rename.test.sh
 
   e2e:
     name: End-to-end (Playwright)

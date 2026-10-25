@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
+import { renamedEnv } from "@gachipad/shared";
 import { connectMongo, createMongoStores, type Db, ensureIndexes } from "./mongo.js";
 import type { Stores } from "./types.js";
 
 /**
  * Helpers for integration tests against the dev services (`pnpm services:up`). Suites skip when
- * a service is unreachable, unless CODESH_REQUIRE_SERVICES=1 (the package `test` scripts set it).
+ * a service is unreachable, unless GACHIPAD_REQUIRE_SERVICES=1 (the package `test` scripts set it).
  */
 
 export const MONGO_TEST_URL = process.env.MONGO_URL ?? "mongodb://127.0.0.1:27017";
 export const VALKEY_TEST_URL = process.env.VALKEY_URL ?? "redis://127.0.0.1:6379";
-export const SERVICES_REQUIRED = process.env.CODESH_REQUIRE_SERVICES === "1";
+export const SERVICES_REQUIRED = renamedEnv(process.env, "GACHIPAD_REQUIRE_SERVICES") === "1";
 
 /** Resolves to whether the suite should run; throws when services are required but missing. */
 export async function requireService(name: string, probe: () => Promise<void>): Promise<boolean> {

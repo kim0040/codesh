@@ -1,7 +1,7 @@
 // Load test for the collab path (docs/OPERATIONS.md §11). No k6 (AGPL): plain
 // Node clients.
 //
-//   pnpm load -- --scenario single-share-50 --url http://host --docker-project codesh
+//   pnpm load -- --scenario single-share-50 --url http://host --docker-project gachipad
 //   pnpm load -- --shares 100 --writers 5 --viewers 20 --duration 60 --url http://host
 //
 // Writers type markers at a fixed rate and move their cursor with every keystroke, like the editor;

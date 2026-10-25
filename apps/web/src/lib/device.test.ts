@@ -85,6 +85,19 @@ async function load() {
   return { ...device, ...prefs };
 }
 
+// legacy codesh name (1.0.x); remove in 2.0
+it("keeps old copies reachable without database enumeration and preserves them on migration quota failure", async () => {
+  const { store, dbs } = fakeBrowser({ databases: "missing", full: ["gachipad.prefs"] });
+  store.set("codesh.prefs", JSON.stringify({ offlineCopy: "yes" }));
+  store.set("codesh.device.copy:oldshare", "1");
+  dbs.add("codesh:doc:oldshare");
+  const device = await load();
+  expect(device.getPrefs().offlineCopy).toBe("yes");
+  expect(await device.sweep()).toBe(false);
+  expect([...dbs]).toEqual(["codesh:doc:oldshare"]);
+  expect(store.get("codesh.prefs")).toBe(JSON.stringify({ offlineCopy: "yes" }));
+});
+
 type Device = Awaited<ReturnType<typeof load>>;
 
 /** What a DocSession does before it opens a copy. */
@@ -131,7 +144,7 @@ describe("device choice", () => {
     expect(createCopy(m, dbs, "shareA")).toBe(false);
     await m.chooseOfflineCopy("yes");
     expect(createCopy(m, dbs, "shareA")).toBe(true);
-    expect(store.get("codesh.device.copy:shareA")).toBe("1");
+    expect(store.get("gachipad.device.copy:shareA")).toBe("1");
   });
 
   it("no deletes the copies of shares no tab has open", async () => {
@@ -158,7 +171,7 @@ describe("device choice", () => {
   });
 
   it("forget that cannot store its record turns copies off for every share and reports it", async () => {
-    const { store, dbs } = fakeBrowser({ full: ["codesh.device.forgotten:"] });
+    const { store, dbs } = fakeBrowser({ full: ["gachipad.device.forgotten:"] });
     const m = await load();
     await m.chooseOfflineCopy("yes");
     createCopy(m, dbs, "shareA");
@@ -166,7 +179,7 @@ describe("device choice", () => {
     expect(await m.forgetShare("shareA")).toBe(false);
     expect([...dbs]).toEqual([]);
     expect(m.getPrefs().offlineCopy).toBe("no");
-    expect(JSON.parse(store.get("codesh.prefs") ?? "{}").offlineCopy).toBe("no");
+    expect(JSON.parse(store.get("gachipad.prefs") ?? "{}").offlineCopy).toBe("no");
     expect(createCopy(m, dbs, "shareA")).toBe(false);
     expect(createCopy(m, dbs, "shareB")).toBe(false);
   });
@@ -189,8 +202,8 @@ describe("deleting every copy", () => {
 
   it("copies from before the registry that cannot be listed stay a failure, also after a start", async () => {
     const { store, dbs } = fakeBrowser({ databases: "missing" });
-    store.set("codesh.prefs", JSON.stringify({ offlineCopy: true }));
-    dbs.add("codesh:doc:legacy");
+    store.set("gachipad.prefs", JSON.stringify({ offlineCopy: true }));
+    dbs.add("gachipad:doc:legacy");
     const m = await load();
     const told = vi.fn();
     m.onLeftovers(told);
@@ -198,8 +211,8 @@ describe("deleting every copy", () => {
     expect(await m.forgetAll()).toBe(false);
     expect(await m.forgetAll()).toBe(false);
     expect(await m.chooseOfflineCopy("no")).toBe(false);
-    expect(store.has("codesh.device.complete")).toBe(false);
-    expect([...dbs]).toEqual(["codesh:doc:legacy"]);
+    expect(store.has("gachipad.device.complete")).toBe(false);
+    expect([...dbs]).toEqual(["gachipad:doc:legacy"]);
     // Nothing that had to go stayed behind a failed deletion: copies are not blocked for that.
     expect(told).not.toHaveBeenCalled();
 
@@ -208,16 +221,16 @@ describe("deleting every copy", () => {
     const next = await load();
     expect(await next.forgetAll()).toBe(true);
     expect([...dbs]).toEqual([]);
-    expect(store.get("codesh.device.complete")).toBe("1");
+    expect(store.get("gachipad.device.complete")).toBe("1");
   });
 
   it("a deletion that failed blocks copies and is retried at the next start", async () => {
-    const { store, dbs } = fakeBrowser({ blocked: ["codesh:doc:shareA"] });
+    const { store, dbs } = fakeBrowser({ blocked: ["gachipad:doc:shareA"] });
     let m = await load();
     await m.chooseOfflineCopy("yes");
     createCopy(m, dbs, "shareA");
     expect(await m.forgetAll()).toBe(false);
-    expect(dbs.has("codesh:doc:shareA")).toBe(true);
+    expect(dbs.has("gachipad:doc:shareA")).toBe(true);
     expect(m.mayKeepCopy("shareB")).toBe(false);
 
     // Next start, nothing holds the database any more.
@@ -231,13 +244,13 @@ describe("deleting every copy", () => {
   it("a deletion that failed before the share was listed is retried without databases()", async () => {
     const shared = await startedOnceWithDatabases();
     const { store, dbs } = fakeBrowser({ databases: "missing", shared });
-    store.set("codesh.device.erase:orphan", "1");
-    dbs.add("codesh:doc:orphan");
+    store.set("gachipad.device.erase:orphan", "1");
+    dbs.add("gachipad:doc:orphan");
     const m = await load();
     expect(m.mayKeepCopy("orphan")).toBe(false);
     expect(await m.sweep()).toBe(true);
     expect([...dbs]).toEqual([]);
-    expect(store.has("codesh.device.erase:orphan")).toBe(false);
+    expect(store.has("gachipad.device.erase:orphan")).toBe(false);
   });
 
   it("a copy listed while databases() is being read is not dropped from the registry", async () => {
@@ -254,10 +267,10 @@ describe("deleting every copy", () => {
     const swept = m.sweep();
     // Another tab lists and creates shareB meanwhile; the answer predates it.
     createCopy(m, dbs, "shareB");
-    answer([{ name: "codesh:doc:shareA", version: 1 }]);
+    answer([{ name: "gachipad:doc:shareA", version: 1 }]);
     expect(await swept).toBe(true);
-    expect(store.get("codesh.device.copy:shareA")).toBe("1");
-    expect(store.get("codesh.device.copy:shareB")).toBe("1");
+    expect(store.get("gachipad.device.copy:shareA")).toBe("1");
+    expect(store.get("gachipad.device.copy:shareB")).toBe("1");
 
     // A later cleanup that cannot list databases still knows both.
     fakeBrowser({ databases: "missing", shared: { store, dbs } });
@@ -276,7 +289,7 @@ describe("deleting every copy", () => {
     expect(createCopy(second, shared.dbs, "shareB")).toBe(true);
     expect(createCopy(first, shared.dbs, "shareC")).toBe(true);
     for (const id of ["shareA", "shareB", "shareC"]) {
-      expect(shared.store.get(`codesh.device.copy:${id}`)).toBe("1");
+      expect(shared.store.get(`gachipad.device.copy:${id}`)).toBe("1");
     }
   });
 
@@ -307,14 +320,14 @@ describe("another account", () => {
     await m.chooseOfflineCopy("yes");
     createCopy(m, dbs, "shareA");
     await m.noteSessionIdentity(session("aaaaaaaaaaaaaaaaaaaaaa"));
-    expect([...dbs]).toEqual(["codesh:doc:shareA"]);
+    expect([...dbs]).toEqual(["gachipad:doc:shareA"]);
     await m.noteSessionIdentity(session("bbbbbbbbbbbbbbbbbbbbbb"));
     expect([...dbs]).toEqual([]);
     expect(m.mayKeepCopy("shareA")).toBe(true);
   });
 
   it("when the deletion fails, no copy is written, the new session goes on and it is said once", async () => {
-    const { store, dbs } = fakeBrowser({ blocked: ["codesh:doc:shareA"] });
+    const { store, dbs } = fakeBrowser({ blocked: ["gachipad:doc:shareA"] });
     let m = await load();
     await m.noteSessionIdentity(session("aaaaaaaaaaaaaaaaaaaaaa"));
     await m.chooseOfflineCopy("yes");
@@ -322,8 +335,8 @@ describe("another account", () => {
     const told = vi.fn();
     m.onLeftovers(told);
     await m.noteSessionIdentity(session("bbbbbbbbbbbbbbbbbbbbbb"));
-    expect(store.get("codesh.device.subject")).toBe("bbbbbbbbbbbbbbbbbbbbbb");
-    expect(dbs.has("codesh:doc:shareA")).toBe(true);
+    expect(store.get("gachipad.device.subject")).toBe("bbbbbbbbbbbbbbbbbbbbbb");
+    expect(dbs.has("gachipad:doc:shareA")).toBe(true);
     expect(m.mayKeepCopy("shareB")).toBe(false);
     expect(createCopy(m, dbs, "shareB")).toBe(false);
     expect(told).toHaveBeenCalledTimes(1);

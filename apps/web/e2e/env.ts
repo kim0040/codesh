@@ -12,7 +12,7 @@ export const VALKEY_URL = process.env.E2E_VALKEY_URL ?? "redis://localhost:6379/
  */
 export const TOUR_SEEN_STORAGE = {
   cookies: [],
-  origins: [{ origin: BASE_URL, localStorage: [{ name: "codesh.tour", value: "9999" }] }],
+  origins: [{ origin: BASE_URL, localStorage: [{ name: "gachipad.tour", value: "9999" }] }],
 };
 
 /** Token of the admin API in the end-to-end stack (the API switches the admin console off without one). */

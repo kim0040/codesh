@@ -577,7 +577,7 @@ service Presence {
 
   nginx: `server {
   listen 80;
-  server_name codesh.local;
+  server_name gachipad.local;
 
   location / {
     proxy_pass http://127.0.0.1:3000;

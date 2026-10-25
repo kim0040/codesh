@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import {
   apiKeys,
   authProvidersResponseSchema,
+  LEGACY_SESSION_COOKIE,
   ldapLoginBodySchema,
   okResponseSchema,
   sessionResponseSchema,
@@ -20,7 +21,7 @@ const IDENTITY_TTL_SECONDS = 30 * 24 * 3600;
 const oidcCallbackQuery = z.object({ state: z.string().min(1).max(200) }).catchall(z.string());
 
 /**
- * Optional login (§8). A verified identity is only bound to the existing `codesh_sid` session, so
+ * Optional login (§8). A verified identity is only bound to the existing `gachipad_sid` session, so
  * every other endpoint keeps working unchanged; `settings.guestAllowed = false` makes it mandatory.
  */
 export function authRoutes(app: App, ctx: Ctx): void {
@@ -50,7 +51,7 @@ export function authRoutes(app: App, ctx: Ctx): void {
   };
 
   /**
-   * Logging in or out gives the browser a new `codesh_sid`: the next person on a shared PC does
+   * Logging in or out gives the browser a new `gachipad_sid`: the next person on a shared PC does
    * not inherit the previous user's shares, uploads and history, and a session id planted before
    * the login (cookie tossing from a sibling host) is worthless. The display name and color move
    * to the new session on login; shares owned by the old one stay with it.
@@ -61,6 +62,9 @@ export function authRoutes(app: App, ctx: Ctx): void {
     identity: VerifiedIdentity,
   ): Promise<Session> => {
     const previous = request.session;
+    if (request.cookies[LEGACY_SESSION_COOKIE] !== undefined) {
+      reply.clearCookie(LEGACY_SESSION_COOKIE, { path: "/" });
+    }
     const clientId = issueSession(ctx, reply);
     const profile = await ctx.valkey.hgetall(apiKeys.profile(previous.clientId));
     if (Object.keys(profile).length > 0) {
@@ -195,6 +199,9 @@ export function authRoutes(app: App, ctx: Ctx): void {
     { schema: { response: { 200: okResponseSchema } } },
     async (request, reply) => {
       await ctx.valkey.del(apiKeys.identity(request.session.clientId));
+      if (request.cookies[LEGACY_SESSION_COOKIE] !== undefined) {
+        reply.clearCookie(LEGACY_SESSION_COOKIE, { path: "/" });
+      }
       issueSession(ctx, reply);
       return OK;
     },

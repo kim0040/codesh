@@ -24,7 +24,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(0).max(65535).default(3001),
   /** `memory` keeps everything in the process: for local experiments, never for real data. */
   STORAGE: z.enum(["mongo", "memory"]).default("mongo"),
-  MONGO_URL: z.string().default("mongodb://localhost:27017/codesh"),
+  MONGO_URL: z.string().default("mongodb://localhost:27017/gachipad"),
   VALKEY_URL: z.string().default("redis://localhost:6379"),
   SESSION_SECRET: z.string().default(DEV_SECRET),
   COLLAB_SECRET: z.string().default(DEV_SECRET),
@@ -51,7 +51,7 @@ const envSchema = z.object({
           ),
       "TRUST_PROXY must contain valid, non-universal proxy CIDRs",
     ),
-  /** Origin users reach the app on, e.g. https://codesh.local. Used for OIDC redirect URIs. */
+  /** Origin users reach the app on, e.g. https://gachipad.local. Used for OIDC redirect URIs. */
   PUBLIC_URL: z.string().default(""),
   /** Requests per client IP and minute, per bucket. */
   RATE_LIMIT_API_PER_MIN: z.coerce.number().int().positive().default(1200),
@@ -66,7 +66,7 @@ const envSchema = z.object({
   UPDATE_REPO: z
     .string()
     .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, "UPDATE_REPO must look like owner/name")
-    .default("kim0040/codesh"),
+    .default("kim0040/gachipad"),
   UPDATE_CHANNEL: z.enum(UPDATE_CHANNELS).default("stable"),
   /** Base URL of the GitHub REST API; replaced in tests. */
   UPDATE_API_URL: z.url({ protocol: /^https?$/ }).default("https://api.github.com"),

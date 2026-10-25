@@ -189,7 +189,7 @@ let store: Map<string, string>;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   fakes.Persistence.made = [];
-  store = new Map([["codesh.prefs", JSON.stringify({ offlineCopy: "yes" })]]);
+  store = new Map([["gachipad.prefs", JSON.stringify({ offlineCopy: "yes" })]]);
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => void store.set(key, String(value)),
@@ -210,7 +210,7 @@ afterEach(() => {
 describe("the offline copy across a resync", () => {
   it("a deletion of the old copy that ends after the wait keeps the edits typed since", async () => {
     const idb = fakeIndexedDb();
-    const name = "codesh:doc:late";
+    const name = "gachipad:doc:late";
     // A frozen tab keeps the copy open: an earlier deletion waits, and this tab's open behind it.
     const frozen = idb.frozenTab(name);
     indexedDB.deleteDatabase(name);
@@ -248,7 +248,7 @@ describe("the offline copy across a resync", () => {
     await settle();
     expect(fakes.Persistence.made).toHaveLength(1);
     expect(session.getState()).toMatchObject({ generation: 1, copyKept: false });
-    expect(store.has("codesh.device.erase:stuck")).toBe(true);
+    expect(store.has("gachipad.device.erase:stuck")).toBe(true);
     expect(told).toHaveBeenCalledTimes(1);
     session.destroy();
     stop();

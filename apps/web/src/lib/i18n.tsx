@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 
-const STORAGE_KEY = "codesh.locale";
+const STORAGE_KEY = "gachipad.locale";
 
 /** Saved choice first, then the browser language (Korean or English), else Korean. */
 function initialLocale(): Locale {

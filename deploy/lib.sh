@@ -12,6 +12,10 @@ need_docker() {
 env_get() {
   local value
   value="$(sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1)"
+  # legacy codesh name (1.0.x); remove in 2.0
+  if [ -z "$value" ] && [[ "$1" == GACHIPAD_* ]]; then
+    value="$(sed -n "s/^CODESH_${1#GACHIPAD_}=//p" .env 2>/dev/null | tail -n 1)"
+  fi
   printf '%s' "${value:-${2:-}}"
 }
 
@@ -31,19 +35,19 @@ install_lock() {
   path="$(pwd -P)/state/install.lock"
   mkdir -p state
   INSTALL_LOCK_OWNED=0
-  if [ "${CODESH_LOCK_PATH:-}" = "$path" ] && [ -n "${CODESH_LOCK_PID:-}" ] &&
-    kill -0 "$CODESH_LOCK_PID" 2>/dev/null &&
-    [ "$(cat "$path.d/owner" 2>/dev/null)" = "$CODESH_LOCK_PID" ]; then
-    if [ "${CODESH_LOCK_KIND:-}" = mkdir ]; then return; fi
-    if [ "${CODESH_LOCK_KIND:-}" = flock ] && [ -e /proc/self/fd/9 ] &&
+  if [ "${GACHIPAD_LOCK_PATH:-}" = "$path" ] && [ -n "${GACHIPAD_LOCK_PID:-}" ] &&
+    kill -0 "$GACHIPAD_LOCK_PID" 2>/dev/null &&
+    [ "$(cat "$path.d/owner" 2>/dev/null)" = "$GACHIPAD_LOCK_PID" ]; then
+    if [ "${GACHIPAD_LOCK_KIND:-}" = mkdir ]; then return; fi
+    if [ "${GACHIPAD_LOCK_KIND:-}" = flock ] && [ -e /proc/self/fd/9 ] &&
       [ /proc/self/fd/9 -ef "$path" ]; then return; fi
   fi
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$path"
     flock -n 9 || die "another update, upgrade, backup or restore is running"
-    CODESH_LOCK_KIND=flock
+    GACHIPAD_LOCK_KIND=flock
   else
-    CODESH_LOCK_KIND="mkdir"
+    GACHIPAD_LOCK_KIND="mkdir"
   fi
   # Also arbitrate through mkdir when flock exists, so callers with different PATHs cannot
   # bypass one another by selecting different primitives.
@@ -52,7 +56,7 @@ install_lock() {
     boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
     boot_time="$(awk '$1 == "btime" {print $2}' /proc/stat 2>/dev/null || true)"
     lock_time="$(stat -c %Y "$path.d" 2>/dev/null || true)"
-    if [ "$CODESH_LOCK_KIND" = flock ] && {
+    if [ "$GACHIPAD_LOCK_KIND" = flock ] && {
       { [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; } ||
       { [ -n "$boot" ] && [ -f "$path.d/boot" ] && [ "$(cat "$path.d/boot")" != "$boot" ]; } ||
       { [[ "$boot_time" =~ ^[0-9]+$ && "$lock_time" =~ ^[0-9]+$ ]] && [ "$lock_time" -lt "$boot_time" ]; };
@@ -67,13 +71,13 @@ install_lock() {
   printf '%s\n' "$$" >"$path.d/owner"
   cat /proc/sys/kernel/random/boot_id >"$path.d/boot" 2>/dev/null || true
   INSTALL_LOCK_OWNED=1
-  export CODESH_LOCK_PATH="$path" CODESH_LOCK_PID="$$" CODESH_LOCK_KIND
+  export GACHIPAD_LOCK_PATH="$path" GACHIPAD_LOCK_PID="$$" GACHIPAD_LOCK_KIND
 }
 
 install_unlock() {
   if [ "${INSTALL_LOCK_OWNED:-0}" = 1 ]; then
-    rm -f "$CODESH_LOCK_PATH.d/owner" "$CODESH_LOCK_PATH.d/boot"
-    rmdir "$CODESH_LOCK_PATH.d"
+    rm -f "$GACHIPAD_LOCK_PATH.d/owner" "$GACHIPAD_LOCK_PATH.d/boot"
+    rmdir "$GACHIPAD_LOCK_PATH.d"
   fi
 }
 
@@ -87,7 +91,7 @@ wait_healthy() {
     :*|http://*) port="$(env_get HTTP_PORT 80)" ;;
     *) scheme=https; port="$(env_get HTTPS_PORT 443)" ;;
   esac
-  host="${site#*://}"; host="${host%%/*}"; host="${host%%:*}"
+  host="${site%%,*}"; host="${host#*://}"; host="${host%%/*}"; host="${host%%:*}"
   host="${host:-127.0.0.1}"
   url="$scheme://$host:$port${2:-/healthz}"
   deadline=$((SECONDS + ${1:-120}))
@@ -150,14 +154,20 @@ mongo_transfer() {
     cfg="$(mktemp)"
     trap "rm -f $cfg" EXIT
     mongosh --nodb --quiet --eval "print(\"password: \" + JSON.stringify(process.env.MONGO_INITDB_ROOT_PASSWORD))" </dev/null >"$cfg"
-    set -- --quiet --host localhost --username codesh --authenticationDatabase admin --config "$cfg" --archive --gzip
+    set -- --quiet --host localhost --username "$MONGO_INITDB_ROOT_USERNAME" --authenticationDatabase admin --config "$cfg" --archive --gzip
+    # legacy codesh name (1.0.x); remove in 2.0
+    # Restore either product namespace into this installation only, including on a fresh host.
+    if [ "$0" != dump ]; then
+      set -- "$@" --nsInclude "${MONGO_DATABASE:-gachipad}.*" --nsInclude "gachipad.*" --nsInclude "codesh.*" \
+        --nsFrom "\$database\$.\$collection\$" --nsTo "${MONGO_DATABASE:-gachipad}.\$collection\$"
+    fi
     case "$0" in
-      dump) mongodump "$@" --db codesh ;;
-      validate) mongorestore "$@" --dryRun --nsInclude "codesh.*" ;;
+      dump) mongodump "$@" --db "${MONGO_DATABASE:-gachipad}" ;;
+      validate) mongorestore "$@" --dryRun ;;
       restore)
         # --drop alone only drops collections in the archive, leaving failed migrations behind.
-        mongosh --quiet --host localhost --eval "if (!db.getSiblingDB(\"admin\").auth(\"codesh\", process.env.MONGO_INITDB_ROOT_PASSWORD)) throw new Error(\"auth failed\"); db.getSiblingDB(\"codesh\").dropDatabase()" >/dev/null
-        mongorestore "$@" --drop --nsInclude "codesh.*" ;;
+        mongosh --quiet --host localhost --eval "if (!db.getSiblingDB(\"admin\").auth(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.MONGO_INITDB_ROOT_PASSWORD)) throw new Error(\"auth failed\"); db.getSiblingDB(process.env.MONGO_DATABASE || \"gachipad\").dropDatabase()" >/dev/null
+        mongorestore "$@" --drop ;;
       *) exit 2 ;;
     esac
   ' "$1"
@@ -179,7 +189,7 @@ mongo_backup() (
   local dir="$1" part file
   mkdir -p "$dir" || return 1
   part="$(mktemp "$dir/.backup.XXXXXX")" || return 1
-  file="$dir/codesh-$(date +%Y%m%d-%H%M%S)-${part##*.}.archive.gz"
+  file="$dir/gachipad-$(date +%Y%m%d-%H%M%S)-${part##*.}.archive.gz"
   trap 'rm -f "$part"' EXIT
   mongo_transfer dump >"$part" || return 1
   [ -s "$part" ] || { echo "mongodump produced no data" >&2; return 1; }
@@ -188,10 +198,11 @@ mongo_backup() (
   echo "backup: $file ($(wc -c <"$file" | tr -d ' ') bytes)"
 )
 
+# legacy codesh name (1.0.x); remove in 2.0
 # Reserve space for both the pre-update dump and the safety dump used during recovery.
 backup_space() {
   local latest bytes free
-  latest="$(find backups -maxdepth 1 -name 'codesh-*.archive.gz' -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d ' ' -f 2- || true)"
+  latest="$(find backups -maxdepth 1 \( -name 'gachipad-*.archive.gz' -o -name 'codesh-*.archive.gz' \) -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d ' ' -f 2- || true)"
   [ -n "$latest" ] || return 0
   bytes="$(wc -c <"$latest")" || return 1
   free="$(df -Pk backups | awk 'NR == 2 {print $4}')" || return 1
@@ -227,3 +238,16 @@ verify_bundle() {
     else shasum -a 256 --quiet -c SHA256SUMS; fi
   }) || die "bundle content checksum mismatch"
 }
+
+# legacy codesh name (1.0.x); remove in 2.0
+# Environment compatibility is startup-only and warns once, without printing any values.
+legacy_env_names=()
+while read -r legacy_env_name; do
+  [[ "$legacy_env_name" == CODESH_* ]] || continue
+  legacy_env_names+=("$legacy_env_name")
+  new_env_name="GACHIPAD_${legacy_env_name#CODESH_}"
+  if [ -z "${!new_env_name+x}" ]; then export "$new_env_name=${!legacy_env_name}"; fi
+done < <(compgen -e)
+if [ "${#legacy_env_names[@]}" -gt 0 ] || grep -q '^CODESH_' .env 2>/dev/null; then
+  echo "warning: legacy CODESH_ settings are deprecated; use GACHIPAD_ settings" >&2
+fi

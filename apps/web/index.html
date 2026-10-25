@@ -14,7 +14,8 @@
       // Apply the saved app theme before first paint so the page never flashes the wrong one.
       (() => {
         try {
-          const theme = localStorage.getItem("codesh.theme");
+          // legacy codesh name (1.0.x); remove in 2.0
+          const theme = localStorage.getItem("gachipad.theme") ?? localStorage.getItem("codesh.theme");
           if (theme === "dark" || theme === "light") {
             document.documentElement.setAttribute("data-theme", theme);
           }

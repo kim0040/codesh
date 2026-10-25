@@ -5,7 +5,7 @@ describe("config", () => {
   it("falls back to local defaults", () => {
     expect(loadConfig({})).toMatchObject({
       port: 3001,
-      mongoUrl: "mongodb://localhost:27017/codesh",
+      mongoUrl: "mongodb://localhost:27017/gachipad",
       valkeyUrl: "redis://localhost:6379",
       adminToken: "",
       storage: "mongo",
@@ -49,7 +49,7 @@ describe("config", () => {
   it("checks for updates by default and turns the check off with UPDATE_CHECK=off", () => {
     expect(loadConfig({}).update).toEqual({
       enabled: true,
-      repo: "kim0040/codesh",
+      repo: "kim0040/gachipad",
       channel: "stable",
       apiUrl: "https://api.github.com",
       statusFile: "",

@@ -1,8 +1,8 @@
 import { Agent, request } from "undici";
 
-/** One browser: its own `codesh_sid` cookie, talking to the API through a shared connection pool. */
+/** One browser: its own `gachipad_sid` cookie, talking to the API through a shared connection pool. */
 export class ApiClient {
-  /** `codesh_sid=...`, so another thread can act as the same person. */
+  /** `gachipad_sid=...`, so another thread can act as the same person. */
   cookie = "";
 
   constructor(
@@ -25,7 +25,7 @@ export class ApiClient {
         dispatcher: this.agent,
         headers: {
           // The API refuses non-GET requests without it (apps/api/README.md, "Cross-site requests").
-          ...(method === "GET" ? {} : { "x-codesh": "1" }),
+          ...(method === "GET" ? {} : { "x-gachipad": "1" }),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
           ...(this.cookie ? { cookie: this.cookie } : {}),
         },

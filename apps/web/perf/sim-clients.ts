@@ -42,7 +42,7 @@ const LINE_MAX = 56;
 export async function newSession(name: string): Promise<APIRequestContext> {
   const api = await request.newContext({
     baseURL: PERF_URL,
-    extraHTTPHeaders: { "X-Codesh": "1" },
+    extraHTTPHeaders: { "X-Gachipad": "1" },
   });
   const response = await api.patch("/api/session", { data: { name } });
   if (!response.ok()) throw new Error(`session ${response.status()}`);

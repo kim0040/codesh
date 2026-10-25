@@ -122,7 +122,7 @@ test("the light-theme intro call to action meets 4.5:1", async ({ browser }) => 
   try {
     await user.context.addInitScript(() => {
       try {
-        localStorage.setItem("codesh.theme", "light");
+        localStorage.setItem("gachipad.theme", "light");
       } catch {
         // The scheme preference above still applies.
       }

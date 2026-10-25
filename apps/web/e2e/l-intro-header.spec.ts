@@ -139,7 +139,7 @@ test("header and footer theme controls switch the page and stay in sync", async 
       "aria-pressed",
       "true",
     );
-    expect(await page.evaluate(() => localStorage.getItem("codesh.theme"))).toBe("dark");
+    expect(await page.evaluate(() => localStorage.getItem("gachipad.theme"))).toBe("dark");
 
     // The other way round: the footer drives the header.
     await footer.getByRole("button", { name: "Light" }).click();
@@ -155,7 +155,7 @@ test("header and footer theme controls switch the page and stay in sync", async 
       "aria-pressed",
       "true",
     );
-    expect(await page.evaluate(() => localStorage.getItem("codesh.theme"))).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("gachipad.theme"))).toBeNull();
 
     // Keyboard operable with a visible focus ring.
     await header.getByRole("button", { name: "Dark" }).focus();
@@ -177,7 +177,7 @@ for (const locale of ["en", "ko"] as const) {
     const { page } = user;
     try {
       await user.context.addInitScript((value) => {
-        localStorage.setItem("codesh.locale", value);
+        localStorage.setItem("gachipad.locale", value);
       }, locale);
       await openIntro(page);
       const overflow = () =>

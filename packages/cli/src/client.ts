@@ -1,8 +1,8 @@
 import { CliError, type ConfigFile, writeConfig } from "./config.js";
 
-const SESSION_COOKIE = "codesh_sid";
+const SESSION_COOKIE = "gachipad_sid";
 
-/** A minimal API client: sends `X-Codesh: 1` on changes (apps/api/README.md) and keeps the session cookie. */
+/** A minimal API client: sends `X-Gachipad: 1` on changes (apps/api/README.md) and keeps the session cookie. */
 export class Client {
   private cookie: string;
 
@@ -20,7 +20,7 @@ export class Client {
       response = await fetch(`${this.base}${path}`, {
         method,
         headers: {
-          ...(method === "GET" ? {} : { "x-codesh": "1" }),
+          ...(method === "GET" ? {} : { "x-gachipad": "1" }),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
           ...(this.cookie ? { cookie: this.cookie } : {}),
         },

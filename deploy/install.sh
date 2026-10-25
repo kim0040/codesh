@@ -2,8 +2,8 @@
 # Installs gachipad from an offline bundle: loads the images, creates .env with fresh secrets and
 # starts the stack. Needs docker with the compose plugin; no internet.
 #
-#   tar xzf codesh-<version>.tar.gz && cd codesh-<version> && ./install.sh
-#   PUBLIC_URL=http://codesh.local HTTP_PORT=8080 ./install.sh     # optional settings for a new .env
+#   tar xzf gachipad-<version>.tar.gz && cd gachipad-<version> && ./install.sh
+#   PUBLIC_URL=http://gachipad.local HTTP_PORT=8080 ./install.sh     # optional settings for a new .env
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
@@ -26,12 +26,12 @@ else
     [ -n "$value" ] && env_set "$name" "$value"
   done
 fi
-env_set CODESH_VERSION "$VERSION"
-# The loaded images carry the bundle's registry in their names.
-REGISTRY="$(sed -n 's/^CODESH_REGISTRY=//p' .env.example | tail -n 1)"
-[ -n "$REGISTRY" ] && env_set CODESH_REGISTRY "$REGISTRY"
-mkdir -p state && chmod 755 state
 ./generate-secrets.sh .env
+env_set GACHIPAD_VERSION "$VERSION"
+# The loaded images carry the bundle's registry in their names.
+REGISTRY="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
+[ -n "$REGISTRY" ] && env_set GACHIPAD_REGISTRY "$REGISTRY"
+mkdir -p state && chmod 755 state
 
 echo "install: starting"
 docker compose up -d --wait

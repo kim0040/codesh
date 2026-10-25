@@ -349,7 +349,7 @@ test("vim mode keeps its own cursor with smooth typing on", async ({ browser }) 
   const owner = await newUser(browser, "Vim");
   try {
     await owner.context.addInitScript(() =>
-      localStorage.setItem("codesh.prefs", JSON.stringify({ keymap: "vim" })),
+      localStorage.setItem("gachipad.prefs", JSON.stringify({ keymap: "vim" })),
     );
     await createShare(owner.page);
     await owner.page.locator(".cm-content").click();

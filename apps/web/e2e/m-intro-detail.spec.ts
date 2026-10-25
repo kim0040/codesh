@@ -23,7 +23,7 @@ for (const locale of ["ko", "en"] as const) {
     const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
     try {
       await user.context.addInitScript((value) => {
-        localStorage.setItem("codesh.locale", value);
+        localStorage.setItem("gachipad.locale", value);
       }, locale);
       await openIntro(user.page);
       // Closed FAQ answers are hidden, so read the DOM text rather than what is rendered.
@@ -138,7 +138,7 @@ for (const locale of ["ko", "en"] as const) {
     const { page } = user;
     try {
       await user.context.addInitScript((value) => {
-        localStorage.setItem("codesh.locale", value);
+        localStorage.setItem("gachipad.locale", value);
       }, locale);
       await openIntro(page);
       // Closed, the header is the brand and the menu button.

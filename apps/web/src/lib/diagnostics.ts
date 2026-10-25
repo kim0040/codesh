@@ -9,6 +9,7 @@ import {
   diagnosticLocation,
 } from "@gachipad/shared";
 import { getPrefs } from "./prefs";
+import { LEGACY_STORAGE_PREFIX, mirrorLegacy } from "./storage-migration";
 
 /** Correlates one live document session without accepting or storing its actual share id. */
 export function newDiagnosticReference(): string {
@@ -53,8 +54,8 @@ export const isBenignResizeObserverError = (message: string): boolean =>
     message,
   );
 
-const STORAGE_KEY = "codesh.diagnostics.v1";
-const ENABLED_KEY = "codesh.diagnostics.enabled";
+const STORAGE_KEY = "gachipad.diagnostics.v1";
+const ENABLED_KEY = "gachipad.diagnostics.enabled";
 const ring = new DiagnosticRing();
 const bootId = newDiagnosticReference();
 const listeners = new Set<() => void>();
@@ -89,7 +90,10 @@ function persist() {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored && stored.length <= DIAGNOSTIC_CAPS.bytes * 2) ring.merge(JSON.parse(stored));
     const value = JSON.stringify(ring.snapshot());
-    if (value !== stored) localStorage.setItem(STORAGE_KEY, value);
+    if (value !== stored) {
+      localStorage.setItem(STORAGE_KEY, value);
+      mirrorLegacy(STORAGE_KEY, value);
+    }
   } catch {
     /* Memory only. */
   }
@@ -174,6 +178,7 @@ export function setDiagnosticsEnabled(value: boolean): void {
   enabled = value;
   try {
     localStorage.setItem(ENABLED_KEY, String(value));
+    mirrorLegacy(ENABLED_KEY, String(value));
   } catch {
     /* Memory only. */
   }
@@ -186,6 +191,7 @@ export function clearDiagnostics(): void {
   timer = undefined;
   try {
     localStorage.removeItem(STORAGE_KEY);
+    mirrorLegacy(STORAGE_KEY, null);
   } catch {
     /* Memory only. */
   }
@@ -219,12 +225,12 @@ export function installDiagnostics(): void {
   );
   window.addEventListener("pagehide", persist);
   window.addEventListener("storage", (event) => {
-    if (event.key === ENABLED_KEY) {
+    if (event.key === ENABLED_KEY || event.key === `${LEGACY_STORAGE_PREFIX}diagnostics.enabled`) {
       enabled = event.newValue !== "false";
       revision++;
       for (const listener of listeners) listener();
     }
-    if (event.key === STORAGE_KEY) {
+    if (event.key === STORAGE_KEY || event.key === `${LEGACY_STORAGE_PREFIX}diagnostics.v1`) {
       if (event.newValue === null) {
         ring.clear();
         if (timer) clearTimeout(timer);
@@ -353,7 +359,7 @@ export function clientDiagnosticExport(): string {
   return JSON.stringify(
     {
       format: 1,
-      header: `gachipad client diagnostics v${version()}: local operational events, a short breadcrumb timeline, counts, redacted error categories/source frames and environment. Document text, file names, user values, URLs, credentials and share IDs are omitted; random session references are hashed anew per export. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${version()}.tar.gz. Nothing is sent automatically.`,
+      header: `gachipad client diagnostics v${version()}: local operational events, a short breadcrumb timeline, counts, redacted error categories/source frames and environment. Document text, file names, user values, URLs, credentials and share IDs are omitted; random session references are hashed anew per export. Source maps for this version are on the GitHub release page as gachipad-web-sourcemaps-${version()}.tar.gz. Nothing is sent automatically.`,
       exportedAt: new Date().toISOString(),
       bootId,
       caps: DIAGNOSTIC_CAPS,

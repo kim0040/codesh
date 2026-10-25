@@ -55,7 +55,7 @@ async function fakeGitHub() {
 
 const release = (tag: string, extra: Record<string, unknown> = {}) => ({
   tag_name: tag,
-  html_url: `https://github.com/kim0040/codesh/releases/tag/${tag}`,
+  html_url: `https://github.com/kim0040/gachipad/releases/tag/${tag}`,
   published_at: "2026-10-20T09:30:00Z",
   body: `## ${tag}\r\n\r\n- Fixed <b>things</b>`,
   draft: false,
@@ -68,7 +68,7 @@ describe.skipIf(!integration)("update check", () => {
   let h: Harness;
   const settings = (overrides: Partial<UpdateConfig> = {}): UpdateConfig => ({
     enabled: true,
-    repo: "kim0040/codesh",
+    repo: "kim0040/gachipad",
     channel: "stable",
     apiUrl: github.url,
     statusFile: "",
@@ -91,6 +91,25 @@ describe.skipIf(!integration)("update check", () => {
     github.seen.length = 0;
   });
 
+  // legacy codesh name (1.0.x); remove in 2.0
+  it("follows the repository rename redirect for installations retaining the old repo setting", async () => {
+    h = await harness({ repo: "kim0040/codesh" });
+    github.answer((request, response) => {
+      if (request.url.includes("/codesh/")) {
+        response.writeHead(301, { location: request.url.replace("/codesh/", "/gachipad/") }).end();
+      } else {
+        response
+          .writeHead(200, { "content-type": "application/json" })
+          .end(JSON.stringify(release("v1.2.0")));
+      }
+    });
+    expect((await checkNow(h)).json<AdminUpdateResponse>().latest).toBe("1.2.0");
+    expect(github.seen.map((request) => request.url)).toEqual([
+      "/repos/kim0040/codesh/releases/latest",
+      "/repos/kim0040/gachipad/releases/latest",
+    ]);
+  });
+
   it("finds a newer release with one plain GET that carries nothing but the version", async () => {
     h = await harness();
     github.json(200, release("v1.2.0"), { etag: '"e1"' });
@@ -103,18 +122,18 @@ describe.skipIf(!integration)("update check", () => {
       latest: "1.2.0",
       status: "ok",
       updateAvailable: true,
-      url: "https://github.com/kim0040/codesh/releases/tag/v1.2.0",
+      url: "https://github.com/kim0040/gachipad/releases/tag/v1.2.0",
       publishedAt: "2026-10-20T09:30:00.000Z",
       notes: "## v1.2.0\n\n- Fixed <b>things</b>",
-      repo: "kim0040/codesh",
+      repo: "kim0040/gachipad",
       channel: "stable",
-      releasesUrl: "https://github.com/kim0040/codesh/releases",
+      releasesUrl: "https://github.com/kim0040/gachipad/releases",
       updater: null,
     });
     expect(github.seen).toHaveLength(1);
     const [request] = github.seen as [Seen];
     expect(request.method).toBe("GET");
-    expect(request.url).toBe("/repos/kim0040/codesh/releases/latest");
+    expect(request.url).toBe("/repos/kim0040/gachipad/releases/latest");
     expect(request.headers["user-agent"]).toBe("gachipad/1.0.0");
     for (const name of ["authorization", "cookie", "x-forwarded-for", "referer", "if-none-match"])
       expect(request.headers[name], name).toBeUndefined();
@@ -159,7 +178,7 @@ describe.skipIf(!integration)("update check", () => {
       channel: "prerelease",
       updateAvailable: true,
     });
-    expect(github.seen[0]?.url).toBe("/repos/kim0040/codesh/releases?per_page=20");
+    expect(github.seen[0]?.url).toBe("/repos/kim0040/gachipad/releases?per_page=20");
   });
 
   it("sends the ETag back and keeps the release on 304 Not Modified", async () => {

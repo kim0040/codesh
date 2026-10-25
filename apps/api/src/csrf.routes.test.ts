@@ -13,10 +13,10 @@ describe.skipIf(!integration)("cross-site request guard", () => {
 
   /** What a cross-site form can do: a plain POST with an Origin and without custom headers. */
   const bare = (headers: Record<string, string> = {}) => ({
-    headers: { "x-codesh": "", ...headers },
+    headers: { "x-gachipad": "", ...headers },
   });
 
-  it("refuses changes without X-Codesh and without an Origin of our own", async () => {
+  it("refuses changes without X-Gachipad and without an Origin of our own", async () => {
     const client = h.client();
     const { id } = await createShare(client);
     for (const [method, url] of [
@@ -50,14 +50,14 @@ describe.skipIf(!integration)("cross-site request guard", () => {
       payload: Buffer.from(await encoded.arrayBuffer()),
       headers: {
         "content-type": encoded.headers.get("content-type") as string,
-        "x-codesh": "",
+        "x-gachipad": "",
         origin: "https://evil.example",
       },
     });
     expect(response.statusCode).toBe(403);
   });
 
-  it("accepts X-Codesh: 1, and an Origin that is the app's own", async () => {
+  it("accepts X-Gachipad: 1, and an Origin that is the app's own", async () => {
     const client = h.client();
     expect((await client.request("POST", "/api/shares", { body: {} })).statusCode).toBe(200);
     const sameHost = await client.request("POST", "/api/shares", {
@@ -87,5 +87,38 @@ describe.skipIf(!integration)("cross-site request guard", () => {
     expect(admin.statusCode).toBe(403);
     expect(errorCode(admin)).toBe("forbidden");
     expect(admin.json<{ error: { message: string } }>().error.message).toBe("Invalid admin token");
+  });
+
+  // legacy codesh name (1.0.x); remove in 2.0
+  it("accepts exactly either known header with value 1", async () => {
+    const client = h.client();
+    for (const name of ["x-gachipad", "x-codesh"]) {
+      expect(
+        (
+          await client.request("POST", "/api/shares", {
+            body: {},
+            ...bare({ [name]: "1" }),
+          })
+        ).statusCode,
+      ).toBe(200);
+      for (const value of ["true", "0", "1, 1", ""]) {
+        expect(
+          (
+            await client.request("POST", "/api/shares", {
+              body: {},
+              ...bare({ [name]: value }),
+            })
+          ).statusCode,
+        ).toBe(403);
+      }
+    }
+    expect(
+      (
+        await client.request("POST", "/api/shares", {
+          body: {},
+          ...bare({ "x-gachipad-other": "1" }),
+        })
+      ).statusCode,
+    ).toBe(403);
   });
 });

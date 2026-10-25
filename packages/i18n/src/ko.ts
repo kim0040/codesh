@@ -910,9 +910,9 @@ export const ko: KoDictionary = {
   "admin.update.releaseLink": "릴리스 페이지",
   "admin.update.newTab": "(새 탭에서 열려요)",
   "admin.update.how.title": "업데이트 방법",
-  "admin.update.how.online": "인터넷이 연결된 서버: codesh 폴더에서 실행해요",
+  "admin.update.how.online": "인터넷이 연결된 서버: gachipad 폴더에서 실행해요",
   "admin.update.how.offline":
-    "인터넷이 안 되는 서버: 릴리스 페이지에서 서버에 맞는 번들(linux-amd64 또는 linux-arm64)과 .sha256 파일을 받아 codesh 옆에 복사한 뒤 실행해요",
+    "인터넷이 안 되는 서버: 릴리스 페이지에서 서버에 맞는 번들(linux-amd64 또는 linux-arm64)과 .sha256 파일을 받아 gachipad 옆에 복사한 뒤 실행해요",
   "admin.update.how.safety":
     "update.sh는 먼저 데이터베이스를 백업하고, 새 버전이 시작되지 않으면 현재 버전으로 되돌려요. upgrade.sh도 먼저 백업해요.",
   "admin.update.copyAction": "복사",

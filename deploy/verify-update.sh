@@ -14,12 +14,16 @@
 # uses existing Collab/base Caddy layers on small shared hosts (API and web assets stay current).
 set -euo pipefail
 
+# legacy codesh name (1.0.x); remove in 2.0
+# Exercises the actual published 1.0.1 bundle and its installed updater against this source tree.
+if [ "${1:-}" = --rename ]; then exec bash deploy/verify-rename.sh; fi
+
 ROOT="$(pwd)"
-WORK="${VERIFY_DIR:-/data/workspace/codesh-verify-update}"
+WORK="${VERIFY_DIR:-/data/workspace/gachipad-verify-update}"
 REG_PORT="${VERIFY_REGISTRY_PORT:-5055}"
 REG="localhost:$REG_PORT/kim0040"
 P="${VERIFY_HTTP_PORT:-18480}"
-PROJECT=codesh-verify-update
+PROJECT=gachipad-verify-update
 INSTALL="$WORK/install"
 SRV="$WORK/srv"
 export TMPDIR="$WORK/tmp"
@@ -41,7 +45,7 @@ teardown() {
   if [ -f "$INSTALL/docker-compose.yml" ]; then
     (cd "$INSTALL" && COMPOSE_PROJECT_NAME=$PROJECT docker compose down -v --remove-orphans) >/dev/null 2>&1 || true
   fi
-  if [ "$OWNED_REGISTRY" = 1 ]; then docker rm -fv codesh-verify-registry >/dev/null 2>&1 || true; fi
+  if [ "$OWNED_REGISTRY" = 1 ]; then docker rm -fv gachipad-verify-registry >/dev/null 2>&1 || true; fi
   # The registry writes as root.
   if [ "$OWNED_REGISTRY" = 1 ] && [ -d "$WORK/registry" ]; then
     docker run --rm --pull never -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry
@@ -57,7 +61,7 @@ envv() { sed -n "s/^$1=//p" "$INSTALL/.env" | tail -n 1; }
 call() {
   local path="$1"
   shift
-  curl -fsS -b "$WORK/jar" -c "$WORK/jar" -H 'X-Codesh: 1' "$@" "http://127.0.0.1:$P$path"
+  curl -fsS -b "$WORK/jar" -c "$WORK/jar" -H 'X-Gachipad: 1' "$@" "http://127.0.0.1:$P$path"
 }
 create_data() {
   call /api/shares -H 'Content-Type: application/json' \
@@ -70,7 +74,7 @@ has_marker() {
 admin_update() { call /api/admin/update -H "Authorization: Bearer $(envv ADMIN_TOKEN)"; }
 
 [ ! -e "$WORK" ] || fail "$WORK already exists; choose a fresh VERIFY_DIR"
-mkdir -p "$TMPDIR" "$INSTALL" "$SRV/api/repos/kim0040/codesh" "$WORK/registry"
+mkdir -p "$TMPDIR" "$INSTALL" "$SRV/api/repos/kim0040/gachipad" "$WORK/registry"
 DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}')"
 [ "$(free_gib "$DOCKER_ROOT")" -ge "$MIN_DOCKER_GIB" ] || fail "less than $MIN_DOCKER_GIB GiB free in $DOCKER_ROOT: a full disk breaks every stack on this host"
 [ "$(free_gib "$WORK")" -ge 2 ] || fail "less than 2 GiB free in $WORK"
@@ -81,12 +85,12 @@ mkdir -p "$WORK/docs" && cp "$ROOT/package.json" "$ROOT/CHANGELOG.md" "$ROOT/LIC
 
 step "local registry and images (1.0.2 mutates MongoDB then fails; old API rejects that schema)"
 df -h /
-docker run -d --name codesh-verify-registry -p "127.0.0.1:$REG_PORT:5000" -v "$WORK/registry:/var/lib/registry" \
+docker run -d --name gachipad-verify-registry -p "127.0.0.1:$REG_PORT:5000" -v "$WORK/registry:/var/lib/registry" \
   registry:2.8.3 >/dev/null
 OWNED_REGISTRY=1
 for _ in $(seq 30); do curl -fs "http://localhost:$REG_PORT/v2/" >/dev/null && break; sleep 1; done
 BUILD_ENV="$WORK/build.env"
-printf 'SESSION_SECRET=x\nCOLLAB_SECRET=x\nMONGO_PASSWORD=x\nMONGO_APP_PASSWORD=x\nVALKEY_PASSWORD=x\nCODESH_VERSION=1.0.0\nCODESH_REGISTRY=%s\n' "$REG" >"$BUILD_ENV"
+printf 'SESSION_SECRET=x\nCOLLAB_SECRET=x\nMONGO_PASSWORD=x\nMONGO_APP_PASSWORD=x\nVALKEY_PASSWORD=x\nGACHIPAD_VERSION=1.0.0\nGACHIPAD_REGISTRY=%s\n' "$REG" >"$BUILD_ENV"
 # Existing real images may serve as bases on a small shared box. No preview/dev containers,
 # tags, volumes or build cache are removed. Default remains a full source build.
 for service in api collab caddy mdns; do
@@ -96,8 +100,8 @@ for service in api collab caddy mdns; do
   base=""
   if [ "${VERIFY_REUSE_IMAGES:-0}" = 1 ]; then
     case "$service" in
-      collab) base="codesh/$service:preview" ;;
-      caddy) base="codesh/caddy:preview" ;;
+      collab) base="gachipad/$service:preview" ;;
+      caddy) base="gachipad/caddy:preview" ;;
     esac
   fi
   if [ "$service" = caddy ] && [ -n "$base" ]; then
@@ -109,8 +113,8 @@ for service in api collab caddy mdns; do
     cp -r apps/web/dist "$WORK/build-web/dist"
     printf 'FROM %s\nRUN rm -rf /srv\nCOPY Caddyfile /etc/caddy/Caddyfile\nCOPY dist /srv\n' "$base" >"$WORK/build-web/Dockerfile"
     df -h /
-    docker build -q -t "$REG/codesh-$name:1.0.0" "$WORK/build-web" >/dev/null
-  elif [ -n "$base" ]; then docker tag "$base" "$REG/codesh-$name:1.0.0"
+    docker build -q -t "$REG/gachipad-$name:1.0.0" "$WORK/build-web" >/dev/null
+  elif [ -n "$base" ]; then docker tag "$base" "$REG/gachipad-$name:1.0.0"
   else docker compose --env-file "$BUILD_ENV" --profile mdns -f "$ROOT/deploy/docker-compose.yml" build "$service"; fi
 done
 # The previous version cannot boot against the deliberate schema marker. This detects rollback
@@ -134,43 +138,43 @@ console.error("new API changed schema and deleted shares, then failed");
 await new Promise(resolve => setTimeout(resolve, 5000));
 process.exit(1);
 BAD
-printf 'FROM %s\nCOPY old-guard.mjs /app/old-guard.mjs\nCMD ["node", "--import", "/opt/tsx/node_modules/tsx/dist/esm/index.mjs", "old-guard.mjs"]\n' "$REG/codesh-api:1.0.0" >"$WORK/build/Dockerfile"
+printf 'FROM %s\nCOPY old-guard.mjs /app/old-guard.mjs\nCMD ["node", "--import", "/opt/tsx/node_modules/tsx/dist/esm/index.mjs", "old-guard.mjs"]\n' "$REG/gachipad-api:1.0.0" >"$WORK/build/Dockerfile"
 df -h /
-docker build -q -t "$REG/codesh-api:1.0.0" -f "$WORK/build/Dockerfile" "$WORK/build" >/dev/null
+docker build -q -t "$REG/gachipad-api:1.0.0" -f "$WORK/build/Dockerfile" "$WORK/build" >/dev/null
 for name in api collab web mdns; do
-  docker push -q "$REG/codesh-$name:1.0.0" >/dev/null
+  docker push -q "$REG/gachipad-$name:1.0.0" >/dev/null
   for v in 1.0.1 1.0.2; do
     if [ "$name" = api ] && [ "$v" = 1.0.2 ]; then
-      printf 'FROM %s\nCOPY bad-api.mjs /app/bad-api.mjs\nCMD ["node", "bad-api.mjs"]\n' "$REG/codesh-api:1.0.0" >"$WORK/build/Dockerfile"
+      printf 'FROM %s\nCOPY bad-api.mjs /app/bad-api.mjs\nCMD ["node", "bad-api.mjs"]\n' "$REG/gachipad-api:1.0.0" >"$WORK/build/Dockerfile"
       df -h /
-      docker build -q -t "$REG/codesh-api:1.0.2" -f "$WORK/build/Dockerfile" "$WORK/build" >/dev/null
+      docker build -q -t "$REG/gachipad-api:1.0.2" -f "$WORK/build/Dockerfile" "$WORK/build" >/dev/null
     else
       df -h /
       # Its own layer, so 1.0.1 has its own digest like a real release.
-      printf 'FROM %s\nLABEL org.opencontainers.image.version=%s\n' "$REG/codesh-$name:1.0.0" "$v" |
-        docker build -q -t "$REG/codesh-$name:$v" - >/dev/null
+      printf 'FROM %s\nLABEL org.opencontainers.image.version=%s\n' "$REG/gachipad-$name:1.0.0" "$v" |
+        docker build -q -t "$REG/gachipad-$name:$v" - >/dev/null
     fi
-    docker push -q "$REG/codesh-$name:$v" >/dev/null
+    docker push -q "$REG/gachipad-$name:$v" >/dev/null
   done
 done
-ok "pushed codesh-{api,collab,web,mdns}:{1.0.0,1.0.1,1.0.2} to $REG"
+ok "pushed gachipad-{api,collab,web,mdns}:{1.0.0,1.0.1,1.0.2} to $REG"
 
 step "release files with bundle.sh, from the registry"
 [ "$(free_gib "$DOCKER_ROOT")" -ge "$MIN_DOCKER_GIB" ] || fail "less than $MIN_DOCKER_GIB GiB free in $DOCKER_ROOT after the builds"
 for v in 1.0.0 1.0.1 1.0.2; do
   df -h /
-  (cd "$WORK/deploy" && BUNDLE_SOURCE=registry CODESH_REGISTRY="$REG" BUNDLE_SUFFIX=-linux-amd64 bash bundle.sh "$v") | tail -n 1
-  dir="$SRV/dl/kim0040/codesh/releases/download/v$v"
+  (cd "$WORK/deploy" && BUNDLE_SOURCE=registry GACHIPAD_REGISTRY="$REG" BUNDLE_SUFFIX=-linux-amd64 bash bundle.sh "$v") | tail -n 1
+  dir="$SRV/dl/kim0040/gachipad/releases/download/v$v"
   mkdir -p "$dir"
-  cp "$WORK/deploy/dist/codesh-deploy-$v.tar.gz" "$dir/"
-  (cd "$WORK/deploy/dist" && sha256sum "codesh-deploy-$v.tar.gz" "codesh-$v-linux-amd64.tar.gz") >"$dir/SHA256SUMS"
+  cp "$WORK/deploy/dist/gachipad-deploy-$v.tar.gz" "$dir/"
+  (cd "$WORK/deploy/dist" && sha256sum "gachipad-deploy-$v.tar.gz" "gachipad-$v-linux-amd64.tar.gz") >"$dir/SHA256SUMS"
 done
-tar xzf "$WORK/deploy/dist/codesh-deploy-1.0.1.tar.gz" -O --wildcards '*/IMAGES' | tee "$WORK/images-1.0.1"
-grep -c '^codesh-[a-z]* sha256:[0-9a-f]\{64\}$' "$WORK/images-1.0.1" | grep -qx 4 || fail "IMAGES of 1.0.1"
-size="$(wc -c <"$WORK/deploy/dist/codesh-1.0.0-linux-amd64.tar.gz")"
+tar xzf "$WORK/deploy/dist/gachipad-deploy-1.0.1.tar.gz" -O --wildcards '*/IMAGES' | tee "$WORK/images-1.0.1"
+grep -c '^gachipad-[a-z]* sha256:[0-9a-f]\{64\}$' "$WORK/images-1.0.1" | grep -qx 4 || fail "IMAGES of 1.0.1"
+size="$(wc -c <"$WORK/deploy/dist/gachipad-1.0.0-linux-amd64.tar.gz")"
 [ "$size" -lt 2147483648 ] || fail "bundle is $size bytes"
 printf '[{"tag_name":"v1.0.2","prerelease":false},{"tag_name":"v1.0.1","prerelease":false},{"tag_name":"v1.0.0","prerelease":false}]' \
-  >"$SRV/api/repos/kim0040/codesh/releases"
+  >"$SRV/api/repos/kim0040/gachipad/releases"
 SRV_PORT="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 python3 -m http.server --bind 127.0.0.1 --directory "$SRV" "$SRV_PORT" >/dev/null 2>&1 &
 SERVER_PID=$!
@@ -180,15 +184,15 @@ ok "bundle $((size / 1024 / 1024)) MiB; deploy archives, SHA256SUMS and a releas
 
 step "install 1.0.0 from the offline bundle"
 # Only the bundle may provide the images: drop the local tags of 1.0.1 and 1.0.2.
-docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E "^$REG/codesh-[a-z]+:1\.0\.[12]$" | xargs -r docker image rm -f >/dev/null
-tar xzf "$WORK/deploy/dist/codesh-1.0.0-linux-amd64.tar.gz" -C "$INSTALL" --strip-components=1
+docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E "^$REG/gachipad-[a-z]+:1\.0\.[12]$" | xargs -r docker image rm -f >/dev/null
+tar xzf "$WORK/deploy/dist/gachipad-1.0.0-linux-amd64.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
 for kv in HTTP_PORT=$P HTTPS_PORT="${VERIFY_HTTPS_PORT:-18843}" NETWORK_SUBNET=172.29.97.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
   sed -i "s|^${kv%%=*}=.*|$kv|" "$INSTALL/.env"
 done
 in_install ./install.sh | tail -n 2
 rm "$INSTALL/images.tar"
-[ "$(envv CODESH_REGISTRY)" = "$REG" ] || fail "CODESH_REGISTRY not taken from the bundle"
+[ "$(envv GACHIPAD_REGISTRY)" = "$REG" ] || fail "GACHIPAD_REGISTRY not taken from the bundle"
 ID="$(create_data marker-one)"
 [ -n "$ID" ] || fail "no share id"
 has_marker "$ID" marker-one || fail "no data"
@@ -198,10 +202,10 @@ step "update.sh --check and an update to 1.0.1"
 in_install ./update.sh --check | tee "$WORK/check.log"
 grep -q 'installed 1.0.0, newest 1.0.2' "$WORK/check.log" || fail "--check"
 in_install ./update.sh --version 1.0.1 --yes | tail -n 4
-[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "not on 1.0.1"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "not on 1.0.1"
 in_install docker compose ps --format '{{.Service}} {{.Image}} {{.State}}' | tee "$WORK/ps.log"
-grep -q "^api $REG/codesh-api:1.0.1 running" "$WORK/ps.log" || fail "api does not run 1.0.1"
-grep -q "^caddy $REG/codesh-web:1.0.1 running" "$WORK/ps.log" || fail "caddy does not run 1.0.1"
+grep -q "^api $REG/gachipad-api:1.0.1 running" "$WORK/ps.log" || fail "api does not run 1.0.1"
+grep -q "^caddy $REG/gachipad-web:1.0.1 running" "$WORK/ps.log" || fail "caddy does not run 1.0.1"
 curl -fsS "http://127.0.0.1:$P/readyz" >/dev/null || fail "/readyz"
 has_marker "$ID" marker-one || fail "data lost in the update"
 admin_update | tee "$WORK/admin.json" | head -c 400
@@ -239,8 +243,8 @@ mutated=0
 for _ in $(seq 60); do
   # shellcheck disable=SC2016 # credentials are read only inside our Mongo container
   if in_install docker compose exec -T mongo mongosh --quiet --eval '
-    db.getSiblingDB("admin").auth("codesh", process.env.MONGO_INITDB_ROOT_PASSWORD);
-    const app = db.getSiblingDB("codesh");
+    db.getSiblingDB("admin").auth("gachipad", process.env.MONGO_INITDB_ROOT_PASSWORD);
+    const app = db.getSiblingDB("gachipad");
     print(app.update_failure_marker.countDocuments({}) > 0 && app.shares.countDocuments({}) === 0 ? "mutated" : "waiting");
   ' 2>/dev/null | grep -qx mutated; then mutated=1; break; fi
   sleep .1
@@ -253,9 +257,9 @@ ok "observed new collection and deleted shares with ingress closed, before rollb
 if wait "$updater"; then fail "update to a broken release succeeded"; fi
 tail -n 8 "$WORK/bad.log"
 grep -q 'rolling back to 1.0.1' "$WORK/bad.log" || fail "no rollback"
-[ "$(envv CODESH_VERSION)" = 1.0.1 ] || fail "version not rolled back"
+[ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "version not rolled back"
 curl -fsS "http://127.0.0.1:$P/readyz" >/dev/null || fail "1.0.1 not healthy after the rollback"
-in_install docker compose ps --format '{{.Service}} {{.Image}}' | grep -q "^api $REG/codesh-api:1.0.1$" || fail "api not on 1.0.1"
+in_install docker compose ps --format '{{.Service}} {{.Image}}' | grep -q "^api $REG/gachipad-api:1.0.1$" || fail "api not on 1.0.1"
 has_marker "$ID" marker-one || fail "first share lost in rollback"
 has_marker "$ID2" marker-two || fail "second share lost in rollback"
 has_marker "$ID3" accepted-during-pull || fail "accepted write during pull lost in rollback"

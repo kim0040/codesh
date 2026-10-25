@@ -1,4 +1,4 @@
-name: codesh-dev
+name: gachipad-dev
 
 services:
   mongo:

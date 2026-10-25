@@ -309,7 +309,7 @@ export const guideEn = {
   "guide.network.address.body1":
     "People need the server's address once. The Share window shows it next to the join code, and the QR code saves typing it.",
   "guide.network.address.body2":
-    "If the administrator has switched on the optional name service, the server also answers to codesh.local on networks that support mDNS, so there is nothing to remember. Otherwise people use the server's regular address.",
+    "If the administrator has switched on the optional name service, the server also answers to gachipad.local on networks that support mDNS, so there is nothing to remember. Otherwise people use the server's regular address.",
 
   "guide.network.size.title": "Large uploads",
   "guide.network.size.body1":
@@ -412,7 +412,7 @@ export const guideEn = {
 
   "guide.security.host.title": "Run it yourself",
   "guide.security.host.body1":
-    "gachipad is open source under the MIT license. It runs on your own server with Docker Compose: a web server, the API, the editing service, MongoDB and Valkey. An optional service adds the codesh.local name.",
+    "gachipad is open source under the MIT license. It runs on your own server with Docker Compose: a web server, the API, the editing service, MongoDB and Valkey. An optional service adds the gachipad.local name.",
   "guide.security.host.body2":
     "Nothing depends on an outside service, and each release comes with an offline bundle for networks without internet.",
 

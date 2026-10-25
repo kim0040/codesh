@@ -60,7 +60,7 @@ describe.skipIf(!integration)("GET /api/events", () => {
     const response = await fetch(`${base}/api/events`, {
       headers: { "x-forwarded-for": h.client().ip },
     });
-    expect(response.headers.get("set-cookie")).toMatch(/^codesh_sid=/);
+    expect(response.headers.get("set-cookie")).toMatch(/^gachipad_sid=/);
     await response.body?.cancel();
   });
 

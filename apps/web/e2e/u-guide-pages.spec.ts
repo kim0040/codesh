@@ -22,7 +22,7 @@ const OUT_OF_SCOPE = /\b(video call|voice|webcam|microphone)\b|화상|음성 통
 
 async function openGuide(page: Page, slug: string, locale: Locale, hash = "") {
   await page.addInitScript((value) => {
-    localStorage.setItem("codesh.locale", value);
+    localStorage.setItem("gachipad.locale", value);
   }, locale);
   await page.goto(`/guide/${slug}${hash}`);
   await expect(page.locator("main h1")).toBeVisible();

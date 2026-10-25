@@ -303,7 +303,7 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.network.address.body1":
     "서버 주소는 한 번만 알면 돼요. 공유 창에 참여 코드 옆으로 주소가 보이고, QR 코드를 쓰면 주소를 입력하지 않아도 돼요.",
   "guide.network.address.body2":
-    "관리자가 선택 기능인 이름 서비스를 켜 두었다면, mDNS를 지원하는 네트워크에서는 서버가 codesh.local로도 응답해서 외울 게 없어요. 그렇지 않으면 서버의 평소 주소를 써요.",
+    "관리자가 선택 기능인 이름 서비스를 켜 두었다면, mDNS를 지원하는 네트워크에서는 서버가 gachipad.local로도 응답해서 외울 게 없어요. 그렇지 않으면 서버의 평소 주소를 써요.",
 
   "guide.network.size.title": "큰 파일 업로드",
   "guide.network.size.body1":
@@ -405,7 +405,7 @@ export const guideKo: Record<GuideKey, string> = {
 
   "guide.security.host.title": "직접 운영하기",
   "guide.security.host.body1":
-    "gachipad는 MIT 라이선스의 오픈소스예요. Docker Compose로 내 서버에서 돌려요. 웹 서버, API, 편집 서비스, MongoDB, Valkey로 이루어져 있고, 선택 서비스로 codesh.local 이름을 추가할 수 있어요.",
+    "gachipad는 MIT 라이선스의 오픈소스예요. Docker Compose로 내 서버에서 돌려요. 웹 서버, API, 편집 서비스, MongoDB, Valkey로 이루어져 있고, 선택 서비스로 gachipad.local 이름을 추가할 수 있어요.",
   "guide.security.host.body2":
     "외부 서비스에 기대는 곳이 없고, 릴리스마다 인터넷이 없는 네트워크용 오프라인 번들이 함께 나와요.",
 

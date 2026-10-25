@@ -42,7 +42,7 @@ test("client diagnostics export contains real failures without document text, PI
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const raw = localStorage.getItem("codesh.diagnostics.v1");
+          const raw = localStorage.getItem("gachipad.diagnostics.v1");
           return raw
             ? JSON.parse(raw).events.some(
                 (e: { kind: string; details: { status?: number } }) =>
@@ -70,7 +70,7 @@ test("client diagnostics export contains real failures without document text, PI
     expect(data.breadcrumbs.some((entry: { kind: string }) => entry.kind === "disconnect")).toBe(
       true,
     );
-    expect(data.header).toContain(`codesh-web-sourcemaps-${data.environment.appVersion}.tar.gz`);
+    expect(data.header).toContain(`gachipad-web-sourcemaps-${data.environment.appVersion}.tar.gz`);
     expect(data.environment.appVersion).toBeTruthy();
     expect(data.events.some((e: { kind: string }) => e.kind === "api_failure")).toBe(true);
     expect(data.events.some((e: { kind: string }) => e.kind === "disconnect")).toBe(true);
@@ -155,7 +155,7 @@ test("admin operations tabs show live data and fit 320px; tokens stay out of que
     expect(raw).not.toContain(ADMIN_TOKEN);
     expect(raw).not.toContain("WRONG-DIAG-ATTEMPT");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
-    expect(await page.evaluate(() => sessionStorage.getItem("codesh.admin"))).toBeNull();
+    expect(await page.evaluate(() => sessionStorage.getItem("gachipad.admin"))).toBeNull();
     expect(
       await page.evaluate(async () => {
         const path = "/src/lib/query.ts";

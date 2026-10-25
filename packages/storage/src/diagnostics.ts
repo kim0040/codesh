@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
   type DiagnosticSnapshot,
   type DiagnosticSource,
   diagnosticError,
+  renamedEnv,
   scrubDiagnosticDetails,
 } from "@gachipad/shared";
 import type { DiagnosticsStore } from "./types.js";
@@ -177,10 +178,13 @@ export type CrashDiagnosticKind = Extract<DiagnosticKind, "uncaught" | "rejectio
 
 /** Small, scrubbed crash records survive a Node process restart within its writable temp area. */
 export function crashDiagnosticPath(source: "api" | "collab"): string {
-  const dataDir = process.env.CODESH_DATA_DIR ?? process.env.DATA_DIR;
+  const dataDir = renamedEnv(process.env, "GACHIPAD_DATA_DIR") ?? process.env.DATA_DIR;
+  // legacy codesh name (1.0.x); remove in 2.0
+  const legacy = join(tmpdir(), "codesh", "tmp", `${source}-crash.json`);
+  if (!dataDir && existsSync(legacy)) return legacy;
   return dataDir
     ? join(dataDir, "tmp", `${source}-crash.json`)
-    : join(tmpdir(), "codesh", "tmp", `${source}-crash.json`);
+    : join(tmpdir(), "gachipad", "tmp", `${source}-crash.json`);
 }
 
 export function writeCrashDiagnostic(

@@ -17,8 +17,8 @@
     "load": "pnpm --filter @gachipad/load start",
     "load:report": "pnpm --filter @gachipad/load report",
     "bundle": "bash deploy/bundle.sh",
-    "services:up": "docker compose -f deploy/docker-compose.dev.yml up -d --wait",
-    "services:down": "docker compose -f deploy/docker-compose.dev.yml down",
+    "services:up": "bash scripts/services.sh up -d --wait",
+    "services:down": "bash scripts/services.sh down",
     "licenses": "node scripts/check-licenses.mjs"
   },
   "devDependencies": {

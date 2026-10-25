@@ -2,11 +2,12 @@
 export type ThemePreference = "system" | "dark" | "light";
 export type ResolvedTheme = "dark" | "light";
 
-const STORAGE_KEY = "codesh.theme";
+const STORAGE_KEY = "gachipad.theme";
 
 export function getStoredTheme(): ThemePreference {
   try {
-    const value = localStorage.getItem(STORAGE_KEY);
+    // legacy codesh name (1.0.x); remove in 2.0
+    const value = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem("codesh.theme");
     return value === "dark" || value === "light" ? value : "system";
   } catch {
     return "system";
@@ -21,6 +22,10 @@ export function setTheme(
   if (preference === "system") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", preference);
   try {
+    // legacy codesh name (1.0.x); remove in 2.0
+    if (localStorage.getItem("gachipad.legacy-storage") === "1" && preference !== "system") {
+      localStorage.setItem("codesh.theme", preference);
+    } else localStorage.removeItem("codesh.theme");
     if (preference === "system") localStorage.removeItem(STORAGE_KEY);
     else localStorage.setItem(STORAGE_KEY, preference);
   } catch {

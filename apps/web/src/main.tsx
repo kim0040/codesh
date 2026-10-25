@@ -1,3 +1,4 @@
+import "./lib/storage-migration";
 import { applyStoredTheme } from "@gachipad/ui";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
@@ -10,14 +11,15 @@ import { hasSeenSession, listenForForgetting } from "./lib/device";
 import { installDiagnostics } from "./lib/diagnostics";
 import { queryClient } from "./lib/query";
 import { sessionQuery } from "./lib/session";
+import { initializeLegacyDatabases } from "./lib/storage-migration";
 import { routeTree } from "./routeTree.gen";
-
-installDiagnostics();
-applyStoredTheme();
 
 // An edit key in the address (`#key=` or a legacy `?key=`) moves into memory before the router
 // reads the location, so it never reaches router state or history.
 captureKeyFromUrl();
+await initializeLegacyDatabases();
+installDiagnostics();
+applyStoredTheme();
 listenForForgetting();
 // A different account than the last one on this device must not inherit its offline copies, also
 // when the first screen never asks who is signed in.

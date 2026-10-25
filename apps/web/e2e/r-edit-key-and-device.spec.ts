@@ -20,7 +20,7 @@ async function copies(page: Page): Promise<string[]> {
       return await page.evaluate(async () =>
         (await indexedDB.databases())
           .map((info) => info.name ?? "")
-          .filter((name) => name.startsWith("codesh:doc:")),
+          .filter((name) => name.startsWith("gachipad:doc:")),
       );
     } catch (error) {
       const navigating = /context was destroyed|SecurityError/.test(String(error));
@@ -32,7 +32,7 @@ async function copies(page: Page): Promise<string[]> {
 
 async function expectCopy(page: Page, id: string, present: boolean): Promise<void> {
   await expect
-    .poll(async () => (await copies(page)).includes(`codesh:doc:${id}`), { timeout: 15_000 })
+    .poll(async () => (await copies(page)).includes(`gachipad:doc:${id}`), { timeout: 15_000 })
     .toBe(present);
 }
 
@@ -364,7 +364,7 @@ test("a clean profile writes no offline copy before the device question is answe
     await upgraded.page.addInitScript(() => {
       if (!sessionStorage.getItem("seeded")) {
         sessionStorage.setItem("seeded", "1");
-        localStorage.setItem("codesh.prefs", JSON.stringify({ offlineCopy: true }));
+        localStorage.setItem("gachipad.prefs", JSON.stringify({ offlineCopy: true }));
       }
     });
     await logIndexedDb(upgraded.page);
@@ -374,9 +374,9 @@ test("a clean profile writes no offline copy before the device question is answe
 
     await owner.page.waitForTimeout(1200);
     for (const page of [owner.page, guest.page, upgraded.page]) {
-      expect((await idbLog(page)).filter((entry) => entry.startsWith("open codesh:doc:"))).toEqual(
-        [],
-      );
+      expect(
+        (await idbLog(page)).filter((entry) => entry.startsWith("open gachipad:doc:")),
+      ).toEqual([]);
       expect(await copies(page)).toEqual([]);
     }
 
@@ -733,10 +733,10 @@ test("two accounts with the same name and no email are different accounts", asyn
       .poll(async () => (await idbLog(owner.page)).filter((entry) => entry.endsWith(id)), {
         timeout: 15_000,
       })
-      .toContain(`delete codesh:doc:${id}`);
+      .toContain(`delete gachipad:doc:${id}`);
     const log = (await idbLog(owner.page)).filter((entry) => entry.endsWith(id));
     // Deleted before anything of this session could open it.
-    expect(log[0]).toBe(`delete codesh:doc:${id}`);
+    expect(log[0]).toBe(`delete gachipad:doc:${id}`);
   } finally {
     await closeAll(owner);
   }

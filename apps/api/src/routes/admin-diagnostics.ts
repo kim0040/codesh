@@ -86,7 +86,7 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
       );
       return {
         format: 1,
-        header: `gachipad server diagnostics v${ctx.version}: operational categories, short per-process breadcrumb timelines, redacted source frames and counts. No document content, credentials, URLs or client addresses. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${ctx.version}.tar.gz.`,
+        header: `gachipad server diagnostics v${ctx.version}: operational categories, short per-process breadcrumb timelines, redacted source frames and counts. No document content, credentials, URLs or client addresses. Source maps for this version are on the GitHub release page as gachipad-web-sourcemaps-${ctx.version}.tar.gz.`,
         exportedAt: new Date().toISOString(),
         version: ctx.version,
         uptimeSeconds: Math.floor((Date.now() - ctx.startedAt) / 1000),

@@ -58,7 +58,7 @@ vi.mock("../prefs", () => ({ subscribePrefs: () => () => {} }));
 vi.mock("../device", () => ({
   CLOSE_TIMEOUT_MS: 4000,
   dropCopy: fakes.dropCopy,
-  idbName: (shareId: string) => `codesh:doc:${shareId}`,
+  idbName: (shareId: string) => `gachipad:doc:${shareId}`,
   leaveAfterDenial: fakes.leaveAfterDenial,
   mayKeepCopy: () => true,
   noteCopy: () => true,

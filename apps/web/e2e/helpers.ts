@@ -21,7 +21,7 @@ export async function newUser(
     baseURL: BASE_URL,
     locale: "en-US",
     // The API's CSRF guard: the app sends it itself, direct API calls from specs need it too.
-    extraHTTPHeaders: { "X-Codesh": "1" },
+    extraHTTPHeaders: { "X-Gachipad": "1" },
     ...options,
   });
   const response = await context.request.patch("/api/session", { data: { name } });

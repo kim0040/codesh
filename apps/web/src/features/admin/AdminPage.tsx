@@ -37,7 +37,7 @@ import { TemplatesEditor } from "./TemplatesEditor";
 import { TemplatesPanel } from "./TemplatesPanel";
 import { UpdatesPanel, updateQuery } from "./UpdatesPanel";
 
-const TOKEN_KEY = "codesh.admin";
+const TOKEN_KEY = "gachipad.admin";
 
 function loadToken(): string {
   try {
@@ -51,6 +51,11 @@ function saveToken(token: string) {
   try {
     if (token) sessionStorage.setItem(TOKEN_KEY, token);
     else sessionStorage.removeItem(TOKEN_KEY);
+    // legacy codesh name (1.0.x); remove in 2.0
+    if (sessionStorage.getItem("codesh.admin") !== null) {
+      if (token) sessionStorage.setItem("codesh.admin", token);
+      else sessionStorage.removeItem("codesh.admin");
+    }
   } catch {
     // The token then lives only for this page view.
   }

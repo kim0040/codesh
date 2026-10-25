@@ -869,7 +869,7 @@ test.describe("OS-dependent features", () => {
       const context = await browser.newContext({
         baseURL: BASE_URL,
         deviceScaleFactor: scale,
-        extraHTTPHeaders: { "X-Codesh": "1" },
+        extraHTTPHeaders: { "X-Gachipad": "1" },
         locale: "en-US",
       });
       try {

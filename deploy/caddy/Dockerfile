@@ -4,7 +4,9 @@
 ARG NODE_IMAGE=node:22.23.3-slim
 ARG CADDY_IMAGE=caddy:2.11.7-alpine
 # Release builds pass the tag's version; it must equal the root package.json version.
+# legacy codesh name (1.0.x); remove in 2.0
 ARG CODESH_VERSION=""
+ARG GACHIPAD_VERSION=${CODESH_VERSION}
 
 FROM ${NODE_IMAGE} AS web
 ENV PNPM_HOME=/pnpm
@@ -12,26 +14,26 @@ ENV PATH=$PNPM_HOME:$PATH
 RUN npm install -g pnpm@9.15.4 --no-audit --no-fund
 WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store pnpm fetch
+RUN --mount=type=cache,id=gachipad-pnpm,target=/pnpm/store pnpm fetch
 COPY . .
-ARG CODESH_VERSION
+ARG GACHIPAD_VERSION
 RUN version="$(node -p 'require("./package.json").version')" \
-    && { [ -z "$CODESH_VERSION" ] || [ "$CODESH_VERSION" = "$version" ] \
-      || { echo "CODESH_VERSION=$CODESH_VERSION, package.json has $version" >&2; exit 1; }; }
-RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store \
+    && { [ -z "$GACHIPAD_VERSION" ] || [ "$GACHIPAD_VERSION" = "$version" ] \
+      || { echo "GACHIPAD_VERSION=$GACHIPAD_VERSION, package.json has $version" >&2; exit 1; }; }
+RUN --mount=type=cache,id=gachipad-pnpm,target=/pnpm/store \
     pnpm install --offline --frozen-lockfile --filter @gachipad/web... \
     && pnpm --filter @gachipad/web build \
     && node deploy/caddy/csp.mjs \
     && find apps/web/dist -type f -name '*.map' -delete
 
 FROM ${CADDY_IMAGE} AS runtime
-ARG CODESH_VERSION
-LABEL org.opencontainers.image.title="codesh-web" \
-      org.opencontainers.image.source="https://github.com/kim0040/codesh" \
-      org.opencontainers.image.version="${CODESH_VERSION}"
+ARG GACHIPAD_VERSION
+LABEL org.opencontainers.image.title="gachipad-web" \
+      org.opencontainers.image.source="https://github.com/kim0040/gachipad" \
+      org.opencontainers.image.version="${GACHIPAD_VERSION}"
 COPY --from=web /repo/Caddyfile.production /etc/caddy/Caddyfile
 COPY --from=web /repo/apps/web/dist /srv
-COPY --from=web /repo/LICENSE /repo/THIRD_PARTY_NOTICES.md /usr/share/doc/codesh/
+COPY --from=web /repo/LICENSE /repo/THIRD_PARTY_NOTICES.md /usr/share/doc/gachipad/
 # Source maps are published with the release, never served (removed in the build stage above).
 RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 EXPOSE 80 443

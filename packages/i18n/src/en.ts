@@ -908,9 +908,9 @@ export const en = {
   "admin.update.releaseLink": "Release page",
   "admin.update.newTab": "(opens in a new tab)",
   "admin.update.how.title": "How to update",
-  "admin.update.how.online": "Server with internet: in the codesh folder, run",
+  "admin.update.how.online": "Server with internet: in the gachipad folder, run",
   "admin.update.how.offline":
-    "Server without internet: download the bundle for your server (linux-amd64 or linux-arm64) and its .sha256 file from the release page, copy both next to codesh, then run",
+    "Server without internet: download the bundle for your server (linux-amd64 or linux-arm64) and its .sha256 file from the release page, copy both next to gachipad, then run",
   "admin.update.how.safety":
     "update.sh backs up the database first and rolls back to the current version if the new one does not start. upgrade.sh also backs up first.",
   "admin.update.copyAction": "Copy",

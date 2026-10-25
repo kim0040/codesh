@@ -22,7 +22,7 @@ const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   baseURL: origin,
   locale: "en-US",
-  extraHTTPHeaders: { "X-Codesh": "1" },
+  extraHTTPHeaders: { "X-Gachipad": "1" },
 });
 const violations = [];
 const external = [];

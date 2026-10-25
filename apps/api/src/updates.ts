@@ -260,6 +260,7 @@ export class UpdateChecker {
     try {
       response = await this.fetchImpl(url, {
         headers,
+        redirect: "follow",
         signal: AbortSignal.timeout(this.timers.timeoutMs),
       });
     } catch {

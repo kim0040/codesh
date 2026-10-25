@@ -7,15 +7,15 @@ import { closeAll, createShare, newUser, type } from "./helpers";
 const available: AdminUpdateResponse = {
   current: "1.0.0",
   latest: "1.2.0",
-  url: "https://github.com/kim0040/codesh/releases/tag/v1.2.0",
+  url: "https://github.com/kim0040/gachipad/releases/tag/v1.2.0",
   publishedAt: "2026-10-20T09:30:00.000Z",
   notes: "## Added\n- Faster sync <img src=x onerror=alert(1)>\n\n## Fixed\n- **Bold** stays text",
   checkedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
   status: "ok",
   updateAvailable: true,
-  repo: "kim0040/codesh",
+  repo: "kim0040/gachipad",
   channel: "stable",
-  releasesUrl: "https://github.com/kim0040/codesh/releases",
+  releasesUrl: "https://github.com/kim0040/gachipad/releases",
   updater: {
     auto: { enabled: true, at: "04:00", policy: "patch" },
     lastRun: {
@@ -72,7 +72,7 @@ test("admin: a newer release shows as a badge and an Updates section with plain-
     await expect(link).toHaveAttribute("rel", /noopener/);
 
     await expect(panel.getByText("./update.sh", { exact: true })).toBeVisible();
-    await expect(panel.getByText("./upgrade.sh codesh-1.2.0-linux-amd64.tar.gz")).toBeVisible();
+    await expect(panel.getByText("./upgrade.sh gachipad-1.2.0-linux-amd64.tar.gz")).toBeVisible();
     await expect(panel.getByTestId("update-auto")).toContainText(
       "On: every day around 04:00, bug-fix releases only",
     );

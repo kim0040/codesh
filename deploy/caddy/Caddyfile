@@ -1,6 +1,6 @@
 # gachipad edge: static web app, /api (incl. SSE) and /collab (WebSocket) -- docs/ARCHITECTURE.md §1.
 #
-# SITE_ADDRESS  ":80" (default) serves plain HTTP. A host name (codesh.local) turns on HTTPS;
+# SITE_ADDRESS  ":80" (default) serves plain HTTP. A host name (gachipad.local) turns on HTTPS;
 #               put a `tls ...` directive for it in /etc/caddy/tls/*.caddy (see deploy/README.md).
 # TRUSTED_PROXIES  CIDRs of a load balancer in front of Caddy whose X-Forwarded-For is kept.
 #               Without one Caddy replaces the header with the client address it sees.
@@ -12,7 +12,7 @@
 	}
 }
 
-{$SITE_ADDRESS::80} {
+{$SITE_ADDRESS::80}{$SITE_ALIASES} {
 	import /etc/caddy/tls/*.caddy
 
 	header {

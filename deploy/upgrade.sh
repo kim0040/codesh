@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Offline upgrades use the same transaction, maintenance boundary and rollback as online updates.
-#   ./upgrade.sh codesh-<new version>.tar.gz [--allow-major]
+#   ./upgrade.sh gachipad-<new version>.tar.gz [--allow-major]
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")"

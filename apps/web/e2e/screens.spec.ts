@@ -38,7 +38,7 @@ async function shot(page: Page, name: string) {
 async function setTheme(user: User, theme: "dark" | "light") {
   await user.context.addInitScript((value) => {
     try {
-      localStorage.setItem("codesh.theme", value);
+      localStorage.setItem("gachipad.theme", value);
     } catch {
       // Storage may be blocked; the screenshot then uses the system scheme.
     }

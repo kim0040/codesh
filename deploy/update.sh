@@ -11,13 +11,13 @@
 #   ./update.sh --auto                   what the timer runs: only what the policy allows
 #   --dry-run                            with --enable-auto / --disable-auto: print, change nothing
 #
-# Online: release list -> SHA256SUMS -> codesh-deploy-<v>.tar.gz checked against it -> its own
+# Online: release list -> SHA256SUMS -> gachipad-deploy-<v>.tar.gz checked against it -> its own
 # SHA256SUMS -> staged files -> pull/load + image digests -> close ingress -> stop writers -> backup
 # (IMAGES) -> up -d -> /healthz and /readyz. If the new version does not get healthy, the previous
 # files and version come back, the DB backup is restored with writers stopped, then the previous
 # images (still on the host) start and pass readiness before ingress opens. Every run is logged to state/update.log; state/update.json is what the admin console shows.
 #
-# Settings, from the environment or .env: UPDATE_REPO (kim0040/codesh), UPDATE_CHANNEL (stable or
+# Settings, from the environment or .env: UPDATE_REPO (kim0040/gachipad), UPDATE_CHANNEL (stable or
 # prerelease), UPDATE_API_URL (https://api.github.com), UPDATE_DOWNLOAD_URL (https://github.com),
 # UPDATE_HEALTH_TIMEOUT (180 s). No credentials: the release API and the images are public.
 set -euo pipefail
@@ -33,9 +33,14 @@ LAST_RUN="$STATE/last-run"
 AUTO_CONF="$STATE/auto.conf"
 ROLLBACK=rollback
 MARKER="$STATE/transaction"
-UNIT=codesh-update
-SYSTEMD_DIR="${CODESH_SYSTEMD_DIR:-/etc/systemd/system}"
-CRON_TAG="# codesh-update $(pwd)"
+UNIT=gachipad-update
+SYSTEMD_DIR="${GACHIPAD_SYSTEMD_DIR:-/etc/systemd/system}"
+# legacy codesh name (1.0.x); remove in 2.0
+# Existing schedulers keep their installed unit/tag, avoiding two timers after the update.
+if [ -f "$SYSTEMD_DIR/codesh-update.timer" ] || [ "$(env_get GACHIPAD_LEGACY_INSTALL)" = 1 ]; then
+  UNIT=codesh-update
+fi
+CRON_TAG="# $UNIT $(pwd)"
 FILES="docker-compose.yml .env.example VERSION lib.sh generate-secrets.sh install.sh upgrade.sh update.sh backup.sh restore.sh README.md"
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "$0"; }
@@ -100,10 +105,10 @@ version_gt() {
 # fetch url file [seconds]: GET without credentials or cookies
 fetch() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --proto '=https,http' --max-time "${3:-30}" -A "codesh-update/$CURRENT" \
+    curl -fsSL --proto '=https,http' --max-time "${3:-30}" -A "gachipad-update/$CURRENT" \
       -H 'Accept: application/vnd.github+json' -o "$2" "$1"
   else
-    wget -q -T "${3:-30}" -U "codesh-update/$CURRENT" -O "$2" "$1"
+    wget -q -T "${3:-30}" -U "gachipad-update/$CURRENT" -O "$2" "$1"
   fi
 }
 
@@ -238,7 +243,7 @@ fail() {
 # --- automatic updates ---------------------------------------------------------------------------
 
 init_system() {
-  if [ -n "${CODESH_INIT:-}" ]; then printf '%s' "$CODESH_INIT"
+  if [ -n "${GACHIPAD_INIT:-}" ]; then printf '%s' "$GACHIPAD_INIT"
   elif [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then printf systemd
   else printf cron; fi
 }
@@ -264,7 +269,7 @@ enable_auto() {
   if [ "$init" = systemd ]; then
     [ "$DRY" = 1 ] || [ -w "$SYSTEMD_DIR" ] || die "writing $SYSTEMD_DIR needs root: sudo ./update.sh --enable-auto ..."
     put "$SYSTEMD_DIR/$UNIT.service" "[Unit]
-Description=codesh automatic update ($dir)
+Description=gachipad automatic update ($dir)
 After=docker.service network-online.target
 Wants=network-online.target
 
@@ -274,7 +279,7 @@ KillMode=mixed
 TimeoutStopSec=30min
 ExecStart=$dir/update.sh --auto"
     put "$SYSTEMD_DIR/$UNIT.timer" "[Unit]
-Description=Daily codesh update window
+Description=Daily gachipad update window
 
 [Timer]
 OnCalendar=*-*-* $AT:00
@@ -389,7 +394,7 @@ mongo_image() {
 verify_images() {
   [ -f "$CANDIDATE/IMAGES" ] || { say "no IMAGES list in this release; image digests not checked"; return 0; }
   local name digest ref registry
-  registry="$(setting CODESH_REGISTRY ghcr.io/kim0040)"
+  registry="$(setting GACHIPAD_REGISTRY ghcr.io/kim0040)"
   while read -r name digest; do
     [ -n "$name" ] || continue
     ref="$registry/$name:$TARGET"
@@ -521,13 +526,13 @@ update() {
 
   if [ "$YES" != 1 ]; then
     [ -t 0 ] || die "add --yes to update without a terminal"
-    read -r -p "Update codesh $CURRENT -> $TARGET? [y/N] " answer
+    read -r -p "Update gachipad $CURRENT -> $TARGET? [y/N] " answer
     [ "$answer" = y ] || [ "$answer" = Y ] || die "cancelled"
   fi
 
   say "updating $CURRENT -> $TARGET"
   if [ -z "$src" ]; then
-    local base="$DOWNLOAD/$REPO/releases/download/v$TARGET" asset="codesh-deploy-$TARGET.tar.gz" expected
+    local base="$DOWNLOAD/$REPO/releases/download/v$TARGET" asset="gachipad-deploy-$TARGET.tar.gz" expected
     fetch "$base/SHA256SUMS" "$WORK/SHA256SUMS" || fail failed "cannot download SHA256SUMS of v$TARGET"
     expected="$(awk -v f="$asset" '$2 == f || $2 == "*" f { print $1 }' "$WORK/SHA256SUMS" | head -n 1)"
     [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || fail failed "SHA256SUMS of v$TARGET does not list $asset"
@@ -546,15 +551,15 @@ update() {
   cp -p .env "$CANDIDATE/.env"
   (
     cd "$CANDIDATE"
-    env_set CODESH_VERSION "$TARGET"
-    if [ -n "$BUNDLE" ]; then
-      registry="$(sed -n 's/^CODESH_REGISTRY=//p' .env.example | tail -n 1)"
-      [ -z "$registry" ] || env_set CODESH_REGISTRY "$registry"
-    fi
     while read -r name; do
       grep -q "^$name=" .env || sed -n "s/^$name=.*/&/p" .env.example >>.env
     done < <(sed -n 's/^\([A-Z0-9_]*\)=.*/\1/p' .env.example)
     ./generate-secrets.sh .env >/dev/null
+    env_set GACHIPAD_VERSION "$TARGET"
+    if [ -n "$BUNDLE" ]; then
+      registry="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
+      [ -z "$registry" ] || env_set GACHIPAD_REGISTRY "$registry"
+    fi
   )
   local file
   for file in $FILES .env; do [ -f "$CANDIDATE/$file" ] || fail failed "missing required file: $file"; done
@@ -645,8 +650,8 @@ main() {
   fi
   [ "$DRY" = 1 ] || exec > >(trap '' HUP INT TERM PIPE; exec tee -i -p -a "$LOG") 2>&1
 
-  CURRENT="$(env_get CODESH_VERSION)"
-  REPO="$(setting UPDATE_REPO kim0040/codesh)"
+  CURRENT="$(env_get GACHIPAD_VERSION)"
+  REPO="$(setting UPDATE_REPO kim0040/gachipad)"
   CHANNEL="$(setting UPDATE_CHANNEL stable)"
   API="$(setting UPDATE_API_URL https://api.github.com)"
   DOWNLOAD="$(setting UPDATE_DOWNLOAD_URL https://github.com)"

@@ -198,7 +198,7 @@ export function renderLicenses(packages: ClosurePackage[], linguist: string): st
     "production dependency tree, the GitHub Linguist language colours, and the notices Prettier ships",
     "for the components it bundles. The two fonts have their own texts in /licenses/.",
     "Licence texts of the server components and container images: THIRD_PARTY_NOTICES.md in the",
-    "source repository and in /usr/share/doc/codesh/ of the images.",
+    "source repository and in /usr/share/doc/gachipad/ of the images.",
     "",
     `Packages (${packages.length}):`,
     ...packages.map((p) => `  ${p.name}@${p.version}  ${p.license}`),

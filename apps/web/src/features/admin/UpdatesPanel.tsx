@@ -249,8 +249,8 @@ function HowTo({ data }: { data: AdminUpdateResponse }) {
   const t = useT();
   const crossesMajor = Boolean(data.latest && major(data.latest) !== major(data.current));
   const bundle = data.latest
-    ? `codesh-${data.latest}-linux-amd64.tar.gz`
-    : "<codesh-X.Y.Z-linux-amd64.tar.gz>";
+    ? `gachipad-${data.latest}-linux-amd64.tar.gz`
+    : "<gachipad-X.Y.Z-linux-amd64.tar.gz>";
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4">
       <h2 className="text-body-sm font-semibold">{t("admin.update.how.title")}</h2>

@@ -17,7 +17,7 @@ ARCHIVE="${1:-}"
 [ -n "$ARCHIVE" ] || die "usage: ./restore.sh <archive.gz> [--yes]"
 [ -f "$ARCHIVE" ] || die "usage: ./restore.sh <archive.gz> [--yes]"
 if [ "${2:-}" != "--yes" ]; then
-  read -r -p "Replace the current codesh database with $ARCHIVE? [y/N] " answer
+  read -r -p "Replace the current gachipad database with $ARCHIVE? [y/N] " answer
   [ "$answer" = "y" ] || [ "$answer" = "Y" ] || die "cancelled"
 fi
 

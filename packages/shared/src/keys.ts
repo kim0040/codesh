@@ -1,14 +1,16 @@
+import { renamedEnv } from "./env.js";
+
 /** Valkey key and channel builders (§7). Nothing else formats these strings. */
 
 /**
- * Optional namespace (env `CODESH_NS`) prepended to every pub/sub channel. Keys are isolated by the
+ * Optional namespace (env `GACHIPAD_NS`) prepended to every pub/sub channel. Keys are isolated by the
  * Valkey database index, but pub/sub ignores it, so deployments or parallel test runs sharing one
  * Valkey need this to keep their messages apart. Read on every call; empty by default.
  */
 export function namespace(): string {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
     ?.env;
-  return env?.CODESH_NS ?? "";
+  return env ? (renamedEnv(env, "GACHIPAD_NS") ?? "") : "";
 }
 
 export const keys = {

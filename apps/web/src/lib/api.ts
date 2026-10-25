@@ -110,7 +110,7 @@ export async function rawRequest(
     if (text) url += `?${text}`;
   }
   // The API refuses state-changing requests without this header (CSRF guard).
-  const headers: Record<string, string> = { "X-Codesh": "1", ...options.headers };
+  const headers: Record<string, string> = { "X-Gachipad": "1", ...options.headers };
   let body: BodyInit | undefined;
   if (options.form) {
     body = options.form;

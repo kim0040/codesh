@@ -76,7 +76,7 @@ async function open({ width, scheme, locale = "ko", reduced = false, height = 90
   await context.addInitScript(INIT);
   const page = await context.newPage();
   const tag = `${width}-${scheme}${locale === "en" ? "-en" : ""}${reduced ? "-reduced" : ""}`;
-  await page.addInitScript(`localStorage.setItem("codesh.locale", ${JSON.stringify(locale)})`);
+  await page.addInitScript(`localStorage.setItem("gachipad.locale", ${JSON.stringify(locale)})`);
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (!["localhost", "127.0.0.1"].includes(url.hostname) && url.protocol.startsWith("http")) {

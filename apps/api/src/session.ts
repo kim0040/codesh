@@ -3,6 +3,7 @@ import {
   generateClientId,
   isClientId,
   keys,
+  LEGACY_SESSION_COOKIE,
   PRESENCE_USER_TTL_SECONDS,
   SESSION_COOKIE,
 } from "@gachipad/shared";
@@ -67,9 +68,14 @@ export function clientIp(ctx: Ctx, request: FastifyRequest): string {
   );
 }
 
-/** Starts a session for the browser: a new client id in the signed `codesh_sid` cookie. */
+/** Starts a session for the browser: a new client id in the signed `gachipad_sid` cookie. */
 export function issueSession(ctx: Ctx, reply: FastifyReply): string {
   const clientId = generateClientId();
+  setSessionCookie(ctx, reply, clientId);
+  return clientId;
+}
+
+function setSessionCookie(ctx: Ctx, reply: FastifyReply, clientId: string): void {
   reply.setCookie(SESSION_COOKIE, clientId, {
     signed: true,
     httpOnly: true,
@@ -78,7 +84,6 @@ export function issueSession(ctx: Ctx, reply: FastifyReply): string {
     path: "/",
     maxAge: COOKIE_MAX_AGE_SECONDS,
   });
-  return clientId;
 }
 
 export async function loadSession(
@@ -87,10 +92,16 @@ export async function loadSession(
   reply: FastifyReply,
 ): Promise<Session> {
   let clientId: string | null = null;
-  const raw = request.cookies[SESSION_COOKIE];
-  if (raw) {
+  // legacy codesh name (1.0.x); remove in 2.0
+  for (const name of [SESSION_COOKIE, LEGACY_SESSION_COOKIE]) {
+    const raw = request.cookies[name];
+    if (!raw) continue;
     const unsigned = request.unsignCookie(raw);
-    if (unsigned.valid && unsigned.value && isClientId(unsigned.value)) clientId = unsigned.value;
+    if (unsigned.valid && unsigned.value && isClientId(unsigned.value)) {
+      clientId = unsigned.value;
+      if (name === LEGACY_SESSION_COOKIE) setSessionCookie(ctx, reply, clientId);
+      break;
+    }
   }
   if (!clientId) clientId = issueSession(ctx, reply);
   const settings = await ctx.settings();

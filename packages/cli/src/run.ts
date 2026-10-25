@@ -20,15 +20,15 @@ export interface Io {
   platform?: NodeJS.Platform;
 }
 
-export const HELP = `gachipad CLI (command: codesh) - share code from the terminal
+export const HELP = `gachipad CLI (command: gachipad) - share code from the terminal
 
 usage:
-  codesh push <file|folder...> [--title <t>] [--language <id>] [--view-only] [--no-qr] [--name <file>] [--url <u>]
-  codesh push -  --name snippet.py          read the content from stdin
-  codesh open <code|id> [--print] [--url <u>]
-  codesh pull <code|id> [-o <dir>] [--zip] [--pin <pin>] [--url <u>]
+  gachipad push <file|folder...> [--title <t>] [--language <id>] [--view-only] [--no-qr] [--name <file>] [--url <u>]
+  gachipad push -  --name snippet.py          read the content from stdin
+  gachipad open <code|id> [--print] [--url <u>]
+  gachipad pull <code|id> [-o <dir>] [--zip] [--pin <pin>] [--url <u>]
 
-The server comes from --url, CODESH_URL or the gachipad CLI config file (%APPDATA%\\codesh\\codesh.json on Windows, ~/.config/codesh.json elsewhere).`;
+The server comes from --url, GACHIPAD_URL or the gachipad CLI config file (%APPDATA%\\gachipad\\gachipad.json on Windows, ~/.config/gachipad.json elsewhere).`;
 
 interface CreateResponse {
   id: string;
@@ -66,7 +66,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         io.stdout(`${HELP}\n`);
         return command === undefined ? 2 : 0;
       default:
-        throw new CliError(`Unknown command "${command}". Try: codesh --help`);
+        throw new CliError(`Unknown command "${command}". Try: gachipad --help`);
     }
   } catch (error) {
     if (
@@ -113,7 +113,7 @@ async function push(args: string[], io: Io): Promise<void> {
   if (fromStdin) {
     if (positionals.length === 0 && io.stdinIsTTY) {
       throw new CliError(
-        "Nothing to push. Give file names, or pipe text in with: codesh push - --name file.py",
+        "Nothing to push. Give file names, or pipe text in with: gachipad push - --name file.py",
       );
     }
     files.push({
@@ -248,7 +248,7 @@ async function open(args: string[], io: Io): Promise<void> {
   });
   const [target] = positionals;
   if (!target || positionals.length > 1)
-    throw new CliError("usage: codesh open <code|id> [--print]");
+    throw new CliError("usage: gachipad open <code|id> [--print]");
   const client = await connect(values.url, io);
   const { path } = await resolveTarget(client, target);
   const url = `${client.base}${path}`;
@@ -307,7 +307,7 @@ async function pull(args: string[], io: Io): Promise<void> {
   });
   const [target] = positionals;
   if (!target || positionals.length > 1)
-    throw new CliError("usage: codesh pull <code|id> [-o dir] [--zip]");
+    throw new CliError("usage: gachipad pull <code|id> [-o dir] [--zip]");
   const client = await connect(values.url, io);
   const { path, id } = await resolveTarget(client, target);
   if (path.startsWith("/lab/"))

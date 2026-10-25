@@ -816,7 +816,7 @@ export interface MongoConnection {
   close(): Promise<void>;
 }
 
-/** Connects with the database named in the URL (default `codesh`). */
+/** Connects with the database named in the URL (default `gachipad`). */
 export async function connectMongo(
   url: string,
   options: { dbName?: string; serverSelectionTimeoutMS?: number } = {},

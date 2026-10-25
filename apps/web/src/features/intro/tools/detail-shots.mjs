@@ -55,7 +55,7 @@ for (const { locale, scheme, width } of CONFIGS) {
     deviceScaleFactor: 1,
   });
   const page = await context.newPage();
-  await page.addInitScript(`localStorage.setItem("codesh.locale", ${JSON.stringify(locale)})`);
+  await page.addInitScript(`localStorage.setItem("gachipad.locale", ${JSON.stringify(locale)})`);
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (!["localhost", "127.0.0.1"].includes(url.hostname) && url.protocol.startsWith("http")) {

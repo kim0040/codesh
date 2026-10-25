@@ -4,10 +4,11 @@
  * `data-theme` on <html> is the source of truth, so every control on the page reads and follows it.
  */
 import { useSyncExternalStore } from "react";
+import { mirrorLegacy } from "../../lib/storage-migration";
 
 export type ThemePreference = "system" | "dark" | "light";
 
-const STORAGE_KEY = "codesh.theme";
+const STORAGE_KEY = "gachipad.theme";
 
 function readThemePreference(): ThemePreference {
   const forced = document.documentElement.getAttribute("data-theme");
@@ -32,6 +33,7 @@ export function applyThemePreference(preference: ThemePreference): void {
   try {
     if (preference === "system") localStorage.removeItem(STORAGE_KEY);
     else localStorage.setItem(STORAGE_KEY, preference);
+    mirrorLegacy(STORAGE_KEY, preference === "system" ? null : preference);
   } catch {
     // The theme still applies for this page view.
   }

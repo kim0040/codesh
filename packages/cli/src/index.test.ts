@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness, type Harness, integration } from "../../../apps/api/src/testing/harness.js";
-import { CliError, configPath, resolveUrl } from "./config.js";
+import { CliError, configPath, readConfig, resolveUrl } from "./config.js";
 import { browserCommand, PACKAGE_NAME, qrOutputType, safeJoin, sharePath } from "./index.js";
 import { type Io, run } from "./run.js";
 
@@ -23,19 +23,40 @@ it("names gachipad in CLI help and keeps the executable name", async () => {
     openBrowser: async () => {},
   });
   expect(code).toBe(0);
-  expect(stdout.join("")).toContain("gachipad CLI (command: codesh)");
-  expect(stdout.join("")).toContain("codesh push");
+  expect(stdout.join("")).toContain("gachipad CLI (command: gachipad)");
+  expect(stdout.join("")).toContain("gachipad push");
 });
 
 describe("server url", () => {
-  it("prefers the flag, then CODESH_URL, then the config file", () => {
-    expect(resolveUrl("http://a/", { CODESH_URL: "http://b" }, { url: "http://c" })).toBe(
+  it("prefers the flag, then GACHIPAD_URL, then the config file", () => {
+    expect(resolveUrl("http://a/", { GACHIPAD_URL: "http://b" }, { url: "http://c" })).toBe(
       "http://a",
     );
-    expect(resolveUrl(undefined, { CODESH_URL: "http://b" }, { url: "http://c" })).toBe("http://b");
+    expect(resolveUrl(undefined, { GACHIPAD_URL: "http://b" }, { url: "http://c" })).toBe(
+      "http://b",
+    );
     expect(resolveUrl(undefined, {}, { url: "http://c/" })).toBe("http://c");
     expect(() => resolveUrl(undefined, {}, {})).toThrow(CliError);
     expect(() => resolveUrl("gachipad.corp", {}, {})).toThrow(CliError);
+  });
+
+  // legacy codesh name (1.0.x); remove in 2.0
+  it("keeps legacy env values and saved config sessions reachable, preferring new values", async () => {
+    expect(resolveUrl(undefined, { CODESH_URL: "http://old" }, {})).toBe("http://old");
+    expect(
+      resolveUrl(undefined, { CODESH_URL: "http://old", GACHIPAD_URL: "http://new" }, {}),
+    ).toBe("http://new");
+    expect(configPath({ CODESH_CONFIG: "/tmp/old.json" })).toBe("/tmp/old.json");
+    const dir = await mkdtemp(join(tmpdir(), "rename-cli-"));
+    try {
+      const value = { url: "http://old", sessions: { "http://old": "codesh_sid=signed-session" } };
+      await writeFile(join(dir, "codesh.json"), JSON.stringify(value));
+      expect(await readConfig(join(dir, "gachipad.json"))).toEqual(value);
+      await writeFile(join(dir, "gachipad.json"), '{"url":"http://new"}');
+      expect(await readConfig(join(dir, "gachipad.json"))).toEqual({ url: "http://new" });
+    } finally {
+      await (await import("node:fs/promises")).rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -46,10 +67,10 @@ describe("platform-specific paths and terminal integration", () => {
         { APPDATA: "C:\\Users\\Ada\\AppData\\Roaming", XDG_CONFIG_HOME: "/tmp/xdg" },
         "win32",
       ),
-    ).toBe("C:\\Users\\Ada\\AppData\\Roaming\\codesh\\codesh.json");
-    expect(configPath({ XDG_CONFIG_HOME: "/tmp/xdg" }, "linux")).toBe("/tmp/xdg/codesh.json");
-    expect(configPath({ CODESH_CONFIG: "C:\\custom\\codesh.json" }, "win32")).toBe(
-      "C:\\custom\\codesh.json",
+    ).toBe("C:\\Users\\Ada\\AppData\\Roaming\\gachipad\\gachipad.json");
+    expect(configPath({ XDG_CONFIG_HOME: "/tmp/xdg" }, "linux")).toBe("/tmp/xdg/gachipad.json");
+    expect(configPath({ GACHIPAD_CONFIG: "C:\\custom\\gachipad.json" }, "win32")).toBe(
+      "C:\\custom\\gachipad.json",
     );
   });
 
@@ -67,11 +88,11 @@ describe("platform-specific paths and terminal integration", () => {
   it("uses a plain QR renderer and the URL handler on Windows", () => {
     expect(qrOutputType("win32")).toBe("utf8");
     expect(qrOutputType("linux")).toBe("terminal");
-    expect(browserCommand("win32", "http://codesh.local/abc12345")).toEqual([
+    expect(browserCommand("win32", "http://gachipad.local/abc12345")).toEqual([
       "rundll32.exe",
-      ["url.dll,FileProtocolHandler", "http://codesh.local/abc12345"],
+      ["url.dll,FileProtocolHandler", "http://gachipad.local/abc12345"],
     ]);
-    expect(browserCommand("darwin", "http://codesh.local/abc12345")[0]).toBe("open");
+    expect(browserCommand("darwin", "http://gachipad.local/abc12345")[0]).toBe("open");
   });
 });
 
@@ -96,7 +117,7 @@ describe.skipIf(!integration)("against an in-process API", () => {
   });
   afterAll(() => h.close());
 
-  /** Runs the CLI with its own home (`CODESH_CONFIG`), so each name is one terminal user. */
+  /** Runs the CLI with its own home (`GACHIPAD_CONFIG`), so each name is one terminal user. */
   async function runCli(args: string[], user = "default", stdin = "") {
     const out: string[] = [];
     const err: string[] = [];
@@ -104,7 +125,7 @@ describe.skipIf(!integration)("against an in-process API", () => {
     const io: Io = {
       stdout: (text) => out.push(text),
       stderr: (text) => err.push(text),
-      env: { CODESH_CONFIG: join(dir, `${user}.json`), CODESH_URL: base },
+      env: { GACHIPAD_CONFIG: join(dir, `${user}.json`), GACHIPAD_URL: base },
       cwd: dir,
       readStdin: async () => Buffer.from(stdin),
       stdinIsTTY: stdin === "",

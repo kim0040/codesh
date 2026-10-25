@@ -4,6 +4,7 @@ export * from "./collab-token.js";
 export * from "./constants.js";
 export * from "./diagnostics.js";
 export * from "./document.js";
+export * from "./env.js";
 export * from "./errors.js";
 export * from "./events.js";
 export * from "./http.js";

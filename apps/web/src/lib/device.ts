@@ -3,6 +3,14 @@ import { api, isApiError } from "./api";
 import { dropAllKeys, dropKey } from "./credentials";
 import { getPrefs, setPrefs } from "./prefs";
 import { queryClient } from "./query";
+import {
+  isStorageMigrationBlocked,
+  LEGACY_IDB_PREFIX,
+  LEGACY_STORAGE_PREFIX,
+  mirrorLegacy,
+  readMigratedKey,
+  usesLegacyStorage,
+} from "./storage-migration";
 
 /**
  * What this browser keeps of a share, and how it is forgotten (docs/ARCHITECTURE.md §14).
@@ -13,28 +21,31 @@ import { queryClient } from "./query";
  * every tab first (a database with an open connection is not deleted), then deletes the copy.
  */
 
-export const IDB_PREFIX = "codesh:doc:";
-export const idbName = (shareId: string) => `${IDB_PREFIX}${shareId}`;
+export const IDB_PREFIX = "gachipad:doc:";
+export const idbName = (shareId: string) =>
+  `${usesLegacyStorage() ? LEGACY_IDB_PREFIX : IDB_PREFIX}${shareId}`;
 
-const CHANNEL = "codesh:device";
-const STORAGE_EVENT_KEY = "codesh.forget";
+const CHANNEL = "gachipad:device";
+// legacy codesh name (1.0.x); remove in 2.0
+const LEGACY_CHANNEL = "codesh:device";
+const STORAGE_EVENT_KEY = "gachipad.forget";
 /** The clientId of the session this device saw last; login and logout rotate it. */
-const SUBJECT_KEY = "codesh.device.subject";
+const SUBJECT_KEY = "gachipad.device.subject";
 /**
  * One localStorage key per share, so tabs that write at the same time never drop each other's
  * entries: its database may exist (listed before it is created), its deletion is not confirmed
  * yet, "Forget on this device" was used on it.
  */
-const COPY = "codesh.device.copy:";
-const ERASE = "codesh.device.erase:";
-const FORGOTTEN = "codesh.device.forgotten:";
+const COPY = "gachipad.device.copy:";
+const ERASE = "gachipad.device.erase:";
+const FORGOTTEN = "gachipad.device.forgotten:";
 /** Every copy has to go (logout, another account); kept until a deletion of all of them worked. */
-const ERASE_ALL_KEY = "codesh.device.erase-all";
+const ERASE_ALL_KEY = "gachipad.device.erase-all";
 /**
  * `indexedDB.databases()` worked once, so every copy since is in the registry. Nothing else sets
  * it: without it a copy from before the registry may be missing from every list.
  */
-const COMPLETE_KEY = "codesh.device.complete";
+const COMPLETE_KEY = "gachipad.device.complete";
 const DELETE_TIMEOUT_MS = 4000;
 /** Closing a document (its IndexedDB connection included) is not waited for longer than this. */
 export const CLOSE_TIMEOUT_MS = 4000;
@@ -80,6 +91,7 @@ const due = { all: false, ids: new Set<string>() };
 function store(key: string, value: string): boolean {
   try {
     localStorage.setItem(key, value);
+    mirrorLegacy(key, value);
     return true;
   } catch {
     return false;
@@ -91,6 +103,7 @@ const mark = (key: string) => store(key, "1");
 function unmark(key: string): void {
   try {
     localStorage.removeItem(key);
+    mirrorLegacy(key, null);
   } catch {
     // Blocked storage: nothing was stored either.
   }
@@ -108,7 +121,7 @@ function storedIds(prefix: string): string[] {
 
 function eraseAllDue(): boolean {
   try {
-    return due.all || localStorage.getItem(ERASE_ALL_KEY) !== null;
+    return due.all || readMigratedKey(ERASE_ALL_KEY) !== null;
   } catch {
     return true;
   }
@@ -121,7 +134,7 @@ function markEraseAll(): void {
 
 export function isForgotten(shareId: string): boolean {
   try {
-    return localStorage.getItem(FORGOTTEN + shareId) !== null;
+    return readMigratedKey(FORGOTTEN + shareId) !== null;
   } catch {
     return true;
   }
@@ -132,10 +145,11 @@ export function isForgotten(shareId: string): boolean {
  * no deletion is due or still running. Anything unreadable counts as no.
  */
 export function mayKeepCopy(shareId: string): boolean {
+  if (isStorageMigrationBlocked()) return false;
   if (getPrefs().offlineCopy !== "yes" || due.ids.has(shareId) || eraseAllDue()) return false;
   if (deleting.has(idbName(shareId))) return false;
   try {
-    return localStorage.getItem(ERASE + shareId) === null && !isForgotten(shareId);
+    return readMigratedKey(ERASE + shareId) === null && !isForgotten(shareId);
   } catch {
     return false;
   }
@@ -150,9 +164,9 @@ export function noteCopy(shareId: string): boolean {
 function mayHoldCopy(shareId: string): boolean {
   try {
     return (
-      localStorage.getItem(COPY + shareId) !== null ||
-      localStorage.getItem(ERASE + shareId) !== null ||
-      localStorage.getItem(COMPLETE_KEY) === null
+      readMigratedKey(COPY + shareId) !== null ||
+      readMigratedKey(ERASE + shareId) !== null ||
+      readMigratedKey(COMPLETE_KEY) === null
     );
   } catch {
     return true;
@@ -206,7 +220,10 @@ export function isRestarting(): boolean {
 function getChannel(): BroadcastChannel | null {
   if (channel !== undefined) return channel;
   try {
-    channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(CHANNEL);
+    channel =
+      typeof BroadcastChannel === "undefined"
+        ? null
+        : new BroadcastChannel(usesLegacyStorage() ? LEGACY_CHANNEL : CHANNEL);
     channel?.addEventListener("message", (event: MessageEvent<Message>) => receive(event.data));
   } catch {
     channel = null;
@@ -222,10 +239,9 @@ function broadcast(message: Message): void {
   }
   // No BroadcastChannel: a storage event reaches the other tabs of this origin.
   try {
-    localStorage.setItem(
-      STORAGE_EVENT_KEY,
-      JSON.stringify({ tab: tabId, at: Date.now(), message }),
-    );
+    const value = JSON.stringify({ tab: tabId, at: Date.now(), message });
+    const key = usesLegacyStorage() ? `${LEGACY_STORAGE_PREFIX}forget` : STORAGE_EVENT_KEY;
+    localStorage.setItem(key, value);
   } catch {
     // Blocked storage: no copy was written in other tabs either.
   }
@@ -264,7 +280,11 @@ function receive(message: Message | undefined): void {
 export function listenForForgetting(): void {
   getChannel();
   window.addEventListener("storage", (event) => {
-    if (event.key !== STORAGE_EVENT_KEY || !event.newValue) return;
+    if (
+      (event.key !== STORAGE_EVENT_KEY && event.key !== `${LEGACY_STORAGE_PREFIX}forget`) ||
+      !event.newValue
+    )
+      return;
     try {
       const parsed = JSON.parse(event.newValue) as { tab?: string; message?: Message };
       if (parsed.tab !== tabId) receive(parsed.message);
@@ -373,7 +393,13 @@ async function deleteWithRetry(name: string): Promise<boolean> {
 
 /** Deletes the copies of these shares and unlists the ones that went. True when all of them went. */
 async function deleteCopies(ids: string[]): Promise<boolean> {
-  const results = await Promise.all(ids.map((id) => deleteWithRetry(idbName(id))));
+  const results = await Promise.all(
+    ids.map(async (id) => {
+      const current = await deleteWithRetry(idbName(id));
+      const other = idbName(id).startsWith(IDB_PREFIX) ? LEGACY_IDB_PREFIX : IDB_PREFIX;
+      return (await deleteWithRetry(other + id)) && current;
+    }),
+  );
   ids.forEach((id, i) => {
     if (!results[i]) return;
     // Allowed again meanwhile (yes in another tab): it may be there anew, so it stays listed.
@@ -395,7 +421,9 @@ async function knownCopies(): Promise<{ ids: string[]; complete: boolean }> {
   try {
     if (typeof indexedDB !== "undefined" && typeof indexedDB.databases === "function") {
       for (const info of await indexedDB.databases()) {
-        if (info.name?.startsWith(IDB_PREFIX)) ids.add(info.name.slice(IDB_PREFIX.length));
+        for (const prefix of [IDB_PREFIX, LEGACY_IDB_PREFIX]) {
+          if (info.name?.startsWith(prefix)) ids.add(info.name.slice(prefix.length));
+        }
       }
       enumerated = true;
     }
@@ -408,7 +436,7 @@ async function knownCopies(): Promise<{ ids: string[]; complete: boolean }> {
   try {
     for (const id of [...storedIds(COPY), ...storedIds(ERASE)]) ids.add(id);
     if (enumerated) mark(COMPLETE_KEY);
-    else complete = localStorage.getItem(COMPLETE_KEY) !== null;
+    else complete = readMigratedKey(COMPLETE_KEY) !== null;
   } catch {
     // Blocked storage: no copy could be listed, nor created (noteCopy).
   }
@@ -443,6 +471,10 @@ async function eraseAll(): Promise<boolean> {
  * missing from an incomplete list is not, it is reported by the cleanups that promise all copies.
  */
 export async function sweep(): Promise<boolean> {
+  if (isStorageMigrationBlocked()) {
+    reportLeftovers();
+    return false;
+  }
   const { deleted } = await cleanup();
   if (!deleted) reportLeftovers();
   return deleted;
@@ -556,7 +588,7 @@ export async function signOut(): Promise<boolean> {
 /** This browser has seen a session before, so a changed identity can still be noticed. */
 export function hasSeenSession(): boolean {
   try {
-    return localStorage.getItem(SUBJECT_KEY) !== null;
+    return readMigratedKey(SUBJECT_KEY) !== null;
   } catch {
     return false;
   }
@@ -574,7 +606,7 @@ export function hasSeenSession(): boolean {
 export async function noteSessionIdentity(session: SessionResponse): Promise<void> {
   let previous: string | null;
   try {
-    previous = localStorage.getItem(SUBJECT_KEY);
+    previous = readMigratedKey(SUBJECT_KEY);
   } catch {
     // Blocked storage: no copy is ever written (noteCopy), so there is nothing to protect.
     return;

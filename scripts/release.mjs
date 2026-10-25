@@ -36,9 +36,9 @@ if (command === "check") {
   if (!SEMVER.test(version)) fail(`package.json version ${version} is not X.Y.Z`);
   if (argument !== undefined && argument.replace(/^refs\/tags\//, "") !== `v${version}`)
     fail(`tag ${argument} does not match package.json version ${version}: bump it first`);
-  const envVersion = /^CODESH_VERSION=(.*)$/m.exec(read("deploy/.env.example"))?.[1];
+  const envVersion = /^GACHIPAD_VERSION=(.*)$/m.exec(read("deploy/.env.example"))?.[1];
   if (envVersion !== version)
-    fail(`deploy/.env.example has CODESH_VERSION=${envVersion}, package.json has ${version}`);
+    fail(`deploy/.env.example has GACHIPAD_VERSION=${envVersion}, package.json has ${version}`);
   const section = changelogSection(read("CHANGELOG.md"), version);
   if (!section) fail(`CHANGELOG.md has no "## [${version}]" section`);
   if (!/ - \d{4}-\d{2}-\d{2}$/.test(section.heading))
@@ -58,8 +58,8 @@ if (command === "check") {
         "",
         "---",
         "",
-        `Online: to update gachipad, run \`./update.sh\` in the existing codesh install folder. Offline: for gachipad, download \`codesh-${v}-linux-amd64.tar.gz\` (or \`-linux-arm64\`) and its \`.sha256\`, then run \`./upgrade.sh codesh-${v}-linux-amd64.tar.gz\`.`,
-        `Verify a download or an image: \`gh attestation verify <file> --repo ${repo}\`, \`gh attestation verify oci://ghcr.io/${repo.split("/")[0].toLowerCase()}/codesh-api:${v} --repo ${repo}\`.`,
+        `Online: to update gachipad, run \`./update.sh\` in the existing gachipad install folder. Offline: for gachipad, download \`gachipad-${v}-linux-amd64.tar.gz\` (or \`-linux-arm64\`) and its \`.sha256\`, then run \`./upgrade.sh gachipad-${v}-linux-amd64.tar.gz\`.`,
+        `Verify a download or an image: \`gh attestation verify <file> --repo ${repo}\`, \`gh attestation verify oci://ghcr.io/${repo.split("/")[0].toLowerCase()}/gachipad-api:${v} --repo ${repo}\`.`,
         "",
       ].join("\n"),
     );

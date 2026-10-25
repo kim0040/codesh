@@ -318,13 +318,13 @@ async function openPage(browser: import("@playwright/test").Browser, name: strin
     baseURL: PERF_URL,
     locale: "en-US",
     viewport: { width: 1440, height: 900 },
-    extraHTTPHeaders: { "X-Codesh": "1" },
+    extraHTTPHeaders: { "X-Gachipad": "1" },
   });
   const response = await context.request.patch("/api/session", { data: { name } });
   expect(response.ok()).toBe(true);
   if (SMOOTH === "off") {
     await context.addInitScript(() =>
-      localStorage.setItem("codesh.prefs", JSON.stringify({ smoothTyping: false })),
+      localStorage.setItem("gachipad.prefs", JSON.stringify({ smoothTyping: false })),
     );
   }
   const page = await context.newPage();

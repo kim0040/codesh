@@ -28,7 +28,7 @@ async function firstTimer(
   const context = await browser.newContext({
     baseURL: BASE_URL,
     locale: "en-US",
-    extraHTTPHeaders: { "X-Codesh": "1" },
+    extraHTTPHeaders: { "X-Gachipad": "1" },
     storageState: { cookies: [], origins: [] },
     ...options,
   });
@@ -58,7 +58,7 @@ async function counter(page: Page): Promise<string> {
 }
 
 async function storedVersion(page: Page): Promise<string | null> {
-  return page.evaluate(() => localStorage.getItem("codesh.tour"));
+  return page.evaluate(() => localStorage.getItem("gachipad.tour"));
 }
 
 async function walkToDone(page: Page): Promise<number> {

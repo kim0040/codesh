@@ -12,7 +12,7 @@ it.each([{ id: "a&calc.exe" }, { labId: "../../x" }, { id: "12345678" }])(
     const io: Io = {
       stdout: vi.fn(),
       stderr: vi.fn(),
-      env: { CODESH_URL: "http://localhost", CODESH_CONFIG: join(dir, "config.json") },
+      env: { GACHIPAD_URL: "http://localhost", GACHIPAD_CONFIG: join(dir, "config.json") },
       cwd: dir,
       readStdin: async () => Buffer.alloc(0),
       stdinIsTTY: true,

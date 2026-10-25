@@ -3,6 +3,7 @@ import {
   type CollabCommandReply,
   channels,
   collabCommandSchema,
+  renamedEnv,
   type SseEvent,
 } from "@gachipad/shared";
 import { createMemoryStores, type Stores } from "@gachipad/storage";
@@ -17,7 +18,7 @@ import { createMetrics } from "../metrics.js";
 import type { UpdateTimers } from "../updates.js";
 
 /** Route tests talk to a real Valkey (`pnpm services:up`) and keep MongoDB in memory. */
-export const integration = process.env.CODESH_INTEGRATION === "1";
+export const integration = renamedEnv(process.env, "GACHIPAD_INTEGRATION") === "1";
 
 const VALKEY_URL = process.env.VALKEY_URL ?? "redis://localhost:6379";
 
@@ -105,7 +106,7 @@ export class Client {
       headers: {
         "x-forwarded-for": this.ip,
         // What the web app sends on every request that changes something (CSRF guard).
-        ...(method === "GET" ? {} : { "x-codesh": "1" }),
+        ...(method === "GET" ? {} : { "x-gachipad": "1" }),
         ...(this.jar.size > 0 ? { cookie: this.cookieHeader } : {}),
         ...options.headers,
       },
@@ -306,7 +307,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     // Tests never ask GitHub; the update tests turn this on against a local server.
     update: {
       enabled: false,
-      repo: "kim0040/codesh",
+      repo: "kim0040/gachipad",
       channel: "stable",
       apiUrl: "http://127.0.0.1:9",
       statusFile: "",

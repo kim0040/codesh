@@ -29,7 +29,7 @@ describe.skipIf(!integration)("session routes", () => {
     expect(body.net).toBe(`${client.ip.split(".").slice(0, 3).join(".")}.0/24`);
     expect(body.room).toBeNull();
 
-    const cookie = response.cookies.find((c) => c.name === "codesh_sid");
+    const cookie = response.cookies.find((c) => c.name === "gachipad_sid");
     expect(cookie).toBeDefined();
     // Signed: `<clientId>.<signature>`, and the raw id alone is not accepted.
     expect(decodeURIComponent(cookie?.value ?? "")).toMatch(new RegExp(`^${body.clientId}\\.`));
@@ -50,15 +50,15 @@ describe.skipIf(!integration)("session routes", () => {
     const real = (await client.get("/api/session")).json<SessionBody>().clientId;
 
     const forged = h.client();
-    forged.setCookie("codesh_sid", real); // unsigned
+    forged.setCookie("gachipad_sid", real); // unsigned
     const unsigned = await forged.get("/api/session");
     expect(unsigned.json<SessionBody>().clientId).not.toBe(real);
 
     const tampered = h.client();
-    tampered.setCookie("codesh_sid", `${real}.${"A".repeat(43)}`);
+    tampered.setCookie("gachipad_sid", `${real}.${"A".repeat(43)}`);
     const bad = await tampered.get("/api/session");
     expect(bad.json<SessionBody>().clientId).not.toBe(real);
-    expect(bad.cookies.some((c) => c.name === "codesh_sid")).toBe(true);
+    expect(bad.cookies.some((c) => c.name === "gachipad_sid")).toBe(true);
   });
 
   it("PATCH /api/session stores name and color and returns them", async () => {
@@ -79,6 +79,49 @@ describe.skipIf(!integration)("session routes", () => {
 
     const partial = await client.patch("/api/session", { name: "Only name" });
     expect(partial.json<SessionBody>()).toMatchObject({ name: "Only name", color: "#112233" });
+  });
+
+  // legacy codesh name (1.0.x); remove in 2.0
+  it("reissues a signed legacy session under the new name without changing ownership", async () => {
+    const owner = h.client();
+    const original = await owner.get("/api/session");
+    const signed = original.cookies.find((cookie) => cookie.name === "gachipad_sid");
+    const migrated = h.client();
+    migrated.setCookie("codesh_sid", decodeURIComponent(signed?.value ?? ""));
+    const response = await migrated.get("/api/session");
+    expect(response.json<SessionBody>().clientId).toBe(original.json<SessionBody>().clientId);
+    expect(response.cookies.some((cookie) => cookie.name === "gachipad_sid")).toBe(true);
+    expect(String(response.headers["set-cookie"])).toMatch(/HttpOnly.*SameSite=Lax/i);
+    const logout = await migrated.post("/api/auth/logout");
+    expect(logout.cookies.find((cookie) => cookie.name === "codesh_sid")?.value).toBe("");
+    expect(logout.json()).toEqual({ ok: true });
+  });
+
+  // legacy codesh name (1.0.x); remove in 2.0
+  it("rejects unsigned legacy cookies and prefers a valid new cookie over a different old one", async () => {
+    const first = await h.client().get("/api/session");
+    const second = await h.client().get("/api/session");
+    const client = h.client();
+    client.setCookie("codesh_sid", first.json<SessionBody>().clientId);
+    expect((await client.get("/api/session")).json<SessionBody>().clientId).not.toBe(
+      first.json<SessionBody>().clientId,
+    );
+    client.setCookie("gachipad_sid", first.cookies[0]?.value ?? "");
+    client.setCookie("codesh_sid", second.cookies[0]?.value ?? "");
+    expect((await client.get("/api/session")).json<SessionBody>().clientId).toBe(
+      first.json<SessionBody>().clientId,
+    );
+  });
+
+  // legacy codesh name (1.0.x); remove in 2.0
+  it("never emits the legacy cookie for a fresh browser, including logout", async () => {
+    const client = h.client();
+    const session = await client.get("/api/session");
+    const logout = await client.post("/api/auth/logout");
+    for (const response of [session, logout]) {
+      expect(response.cookies.map((cookie) => cookie.name)).not.toContain("codesh_sid");
+      expect(response.cookies.map((cookie) => cookie.name)).toContain("gachipad_sid");
+    }
   });
 
   it("rejects an empty name, a long name and a bad color", async () => {
