@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs codesh from an offline bundle: loads the images, creates .env with fresh secrets and
+# Installs gachipad from an offline bundle: loads the images, creates .env with fresh secrets and
 # starts the stack. Needs docker with the compose plugin; no internet.
 #
 #   tar xzf codesh-<version>.tar.gz && cd codesh-<version> && ./install.sh
@@ -36,5 +36,5 @@ mkdir -p state && chmod 755 state
 echo "install: starting"
 docker compose up -d --wait
 wait_healthy 120
-echo "install: codesh $VERSION is running on port $(env_get HTTP_PORT 80)"
+echo "install: gachipad $VERSION is running on port $(env_get HTTP_PORT 80)"
 echo "install: back up with ./backup.sh, update with ./update.sh (online) or ./upgrade.sh <new bundle>"

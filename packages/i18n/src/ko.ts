@@ -25,7 +25,7 @@ import type { DictionaryKey } from "./en.js";
  *   lab mode         실습실 모드 · instructor 강사 · student 수강생
  *   download         다운로드
  *   programming lang 언어 (status bar) / 프로그래밍 언어 (settings) · UI language 화면 언어
- *   PIN, QR, CIDR, OIDC, LDAP, Markdown, Vim, Emacs, Sublime and the brand "codesh" stay Latin.
+ *   PIN, QR, CIDR, OIDC, LDAP, Markdown, Vim, Emacs, Sublime and the brand "gachipad" stays Latin.
  *
  * Plural families only need `.other`: Korean has no singular form.
  */

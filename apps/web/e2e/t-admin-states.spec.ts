@@ -109,7 +109,7 @@ test("admin shares offer named lock, unlock and delete actions", async ({ browse
 test("plain HTTP on a non-loopback host warns before and after login", async ({ browser }) => {
   const admin = await newUser(browser, "Admin");
   try {
-    await admin.page.route("http://admin.codesh.test/**", async (route) => {
+    await admin.page.route("http://admin.gachipad.test/**", async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === "/api/events") {
         await route.fulfill({ contentType: "text/event-stream", body: "" });
@@ -122,7 +122,7 @@ test("plain HTTP on a non-loopback host warns before and after login", async ({ 
         }),
       });
     });
-    await admin.page.goto("http://admin.codesh.test/admin");
+    await admin.page.goto("http://admin.gachipad.test/admin");
     const warning = admin.page.getByTestId("admin-http-warning");
     await expect(warning).toContainText("Your admin token travels in clear text");
     await expect(warning).toContainText("HTTPS");

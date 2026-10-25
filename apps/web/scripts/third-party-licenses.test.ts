@@ -7,7 +7,7 @@ import { collectClosure, renderLicenses } from "./third-party-licenses";
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "codesh-licenses-"));
+  root = mkdtempSync(join(tmpdir(), "gachipad-licenses-"));
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 

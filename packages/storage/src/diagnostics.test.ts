@@ -63,7 +63,7 @@ describe("server diagnostic mirror", () => {
     expect(replace).toHaveBeenCalledTimes(2);
   });
   it("writes scrubbed crash details synchronously and ingests them on the next start", () => {
-    const dir = mkdtempSync(join(tmpdir(), "codesh-diag-crash-"));
+    const dir = mkdtempSync(join(tmpdir(), "gachipad-diag-crash-"));
     const path = join(dir, "tmp", "api-crash.json");
     try {
       writeCrashDiagnostic(path, "uncaught", {

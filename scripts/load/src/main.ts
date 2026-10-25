@@ -72,31 +72,31 @@ async function pool<T>(items: readonly T[], limit: number, fn: (item: T) => Prom
 
 const METRICS = {
   api: [
-    "codesh_http_request_duration_seconds_count",
-    "codesh_shares_created_total",
-    "codesh_rate_limited_total",
-    "codesh_sse_connections",
-    "codesh_api_process_cpu_seconds_total",
-    "codesh_api_process_resident_memory_bytes",
-    "codesh_api_nodejs_eventloop_lag_p99_seconds",
+    "gachipad_http_request_duration_seconds_count",
+    "gachipad_shares_created_total",
+    "gachipad_rate_limited_total",
+    "gachipad_sse_connections",
+    "gachipad_api_process_cpu_seconds_total",
+    "gachipad_api_process_resident_memory_bytes",
+    "gachipad_api_nodejs_eventloop_lag_p99_seconds",
   ],
   collab: [
-    "codesh_collab_connections",
-    "codesh_collab_documents_loaded",
-    "codesh_collab_updates_total",
-    "codesh_collab_flush_seconds_count",
-    "codesh_collab_flush_seconds_sum",
-    "codesh_collab_flush_errors_total",
-    "codesh_collab_slow_client_closes_total",
-    "codesh_collab_refused_too_large_total",
-    "codesh_collab_ws_messages_sent_total",
-    "codesh_collab_ws_bytes_sent_total",
-    "codesh_collab_awareness_dropped_total",
-    "codesh_collab_process_cpu_seconds_total",
-    "codesh_collab_process_resident_memory_bytes",
-    "codesh_collab_nodejs_heap_size_used_bytes",
-    "codesh_collab_nodejs_eventloop_lag_p99_seconds",
-    "codesh_collab_nodejs_eventloop_lag_max_seconds",
+    "gachipad_collab_connections",
+    "gachipad_collab_documents_loaded",
+    "gachipad_collab_updates_total",
+    "gachipad_collab_flush_seconds_count",
+    "gachipad_collab_flush_seconds_sum",
+    "gachipad_collab_flush_errors_total",
+    "gachipad_collab_slow_client_closes_total",
+    "gachipad_collab_refused_too_large_total",
+    "gachipad_collab_ws_messages_sent_total",
+    "gachipad_collab_ws_bytes_sent_total",
+    "gachipad_collab_awareness_dropped_total",
+    "gachipad_collab_process_cpu_seconds_total",
+    "gachipad_collab_process_resident_memory_bytes",
+    "gachipad_collab_nodejs_heap_size_used_bytes",
+    "gachipad_collab_nodejs_eventloop_lag_p99_seconds",
+    "gachipad_collab_nodejs_eventloop_lag_max_seconds",
   ],
 } as const;
 
@@ -148,7 +148,7 @@ async function createShare(group: ShareGroup, index: number, stamp: string): Pro
     await startSession(owner);
     const created = await owner.call<{ id: string }>("POST", "/api/shares", {
       title: `load-${stamp}-${group.name}-${index}`,
-      files: [{ path: "main.txt", content: "// codesh load test\n" }],
+      files: [{ path: "main.txt", content: "// gachipad load test\n" }],
     });
     if (created.status !== 200) throw new Error(`create ${created.status}`);
     const { id } = created.json;
@@ -572,34 +572,34 @@ async function main() {
   const server = {
     collabReplicas,
     collabMetricsSupported,
-    collabCpuCores: collabRate("codesh_collab_process_cpu_seconds_total"),
+    collabCpuCores: collabRate("gachipad_collab_process_cpu_seconds_total"),
     apiCpuCores: perSecond(
       increase(
         series.map((x) => x.api),
-        "codesh_api_process_cpu_seconds_total",
+        "gachipad_api_process_cpu_seconds_total",
       ),
     ),
-    updatesPerS: collabRate("codesh_collab_updates_total"),
-    wsMessagesPerS: collabRate("codesh_collab_ws_messages_sent_total"),
-    wsBytesPerS: collabRate("codesh_collab_ws_bytes_sent_total"),
-    flushesPerS: collabRate("codesh_collab_flush_seconds_count"),
+    updatesPerS: collabRate("gachipad_collab_updates_total"),
+    wsMessagesPerS: collabRate("gachipad_collab_ws_messages_sent_total"),
+    wsBytesPerS: collabRate("gachipad_collab_ws_bytes_sent_total"),
+    flushesPerS: collabRate("gachipad_collab_flush_seconds_count"),
     awarenessDropped: collabMetricsSupported
       ? increase(
           series.map((x) => x.collab),
-          "codesh_collab_awareness_dropped_total",
+          "gachipad_collab_awareness_dropped_total",
         )
       : null,
     collabLagP99Ms: nullIfNaN(
-      Math.round(peak("codesh_collab_nodejs_eventloop_lag_p99_seconds") * 1e4) / 10,
+      Math.round(peak("gachipad_collab_nodejs_eventloop_lag_p99_seconds") * 1e4) / 10,
     ),
     collabLagMaxMs: nullIfNaN(
-      Math.round(peak("codesh_collab_nodejs_eventloop_lag_max_seconds") * 1e4) / 10,
+      Math.round(peak("gachipad_collab_nodejs_eventloop_lag_max_seconds") * 1e4) / 10,
     ),
     collabRssPeakMiB: nullIfNaN(
-      Math.round((peak("codesh_collab_process_resident_memory_bytes") / 1024 ** 2) * 10) / 10,
+      Math.round((peak("gachipad_collab_process_resident_memory_bytes") / 1024 ** 2) * 10) / 10,
     ),
     collabHeapPeakMiB: nullIfNaN(
-      Math.round((peak("codesh_collab_nodejs_heap_size_used_bytes") / 1024 ** 2) * 10) / 10,
+      Math.round((peak("gachipad_collab_nodejs_heap_size_used_bytes") / 1024 ** 2) * 10) / 10,
     ),
   };
 

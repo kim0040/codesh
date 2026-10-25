@@ -44,7 +44,7 @@ export const USAGE = `usage: pnpm load -- --url http://host [--scenario single-s
   --duration <s>         seconds the writers type (default: the scenario's, 30 for custom)
   --storm <kind>         drop (every socket dies at once) or restart (runs --restart-cmd)
   --storm-at <s>         seconds into typing when the storm hits (default 15)
-  --restart-cmd <sh>     shell command for --storm restart, e.g. "docker restart codesh-perf-collab-1"
+  --restart-cmd <sh>     shell command for --storm restart, e.g. "docker restart gachipad-perf-collab-1"
   --docker-project <p>   compose project to sample with docker stats during the run
   --threads <n>          client threads (default one per CPU, at most one per client)
   custom scenario:

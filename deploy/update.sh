@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Updates an installed codesh to a newer GitHub release (docs/OPERATIONS.md "업데이트").
+# Updates an installed gachipad to a newer GitHub release (docs/OPERATIONS.md "업데이트").
 #
 #   ./update.sh --check                  installed and newest release; changes nothing
 #   ./update.sh [--yes]                  the newest release (refuses a new major version)
@@ -411,7 +411,7 @@ open_ingress() {
 
 # shellcheck disable=SC2317 # invoked through the EXIT trap
 rollback() {
-  say "codesh $TARGET failed: rolling back to $CURRENT"
+  say "gachipad $TARGET failed: rolling back to $CURRENT"
   # Never run the old application against the failed release's DB. Keep ingress closed.
   docker compose stop caddy || return 1
   docker compose stop --timeout 40 api collab || return 1
@@ -427,7 +427,7 @@ rollback() {
   rm -f "$MARKER" || say "warning: cannot clear $MARKER; remove it after verifying recovery" >&2
   record rolled-back "$CURRENT" "$TARGET" "previous files restored; DB restore required: $DB_TOUCHED; back on $CURRENT" ||
     say "warning: recovery complete but status could not be written" >&2
-  say "rolled back: codesh $CURRENT is running"
+  say "rolled back: gachipad $CURRENT is running"
 }
 
 # shellcheck disable=SC2317 # invoked through the EXIT trap
@@ -461,7 +461,7 @@ transaction_phase() {
 
 update() {
   local mode="$1" list src=""
-  [ -f .env ] || die "no .env here: this is not an installed codesh"
+  [ -f .env ] || die "no .env here: this is not an installed gachipad"
   if [ -e ../.git ] && [ -f ../package.json ] && [ "$mode" != check ]; then
     die "this is a source checkout: update it with git pull && docker compose build && docker compose up -d"
   fi
@@ -470,7 +470,7 @@ update() {
     mkdir "$WORK/x"
     tar xzf "$BUNDLE" -C "$WORK/x"
     src="$(find "$WORK/x" -maxdepth 2 -name images.tar -exec dirname {} \; | head -n 1)"
-    [ -n "$src" ] || fail failed "not an offline codesh bundle"
+    [ -n "$src" ] || fail failed "not an offline gachipad bundle"
     (verify_bundle "$src") || fail failed "bundle content checksum mismatch"
     TARGET="$(cat "$src/VERSION")"
   fi
@@ -514,7 +514,7 @@ update() {
   fi
   if [ -z "$TARGET" ] || [ "$TARGET" = "$CURRENT" ]; then
     [ "$mode" = check ] || record up-to-date "$CURRENT" "$CURRENT" ""
-    say "codesh $CURRENT is up to date"
+    say "gachipad $CURRENT is up to date"
     return 0
   fi
   if [ "$mode" = check ]; then say "installed $CURRENT, available $TARGET"; return 0; fi
@@ -536,7 +536,7 @@ update() {
     mkdir "$WORK/x"
     tar xzf "$WORK/$asset" -C "$WORK/x"
     src="$(find "$WORK/x" -maxdepth 2 -name docker-compose.yml -exec dirname {} \; | head -n 1)"
-    [ -n "$src" ] || fail failed "$asset is not a codesh release"
+    [ -n "$src" ] || fail failed "$asset is not a gachipad release"
     (verify_bundle "$src") || fail failed "content checksum mismatch in $asset"
     [ "$(cat "$src/VERSION")" = "$TARGET" ] || fail failed "$asset has the wrong VERSION"
   fi
@@ -606,7 +606,7 @@ update() {
     fail failed "app verified but ingress failed; current files and DB retained; inspect logs and run docker compose up -d"
   fi
   record updated "$CURRENT" "$TARGET" "" || say "warning: update complete but status could not be written" >&2
-  say "codesh $TARGET is running (backup: ${BACKUP:-none})"
+  say "gachipad $TARGET is running (backup: ${BACKUP:-none})"
 }
 
 main() {

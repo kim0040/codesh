@@ -36,10 +36,10 @@ describe.runIf(available)("collab server routes", () => {
     expect(response.status).toBe(200);
     const body = await response.text();
     for (const name of [
-      "codesh_collab_connections",
-      "codesh_collab_documents_loaded",
-      "codesh_collab_flush_seconds",
-      "codesh_collab_updates_total",
+      "gachipad_collab_connections",
+      "gachipad_collab_documents_loaded",
+      "gachipad_collab_flush_seconds",
+      "gachipad_collab_updates_total",
     ]) {
       expect(body).toContain(name);
     }

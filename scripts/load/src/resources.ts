@@ -64,7 +64,7 @@ export function parseSize(text: string): number {
   return (Number(match[1]) * (UNITS[match[2] as string] ?? 1)) / 1024 ** 2;
 }
 
-/** `codesh-perf-collab-1` in project `codesh-perf` -> `collab`. */
+/** `gachipad-perf-collab-1` in project `gachipad-perf` -> `collab`. */
 export function serviceOf(container: string, project: string): string | null {
   if (!container.startsWith(`${project}-`)) return null;
   return container.slice(project.length + 1).replace(/-\d+$/, "");

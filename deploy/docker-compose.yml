@@ -1,4 +1,4 @@
-# codesh production stack (docs/ARCHITECTURE.md §1).
+# gachipad production stack (docs/ARCHITECTURE.md §1).
 #
 #   cp .env.example .env && ./generate-secrets.sh     # once
 #   docker compose pull && docker compose up -d       # released images of CODESH_VERSION from CODESH_REGISTRY

@@ -6,14 +6,14 @@
 #   scripts/load/perf-stack.sh down            # stop and delete its containers and volumes
 #   scripts/load/perf-stack.sh restart-collab  # what --storm restart runs
 #
-# Defaults: project codesh-perf, env dir /tmp/codesh-perf, http://localhost:8850. Override with
+# Defaults: project gachipad-perf, env dir /tmp/gachipad-perf, http://localhost:8850. Override with
 # PERF_PROJECT, PERF_DIR, PERF_HTTP_PORT, PERF_SUBNET. Rate limits and quotas are raised because
 # every simulated client comes from this one host.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PROJECT="${PERF_PROJECT:-codesh-perf}"
-DIR="${PERF_DIR:-/tmp/codesh-perf}"
+PROJECT="${PERF_PROJECT:-gachipad-perf}"
+DIR="${PERF_DIR:-/tmp/gachipad-perf}"
 HTTP_PORT="${PERF_HTTP_PORT:-8850}"
 SUBNET="${PERF_SUBNET:-172.29.150.0/24}"
 ENV_FILE="$DIR/.env"

@@ -23,7 +23,7 @@ describe("sanitizePath", () => {
 
 describe("text detection", () => {
   it("decodes UTF-8 text including Korean", () => {
-    expect(decodeText(new TextEncoder().encode("안녕 codesh\n"))).toBe("안녕 codesh\n");
+    expect(decodeText(new TextEncoder().encode("안녕 gachipad\n"))).toBe("안녕 gachipad\n");
   });
 
   it("treats NUL bytes and invalid UTF-8 as binary", () => {

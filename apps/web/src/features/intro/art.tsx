@@ -532,13 +532,13 @@ export function KeysArt() {
   );
 }
 
-/** The name, built from six cells like the join code. */
+/** The wordmark, with one cell per letter. */
 export function NameCells({ children }: { children?: ReactNode }) {
   return (
     <div className="ix-name" aria-hidden="true">
       {[..."gachipad"].map((letter, index) => (
         <span
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed six letters
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed eight letters
           key={index}
           className="ix-name-cell"
           style={

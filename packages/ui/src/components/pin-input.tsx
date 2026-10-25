@@ -8,7 +8,7 @@ export interface PinInputProps {
   onValueChange?: (value: string) => void;
   /** Fired once when the last digit is entered or a full code is pasted. */
   onComplete?: (value: string) => void;
-  /** Number of digits. Defaults to 6, the codesh join code length. */
+  /** Number of digits. Defaults to 6, the gachipad join code length. */
   length?: number;
   /** Visual grouping (6 digits show as 3 + 3). */
   groupSize?: number;

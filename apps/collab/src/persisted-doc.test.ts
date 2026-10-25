@@ -10,7 +10,7 @@ describe.runIf(available)("PersistedDoc", () => {
   let database: TestDatabase;
 
   beforeAll(async () => {
-    database = await createTestDatabase("codesh_persist");
+    database = await createTestDatabase("gachipad_persist");
   });
   afterAll(() => database?.drop());
 

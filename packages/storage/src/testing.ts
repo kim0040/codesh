@@ -40,7 +40,7 @@ export interface TestDatabase {
 }
 
 /** A database with a random name, so parallel test files never share data. */
-export async function createTestDatabase(prefix = "codesh_test"): Promise<TestDatabase> {
+export async function createTestDatabase(prefix = "gachipad_test"): Promise<TestDatabase> {
   const connection = await connectMongo(MONGO_TEST_URL, {
     dbName: `${prefix}_${randomUUID().slice(0, 8)}`,
   });

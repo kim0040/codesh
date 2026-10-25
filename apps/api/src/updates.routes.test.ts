@@ -115,7 +115,7 @@ describe.skipIf(!integration)("update check", () => {
     const [request] = github.seen as [Seen];
     expect(request.method).toBe("GET");
     expect(request.url).toBe("/repos/kim0040/codesh/releases/latest");
-    expect(request.headers["user-agent"]).toBe("codesh/1.0.0");
+    expect(request.headers["user-agent"]).toBe("gachipad/1.0.0");
     for (const name of ["authorization", "cookie", "x-forwarded-for", "referer", "if-none-match"])
       expect(request.headers[name], name).toBeUndefined();
 
@@ -295,7 +295,7 @@ describe.skipIf(!integration)("update check", () => {
   });
 
   it("shows the updater's status file when it is mounted, and nothing for a broken one", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "codesh-update-"));
+    const dir = await mkdtemp(join(tmpdir(), "gachipad-update-"));
     try {
       const file = join(dir, "update.json");
       await writeFile(

@@ -1,4 +1,4 @@
-# codesh edge: static web app, /api (incl. SSE) and /collab (WebSocket) -- docs/ARCHITECTURE.md §1.
+# gachipad edge: static web app, /api (incl. SSE) and /collab (WebSocket) -- docs/ARCHITECTURE.md §1.
 #
 # SITE_ADDRESS  ":80" (default) serves plain HTTP. A host name (codesh.local) turns on HTTPS;
 #               put a `tls ...` directive for it in /etc/caddy/tls/*.caddy (see deploy/README.md).

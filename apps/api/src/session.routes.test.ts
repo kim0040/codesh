@@ -120,7 +120,7 @@ describe.skipIf(!integration)("session routes", () => {
   });
 
   it("marks the cookie Secure when the app is served over https", async () => {
-    const secure = await createHarness({ config: { publicUrl: "https://codesh.corp" } });
+    const secure = await createHarness({ config: { publicUrl: "https://gachipad.corp" } });
     try {
       const response = await secure.client().get("/api/session");
       expect(String(response.headers["set-cookie"])).toMatch(/; Secure/i);

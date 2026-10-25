@@ -186,8 +186,8 @@ describe.runIf(available)("collab sync and persistence", () => {
     }
     await waitFor(() => server.collab.docs.get(share.id)?.core.pendingUpdates === 0, "flushed");
     const metric = await server.metrics.flushSeconds.get();
-    const count = metric.values.find((v) => v.metricName === "codesh_collab_flush_seconds_count");
-    const sum = metric.values.find((v) => v.metricName === "codesh_collab_flush_seconds_sum");
+    const count = metric.values.find((v) => v.metricName === "gachipad_collab_flush_seconds_count");
+    const sum = metric.values.find((v) => v.metricName === "gachipad_collab_flush_seconds_sum");
     expect(count?.value).toBeGreaterThan(0);
     const avgMs = ((sum?.value ?? 0) / (count?.value ?? 1)) * 1000;
     const le5 = metric.values.find((v) => v.labels.le === 0.005)?.value ?? 0;
@@ -197,7 +197,7 @@ describe.runIf(available)("collab sync and persistence", () => {
       ).toFixed(0)}% <= 5 ms`,
     );
     const body = await (await fetch(`${server.httpURL}/metrics`)).text();
-    expect(body).toMatch(/codesh_collab_connections \d+/);
-    expect(body).toMatch(/codesh_collab_updates_total\{origin="connection"\} \d+/);
+    expect(body).toMatch(/gachipad_collab_connections \d+/);
+    expect(body).toMatch(/gachipad_collab_updates_total\{origin="connection"\} \d+/);
   });
 });

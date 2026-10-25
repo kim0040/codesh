@@ -148,10 +148,10 @@ describe.skipIf(!integration)("POST /api/shares", () => {
   });
 
   it("prefixes the url with PUBLIC_URL when configured", async () => {
-    const configured = await createHarness({ config: { publicUrl: "https://codesh.corp" } });
+    const configured = await createHarness({ config: { publicUrl: "https://gachipad.corp" } });
     try {
       const { id, url } = await createShare(configured.client());
-      expect(url).toBe(`https://codesh.corp/${id}`);
+      expect(url).toBe(`https://gachipad.corp/${id}`);
     } finally {
       await configured.close();
     }

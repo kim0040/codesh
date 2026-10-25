@@ -57,11 +57,11 @@ describe.skipIf(!integration)("system routes", () => {
     const response = await h.client().get("/metrics");
     expect(response.statusCode).toBe(200);
     expect(String(response.headers["content-type"])).toMatch(/^text\/plain/);
-    expect(response.body).toMatch(/^codesh_shares_created_total [1-9]/m);
+    expect(response.body).toMatch(/^gachipad_shares_created_total [1-9]/m);
     expect(response.body).toMatch(
-      /codesh_http_request_duration_seconds_count\{[^}]*route="\/api\/session"[^}]*status="200"\} [1-9]/,
+      /gachipad_http_request_duration_seconds_count\{[^}]*route="\/api\/session"[^}]*status="200"\} [1-9]/,
     );
-    expect(response.body).toContain("codesh_api_process_cpu_user_seconds_total");
+    expect(response.body).toContain("gachipad_api_process_cpu_user_seconds_total");
   });
 });
 

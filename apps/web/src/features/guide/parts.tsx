@@ -264,7 +264,7 @@ export function ShortcutTables() {
   );
 }
 
-/** Names of the templates that ship with codesh, in the current language. */
+/** Names of the templates that ship with gachipad, in the current language. */
 export function TemplateNames() {
   const t = useT();
   return (

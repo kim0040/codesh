@@ -231,7 +231,7 @@ export function renderLicenses(packages: ClosurePackage[], linguist: string): st
 export function thirdPartyLicenses(): Plugin {
   let root = process.cwd();
   return {
-    name: "codesh:third-party-licenses",
+    name: "gachipad:third-party-licenses",
     apply: "build",
     configResolved(config) {
       root = config.root;

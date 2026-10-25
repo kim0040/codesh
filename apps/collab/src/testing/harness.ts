@@ -112,7 +112,7 @@ export class Harness {
   private constructor(readonly database: TestDatabase) {}
 
   static async create(): Promise<Harness> {
-    return new Harness(await createTestDatabase("codesh_collab"));
+    return new Harness(await createTestDatabase("gachipad_collab"));
   }
 
   get stores(): Stores {

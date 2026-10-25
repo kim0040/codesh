@@ -252,7 +252,7 @@ interface RecentPerm {
  * commands from other services (§6).
  */
 export class Collab implements Extension<CollabContext> {
-  extensionName = "codesh-collab";
+  extensionName = "gachipad-collab";
   /** Before extension-redis (1000), so a postponed unload does not wait for its disconnect delay. */
   priority = 1100;
 

@@ -83,10 +83,10 @@ export async function keymapExtension(mode: Keymap): Promise<Extension> {
       const run = (index: number) => (cm: { cm6: EditorView }) => {
         undoKeymap[index]?.run?.(cm.cm6);
       };
-      Vim.defineAction("codeshUndo", run(0) as never);
-      Vim.defineAction("codeshRedo", run(1) as never);
-      Vim.mapCommand("u", "action", "codeshUndo", {}, { context: "normal" });
-      Vim.mapCommand("<C-r>", "action", "codeshRedo", {}, { context: "normal" });
+      Vim.defineAction("gachipadUndo", run(0) as never);
+      Vim.defineAction("gachipadRedo", run(1) as never);
+      Vim.mapCommand("u", "action", "gachipadUndo", {}, { context: "normal" });
+      Vim.mapCommand("<C-r>", "action", "gachipadRedo", {}, { context: "normal" });
     } catch {
       // The editor still works; only undo from normal mode is affected.
     }

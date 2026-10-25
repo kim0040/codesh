@@ -216,7 +216,7 @@ describe.runIf(available)("convergence under concurrency", () => {
   let database: TestDatabase;
 
   beforeAll(async () => {
-    database = await createTestDatabase("codesh_converge");
+    database = await createTestDatabase("gachipad_converge");
   });
   afterAll(() => database?.drop());
 

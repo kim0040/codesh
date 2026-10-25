@@ -73,7 +73,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       error instanceof CliError ||
       (error as { code?: string }).code?.startsWith("ERR_PARSE_ARGS")
     ) {
-      io.stderr(`codesh: ${(error as Error).message}\n`);
+      io.stderr(`gachipad: ${(error as Error).message}\n`);
       return 1;
     }
     throw error;

@@ -1,5 +1,5 @@
 /*
- * codesh design tokens. Dark is the default; light follows `prefers-color-scheme: light`;
+ * gachipad design tokens. Dark is the default; light follows `prefers-color-scheme: light`;
  * `data-theme="dark|light"` on <html> (or on any subtree) overrides both.
  *
  * Every colour is `light-dark(<light>, <dark>)`, so a token is declared once and resolves against

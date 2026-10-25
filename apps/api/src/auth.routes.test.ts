@@ -83,14 +83,14 @@ describe.skipIf(!integration)("optional login", () => {
 
   let h: Harness;
   beforeAll(async () => {
-    h = await createHarness({ ldap, oidc, config: { publicUrl: "https://codesh.corp" } });
+    h = await createHarness({ ldap, oidc, config: { publicUrl: "https://gachipad.corp" } });
   });
   afterAll(() => h.close());
 
   const enable = async (patch: Partial<ReturnType<typeof defaultSettings>>) =>
     h.stores.settings.put({ ...defaultSettings(), ...patch });
   const ldapSettings = { url: "ldaps://ad.corp", baseDn: "dc=corp,dc=local" };
-  const oidcSettings = { issuer: "https://idp.corp", clientId: "codesh", clientSecret: "s3cret" };
+  const oidcSettings = { issuer: "https://idp.corp", clientId: "gachipad", clientSecret: "s3cret" };
 
   it("is off by default: providers say so and every login endpoint answers 404", async () => {
     await enable({});
@@ -296,7 +296,7 @@ describe.skipIf(!integration)("optional login", () => {
       expect(response.statusCode).toBe(302);
       expect(String(response.headers.location)).toMatch(/^https:\/\/idp\.corp\/authorize\?state=/);
       expect(authorizeCalls).toHaveLength(1);
-      expect(authorizeCalls[0]?.redirectUri).toBe("https://codesh.corp/api/auth/oidc/callback");
+      expect(authorizeCalls[0]?.redirectUri).toBe("https://gachipad.corp/api/auth/oidc/callback");
       const stored = JSON.parse((await h.valkey.get(`oidc:state:${state}`)) as string);
       expect(stored).toEqual({
         clientId,
@@ -320,14 +320,14 @@ describe.skipIf(!integration)("optional login", () => {
       expect(callback.statusCode).toBe(302);
       const clientId = await client.clientId();
       expect(clientId).not.toBe(guestId);
-      expect(callback.headers.location).toBe("https://codesh.corp/");
+      expect(callback.headers.location).toBe("https://gachipad.corp/");
       expect(exchangeCalls).toHaveLength(1);
       const call = exchangeCalls[0] as (typeof exchangeCalls)[number];
       expect(call.state).toBe(state);
       expect(call.nonce).toBe(authorizeCalls.at(-1)?.nonce);
       expect(call.codeVerifier).toBe(authorizeCalls.at(-1)?.codeVerifier);
       expect(call.currentUrl.origin + call.currentUrl.pathname).toBe(
-        "https://codesh.corp/api/auth/oidc/callback",
+        "https://gachipad.corp/api/auth/oidc/callback",
       );
       expect(call.currentUrl.searchParams.get("code")).toBe("abc");
       expect(await h.valkey.hgetall(`identity:${clientId}`)).toMatchObject({
@@ -386,11 +386,11 @@ describe.skipIf(!integration)("optional login", () => {
         expect(missing.statusCode).toBe(400);
         await bare.stores.settings.put({
           ...defaultSettings(),
-          auth: { oidc: { ...oidcSettings, redirectUri: "https://codesh.corp/cb" }, ldap: null },
+          auth: { oidc: { ...oidcSettings, redirectUri: "https://gachipad.corp/cb" }, ldap: null },
         });
         authorizeCalls = [];
         expect((await bare.client().get("/api/auth/oidc/login")).statusCode).toBe(302);
-        expect(authorizeCalls[0]?.redirectUri).toBe("https://codesh.corp/cb");
+        expect(authorizeCalls[0]?.redirectUri).toBe("https://gachipad.corp/cb");
       } finally {
         await bare.close();
       }

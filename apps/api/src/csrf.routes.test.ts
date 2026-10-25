@@ -7,7 +7,7 @@ const errorCode = (response: { json: <T>() => T }) =>
 describe.skipIf(!integration)("cross-site request guard", () => {
   let h: Harness;
   beforeAll(async () => {
-    h = await createHarness({ config: { publicUrl: "https://codesh.corp" } });
+    h = await createHarness({ config: { publicUrl: "https://gachipad.corp" } });
   });
   afterAll(() => h.close());
 
@@ -67,7 +67,7 @@ describe.skipIf(!integration)("cross-site request guard", () => {
     expect(sameHost.statusCode).toBe(200);
     const configured = await client.request("POST", "/api/shares", {
       body: {},
-      ...bare({ origin: "https://codesh.corp", host: "internal:3001" }),
+      ...bare({ origin: "https://gachipad.corp", host: "internal:3001" }),
     });
     expect(configured.statusCode).toBe(200);
   });

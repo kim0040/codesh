@@ -303,7 +303,7 @@ function bearer(token: string): Record<string, string> {
 
 /** `webkitRelativePath` of a file picked from a folder, or the path we attach to dropped entries. */
 export function relativePathOf(file: File): string | null {
-  const dropped = (file as File & { codeshPath?: string }).codeshPath;
+  const dropped = (file as File & { gachipadPath?: string }).gachipadPath;
   if (dropped) return dropped;
   return file.webkitRelativePath ? file.webkitRelativePath : null;
 }

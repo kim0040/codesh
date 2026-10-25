@@ -1,4 +1,4 @@
-@keyframes codesh-completion-fade {
+@keyframes gachipad-completion-fade {
   from {
     opacity: 0;
   }
@@ -9,7 +9,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .cm-tooltip-autocomplete {
-    animation: codesh-completion-fade 120ms ease-out;
+    animation: gachipad-completion-fade 120ms ease-out;
   }
 }
 

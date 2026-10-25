@@ -13,9 +13,9 @@ import type { UpdateConfig } from "./config.js";
 import { compareSemver, formatSemver, parseSemver, type SemVer } from "./semver.js";
 
 /**
- * The update check: the one outbound request codesh makes, and only while UPDATE_CHECK is on
+ * The update check: the one outbound request gachipad makes, and only while UPDATE_CHECK is on
  * (docs/ARCHITECTURE.md §14). A plain unauthenticated GET of the repository's latest release:
- * no identifiers, no cookies, nothing about the installation but `User-Agent: codesh/<version>`.
+ * no identifiers, no cookies, nothing about the installation but `User-Agent: gachipad/<version>`.
  * It runs in the background, a few minutes after start and then about every 12 hours, by one api
  * instance per deployment (Valkey lock); a failure only marks the state `unreachable`.
  */
@@ -239,7 +239,7 @@ export class UpdateChecker {
         : `${apiUrl}/repos/${repo}/releases?per_page=20`;
     const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
-      "User-Agent": `codesh/${this.version}`,
+      "User-Agent": `gachipad/${this.version}`,
       "X-GitHub-Api-Version": "2022-11-28",
     };
     if (stored?.etag) headers["If-None-Match"] = stored.etag;

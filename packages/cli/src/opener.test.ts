@@ -7,7 +7,7 @@ import { type Io, run } from "./run.js";
 it.each([{ id: "a&calc.exe" }, { labId: "../../x" }, { id: "12345678" }])(
   "L12: refuses a server-supplied opener target %j",
   async (target) => {
-    const dir = await mkdtemp(join(tmpdir(), "codesh-opener-"));
+    const dir = await mkdtemp(join(tmpdir(), "gachipad-opener-"));
     const openBrowser = vi.fn();
     const io: Io = {
       stdout: vi.fn(),

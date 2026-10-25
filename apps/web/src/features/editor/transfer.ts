@@ -5,7 +5,7 @@ import { useT } from "../../lib/i18n";
 import { collectDroppedFiles } from "./dropped-files";
 
 /** MIME type used while dragging a file tab or tree row of this share. */
-export const FILE_DRAG_TYPE = "application/x-codesh-file";
+export const FILE_DRAG_TYPE = "application/x-gachipad-file";
 
 export function setFileDrag(event: DragEvent, fileId: string): void {
   event.dataTransfer.setData(FILE_DRAG_TYPE, fileId);

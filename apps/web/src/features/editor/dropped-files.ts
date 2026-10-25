@@ -1,6 +1,6 @@
 /**
  * Files from a drop, with folders expanded. Browsers hide folder contents behind
- * `webkitGetAsEntry`; each file gets `codeshPath` so uploads keep their relative path.
+ * `webkitGetAsEntry`; each file gets `gachipadPath` so uploads keep their relative path.
  */
 
 interface FsEntry {
@@ -30,7 +30,7 @@ async function readAll(entry: FsEntry): Promise<File[]> {
   if (entry.isFile && entry.file) {
     if (isJunkFile(entry.fullPath)) return [];
     const file = await new Promise<File>((resolve, reject) => entry.file?.(resolve, reject));
-    (file as File & { codeshPath?: string }).codeshPath = entry.fullPath.replace(/^\//, "");
+    (file as File & { gachipadPath?: string }).gachipadPath = entry.fullPath.replace(/^\//, "");
     return [file];
   }
   if (entry.isDirectory && entry.createReader) {

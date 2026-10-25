@@ -35,7 +35,7 @@ describe("server url", () => {
     expect(resolveUrl(undefined, { CODESH_URL: "http://b" }, { url: "http://c" })).toBe("http://b");
     expect(resolveUrl(undefined, {}, { url: "http://c/" })).toBe("http://c");
     expect(() => resolveUrl(undefined, {}, {})).toThrow(CliError);
-    expect(() => resolveUrl("codesh.corp", {}, {})).toThrow(CliError);
+    expect(() => resolveUrl("gachipad.corp", {}, {})).toThrow(CliError);
   });
 });
 
@@ -92,12 +92,12 @@ describe.skipIf(!integration)("against an in-process API", () => {
   beforeAll(async () => {
     h = await createHarness();
     base = await h.listen();
-    dir = await mkdtemp(join(tmpdir(), "codesh-cli-"));
+    dir = await mkdtemp(join(tmpdir(), "gachipad-cli-"));
   });
   afterAll(() => h.close());
 
   /** Runs the CLI with its own home (`CODESH_CONFIG`), so each name is one terminal user. */
-  async function codesh(args: string[], user = "default", stdin = "") {
+  async function runCli(args: string[], user = "default", stdin = "") {
     const out: string[] = [];
     const err: string[] = [];
     const opened: string[] = [];
@@ -119,19 +119,19 @@ describe.skipIf(!integration)("against an in-process API", () => {
   it("pushes files, prints the url and the code, and the share can be pulled by code", async () => {
     await writeFile(join(dir, "hello.py"), "print('hi')\n");
     await writeFile(join(dir, "util.py"), "x = 1\n");
-    const pushed = await codesh(["push", "hello.py", "util.py", "--title", "My demo", "--no-qr"]);
+    const pushed = await runCli(["push", "hello.py", "util.py", "--title", "My demo", "--no-qr"]);
     expect(pushed.code, pushed.err).toBe(0);
     const code = /code (\d{6})/.exec(pushed.out)?.[1];
     expect(code).toBeDefined();
     expect(pushed.out).toMatch(new RegExp(`${base}/[0-9A-Za-z]{8}\\n`));
 
     const target = join(dir, "pulled");
-    const pulled = await codesh(["pull", code as string, "-o", target], "reader");
+    const pulled = await runCli(["pull", code as string, "-o", target], "reader");
     expect(pulled.code, pulled.err).toBe(0);
     expect(await readFile(join(target, "hello.py"), "utf8")).toBe("print('hi')\n");
     expect(await readFile(join(target, "util.py"), "utf8")).toBe("x = 1\n");
 
-    const zipped = await codesh(
+    const zipped = await runCli(
       ["pull", code as string, "--zip", "-o", join(dir, "demo.zip")],
       "reader",
     );
@@ -144,11 +144,11 @@ describe.skipIf(!integration)("against an in-process API", () => {
     await mkdir(join(source, "src", "nested"), { recursive: true });
     const contents = Buffer.from("first\r\nsecond\r\n", "utf8");
     await writeFile(join(source, "src", "nested", "main.ts"), contents);
-    const pushed = await codesh(["push", "folder-share", "--no-qr"]);
+    const pushed = await runCli(["push", "folder-share", "--no-qr"]);
     expect(pushed.code, pushed.err).toBe(0);
     const code = /code (\d{6})/.exec(pushed.out)?.[1] as string;
     const output = join(dir, "folder-pulled");
-    const pulled = await codesh(["pull", code, "-o", output], "folder-reader");
+    const pulled = await runCli(["pull", code, "-o", output], "folder-reader");
     expect(pulled.code, pulled.err).toBe(0);
     expect(await readFile(join(output, "folder-share", "src", "nested", "main.ts"))).toEqual(
       contents,
@@ -157,14 +157,14 @@ describe.skipIf(!integration)("against an in-process API", () => {
 
   it("prints a QR code unless --no-qr", async () => {
     await writeFile(join(dir, "q.txt"), "q");
-    const withQr = await codesh(["push", "q.txt"]);
+    const withQr = await runCli(["push", "q.txt"]);
     expect(withQr.code).toBe(0);
     expect(withQr.out.split("\n").length).toBeGreaterThan(8);
   });
 
   it("--view-only makes other people viewers", async () => {
     await writeFile(join(dir, "ro.txt"), "read me");
-    const pushed = await codesh(["push", "ro.txt", "--view-only", "--no-qr"]);
+    const pushed = await runCli(["push", "ro.txt", "--view-only", "--no-qr"]);
     expect(pushed.out).toContain("(view only)");
     const id = /\/([0-9A-Za-z]{8})\n/.exec(pushed.out)?.[1] as string;
     const stranger = h.client();
@@ -173,13 +173,13 @@ describe.skipIf(!integration)("against an in-process API", () => {
   });
 
   it("reads stdin and keeps the owner session between pushes", async () => {
-    const first = await codesh(
+    const first = await runCli(
       ["push", "-", "--name", "pipe.js", "--no-qr"],
       "owner",
       "let a = 1;\n",
     );
     expect(first.code, first.err).toBe(0);
-    const second = await codesh(
+    const second = await runCli(
       ["push", "-", "--name", "pipe2.js", "--no-qr"],
       "owner",
       "let b = 2;\n",
@@ -198,27 +198,27 @@ describe.skipIf(!integration)("against an in-process API", () => {
 
   it("open prints the url of a code, and opens the browser unless --print", async () => {
     await writeFile(join(dir, "o.txt"), "o");
-    const pushed = await codesh(["push", "o.txt", "--no-qr"]);
+    const pushed = await runCli(["push", "o.txt", "--no-qr"]);
     const code = /code (\d{6})/.exec(pushed.out)?.[1] as string;
     const id = /\/([0-9A-Za-z]{8})\n/.exec(pushed.out)?.[1] as string;
-    const printed = await codesh(["open", code, "--print"], "other");
+    const printed = await runCli(["open", code, "--print"], "other");
     expect(printed.out).toBe(`${base}/${id}\n`);
     expect(printed.opened).toEqual([]);
-    const opened = await codesh(["open", id], "other");
+    const opened = await runCli(["open", id], "other");
     expect(opened.opened).toEqual([`${base}/${id}`]);
   });
 
   it("explains errors instead of crashing", async () => {
-    const missing = await codesh(["push", "nope.txt"]);
+    const missing = await runCli(["push", "nope.txt"]);
     expect(missing.code).toBe(1);
     expect(missing.err).toContain("Cannot read nope.txt");
-    const unknown = await codesh(["open", "999999"]);
+    const unknown = await runCli(["open", "999999"]);
     expect(unknown.code).toBe(1);
     expect(unknown.err).toContain("not_found");
-    const bad = await codesh(["pull", "abc"]);
+    const bad = await runCli(["pull", "abc"]);
     expect(bad.code).toBe(1);
     await writeFile(join(dir, "bin.dat"), Buffer.from([1, 0, 2]));
-    const binary = await codesh(["push", "bin.dat"]);
+    const binary = await runCli(["push", "bin.dat"]);
     expect(binary.err).toContain("binary");
   });
 });

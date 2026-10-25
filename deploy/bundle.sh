@@ -44,12 +44,12 @@ CODESH_SERVICES="api collab caddy mdns"
 
 case "$SOURCE" in
   build)
-    echo "bundle: building codesh $VERSION"
+    echo "bundle: building gachipad $VERSION"
     compose build
     compose pull mongo valkey
     ;;
   registry)
-    echo "bundle: pulling codesh $VERSION from $REGISTRY"
+    echo "bundle: pulling gachipad $VERSION from $REGISTRY"
     # shellcheck disable=SC2086
     compose pull $CODESH_SERVICES mongo valkey
     ;;

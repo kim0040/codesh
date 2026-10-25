@@ -211,7 +211,7 @@ describe.skipIf(!integration)("admin API", () => {
         {
           ...defaultSettings(),
           auth: {
-            oidc: { issuer: "https://idp.corp", clientId: "codesh", clientSecret: "s3cret" },
+            oidc: { issuer: "https://idp.corp", clientId: "gachipad", clientSecret: "s3cret" },
             ldap: { url: "ldaps://ad.corp", baseDn: "dc=corp,dc=local" },
           },
         },

@@ -247,7 +247,7 @@ has_marker "$LP" "$LJ" "$LID" || fail "legacy share content missing"
 # unbound variable"), exits 1 and leaves the extracted bundle in TMPDIR. Accept exactly that.
 if ! in_dir "$LEGACY" codesh-verify-legacy ./upgrade.sh "$DIST/codesh-$NEW.tar.gz" >"$WORK/legacy-upgrade.log" 2>&1; then
   tail -3 "$WORK/legacy-upgrade.log"
-  grep -q "upgrade: codesh $NEW is running" "$WORK/legacy-upgrade.log" || fail "legacy upgrade failed"
+  grep -q "upgrade: gachipad $NEW is running" "$WORK/legacy-upgrade.log" || fail "legacy upgrade failed"
   grep -q 'tmp: unbound variable' "$WORK/legacy-upgrade.log" || fail "legacy upgrade failed"
   echo "known: the old upgrade.sh exits 1 after a successful upgrade (trap bug fixed in this version)"
 fi
@@ -262,7 +262,7 @@ grep -q 'copy it from the verified bundle' "$WORK/legacy-bootstrap.log" || fail 
 tar xzf "$DIST/codesh-$NEW.tar.gz" -O "codesh-$NEW/update.sh" >"$LEGACY/update.sh"
 chmod +x "$LEGACY/update.sh"
 in_dir "$LEGACY" codesh-verify-legacy ./update.sh --bundle "$DIST/codesh-$NEW.tar.gz" >"$WORK/legacy-bootstrap.log" 2>&1
-grep -q "codesh $NEW is up to date" "$WORK/legacy-bootstrap.log" || fail "legacy updater was not installed"
+grep -q "gachipad $NEW is up to date" "$WORK/legacy-bootstrap.log" || fail "legacy updater was not installed"
 has_marker "$LP" "$LJ" "$LID" || fail "legacy content missing after upgrade"
 least_privilege "$LEGACY" codesh-verify-legacy
 no_password_in_ps "$LEGACY"

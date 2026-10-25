@@ -28,17 +28,17 @@ describe("markers", () => {
 
 describe("metricValue", () => {
   const text = [
-    "# HELP codesh_collab_connections Open document connections",
-    "# TYPE codesh_collab_connections gauge",
-    "codesh_collab_connections 42",
-    'codesh_collab_updates_total{origin="connection"} 10',
-    'codesh_collab_updates_total{origin="redis"} 5',
-    "codesh_collab_connections_extra 9",
+    "# HELP gachipad_collab_connections Open document connections",
+    "# TYPE gachipad_collab_connections gauge",
+    "gachipad_collab_connections 42",
+    'gachipad_collab_updates_total{origin="connection"} 10',
+    'gachipad_collab_updates_total{origin="redis"} 5',
+    "gachipad_collab_connections_extra 9",
   ].join("\n");
 
   it("reads a gauge, sums label sets and ignores name prefixes", () => {
-    expect(metricValue(text, "codesh_collab_connections")).toBe(42);
-    expect(metricValue(text, "codesh_collab_updates_total")).toBe(15);
+    expect(metricValue(text, "gachipad_collab_connections")).toBe(42);
+    expect(metricValue(text, "gachipad_collab_updates_total")).toBe(15);
     expect(metricValue(text, "missing")).toBeUndefined();
   });
 });
