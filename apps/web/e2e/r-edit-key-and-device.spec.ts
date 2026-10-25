@@ -237,39 +237,59 @@ test("opening an edit link scrubs the key at once and editing rights survive rel
   }
 });
 
-test("a fragment link works the same, also when pasted into a tab that is already open", async ({
-  browser,
-}) => {
-  const owner = await newUser(browser, "Owner");
-  const guest = await newUser(browser, "Guest");
-  try {
-    const id = await createShare(owner.page);
-    await type(owner.page, "base");
-    const editUrl = await viewOnly(owner, id);
-    const hash = new URL(editUrl).hash;
+for (const immediateJoin of [false, true]) {
+  test(`a fragment link works the same, also when pasted into a tab that is already open${immediateJoin ? " (immediate join)" : ""}`, async ({
+    browser,
+  }) => {
+    const owner = await newUser(browser, "Owner");
+    const guest = await newUser(browser, "Guest");
+    try {
+      const id = await createShare(owner.page);
+      await type(owner.page, "base");
+      const editUrl = await viewOnly(owner, id);
+      const hash = new URL(editUrl).hash;
 
-    const urls: string[] = [];
-    guest.page.on("request", (request) => urls.push(request.url()));
-    await guest.page.goto(`/${id}`);
-    await waitForEditor(guest.page);
-    await expect(guest.page.getByTestId("banner-readonly")).toBeVisible();
+      const urls: string[] = [];
+      guest.page.on("request", (request) => urls.push(request.url()));
+      await guest.page.goto(`/${id}`);
+      await waitForEditor(guest.page);
+      await expect(guest.page.getByTestId("banner-readonly")).toBeVisible();
 
-    // Pasting a link that differs only in its fragment does not reload the page.
-    await guest.page.evaluate((next) => {
-      window.location.hash = next;
-    }, hash);
-    await expect.poll(() => new URL(guest.page.url()).hash).toBe("");
-    // The editor of the new join, not the moment between two documents when there is none.
-    await waitForEditor(guest.page);
-    await expect(guest.page.getByTestId("banner-readonly")).toHaveCount(0);
-    await type(guest.page, " + pasted");
-    await expect.poll(() => editorText(owner.page)).toContain("+ pasted");
-    const key = hash.slice("#key=".length);
-    expect(urls.filter((url) => url.includes(key))).toEqual([]);
-  } finally {
-    await closeAll(owner, guest);
-  }
-});
+      if (immediateJoin) {
+        // With no network turn between loading and ready, React batches both states. The
+        // successful join must replace the viewer session even if loading never commits.
+        await guest.page.evaluate(async (next) => {
+          const modulePath = "/src/lib/api.ts";
+          const { api } = (await import(modulePath)) as typeof import("../src/lib/api");
+          const answer = await api.joinShare(location.pathname.slice(1), {
+            editKey: next.slice("#key=".length),
+          });
+          const join = api.joinShare;
+          api.joinShare = () => {
+            api.joinShare = join;
+            return Promise.resolve(answer);
+          };
+        }, hash);
+        await expect(guest.page.getByTestId("banner-readonly")).toBeVisible();
+      }
+
+      // Pasting a link that differs only in its fragment does not reload the page.
+      await guest.page.evaluate((next) => {
+        window.location.hash = next;
+      }, hash);
+      await expect.poll(() => new URL(guest.page.url()).hash).toBe("");
+      // The editor of the new join, not the moment between two documents when there is none.
+      await waitForEditor(guest.page);
+      await expect(guest.page.getByTestId("banner-readonly")).toHaveCount(0);
+      await type(guest.page, " + pasted");
+      await expect.poll(() => editorText(owner.page)).toContain("+ pasted");
+      const key = hash.slice("#key=".length);
+      expect(urls.filter((url) => url.includes(key))).toEqual([]);
+    } finally {
+      await closeAll(owner, guest);
+    }
+  });
+}
 
 test("a key pasted while the open document was still authenticating as a viewer edits", async ({
   browser,

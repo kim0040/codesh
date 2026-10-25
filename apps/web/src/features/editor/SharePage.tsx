@@ -31,7 +31,7 @@ type JoinState =
   | { phase: "notfound" }
   | { phase: "expired" }
   | { phase: "error"; error: unknown }
-  | { phase: "ready"; role: Role; credentials: JoinCredentials };
+  | { phase: "ready"; attempt: number; role: Role; credentials: JoinCredentials };
 
 /**
  * `/:id` for a 6-digit join code resolves the code and redirects; for a share id it runs the
@@ -113,7 +113,7 @@ function JoinGate({ shareId }: { shareId: string }) {
         if ("token" in result) {
           if (credentials.editKey) noteKeyAdmitted(shareId);
           setLostEdits(false);
-          setState({ phase: "ready", role: result.role, credentials });
+          setState({ phase: "ready", attempt: id, role: result.role, credentials });
         } else await challenge({ phase: "waiting" });
       } catch (error) {
         if (id !== attemptId.current) return;
@@ -255,8 +255,10 @@ function JoinGate({ shareId }: { shareId: string }) {
     }
     case "ready":
       if (!session.data) return <LoadingScreen />;
+      // A fast join can batch loading and ready: replace the old session even then.
       return (
         <EditorPage
+          key={state.attempt}
           shareId={shareId}
           role={state.role}
           credentials={state.credentials}
