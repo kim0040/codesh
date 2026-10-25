@@ -81,11 +81,17 @@ export function smoothCaret(): Extension {
       return [new GlidingCaret(rect.left, rect.top, rect.height, glide)];
     },
     update(update: ViewUpdate, dom: HTMLElement) {
-      glide =
-        update.transactions.length > 0 &&
-        !update.view.composing &&
-        update.transactions.every(glides) &&
-        !(update.geometryChanged && !update.docChanged);
+      const moved = update.docChanged || update.selectionSet;
+      // An update that leaves the cursor alone (a status change, a decoration) keeps how the last
+      // move goes, unless the layout moved; it lands before the measure of that move.
+      if (moved || update.geometryChanged) {
+        glide =
+          moved &&
+          update.transactions.length > 0 &&
+          !update.view.composing &&
+          update.transactions.every(glides) &&
+          !(update.geometryChanged && !update.docChanged);
+      }
       // Like CodeMirror's own cursor: a move restarts the blink, visible, by switching animations.
       if (update.transactions.some((tr) => tr.selection || tr.docChanged)) {
         dom.style.animationName =

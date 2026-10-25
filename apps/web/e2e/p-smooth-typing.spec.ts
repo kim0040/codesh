@@ -38,6 +38,13 @@ test("smooth typing glides the cursor and the setting turns it off", async ({ br
 
     // On by default: the editor says so, and the cursor moves with a transform transition.
     await expect(editor).toHaveAttribute("data-smooth-typing", "on");
+    // A font arriving with the first glyphs moves the text, and that move snaps on purpose: let the
+    // fonts settle, then read the placement drawn for one more keystroke.
+    await owner.page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await owner.page.keyboard.type(" ");
+    await owner.page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+    );
     const on = await caretTransition(owner.page);
     expect(on?.property).toBe("transform");
     expect(Number.parseFloat(on?.duration ?? "0")).toBeGreaterThan(0);
