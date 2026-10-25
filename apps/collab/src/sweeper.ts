@@ -23,9 +23,13 @@ export async function sweep(
 ): Promise<SweepResult | null> {
   if (!(await lock.acquire(keys.sweeperLock))) return null;
   try {
+    if (stores.maintenance) {
+      return await stores.maintenance.sweep(now, async () => {
+        if (!(await lock.renew(keys.sweeperLock))) throw new Error("sweeper lock lost");
+      });
+    }
     const settings = await stores.settings.get();
-    // MongoDB also has TTL indexes, but explicit deletes let the sweeper clean related
-    // collections and give SQL backends the same expiry pass.
+    // Explicit expiry also gives SQL backends the same cleanup as MongoDB's TTL indexes.
     await stores.shares.deleteExpired(now);
     await stores.labs.deleteExpired(now);
     const referenced = new Set([
