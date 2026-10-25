@@ -73,6 +73,7 @@ export function EditorPage({ shareId, role, credentials, sensitive, onLeft, me }
       sensitive: sensitiveRef.current,
       onMerged: () => toast({ title: t("conn.synced"), tone: "success", duration: 3000 }),
       onRole: () => void queryClient.invalidateQueries({ queryKey: ["share", shareId] }),
+      onPermissionRefused: () => toast({ title: t("perm.refused"), tone: "warning" }),
     });
     setSession(next);
     return () => {

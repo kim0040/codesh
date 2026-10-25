@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { fileText, setFileLanguage } from "../../lib/collab/model";
 import { useT } from "../../lib/i18n";
 import { useStore } from "../../lib/store";
-import { useEditor } from "./context";
+import { useDocumentPermissions, useEditor } from "./context";
 
 const STATUS_TEXT = {
   connected: "status.connected",
@@ -78,7 +78,7 @@ function LanguagePicker({ label, color }: { label: string; color: string }) {
   const ctx = useEditor();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const canChange = !ctx.readOnly;
+  const canChange = useDocumentPermissions().language;
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -90,6 +90,7 @@ function LanguagePicker({ label, color }: { label: string; color: string }) {
   }, [query]);
 
   const choose = (id: string) => {
+    if (!canChange) return;
     setFileLanguage(ctx.doc, ctx.activeFile.id, id);
     const entry = getLanguage(id);
     toast({
@@ -110,6 +111,7 @@ function LanguagePicker({ label, color }: { label: string; color: string }) {
     <button
       type="button"
       disabled={!canChange}
+      title={!canChange ? t("perm.ownerOnly") : undefined}
       aria-label={`${t("status.language.label")}: ${label}. ${t("status.language.changeAction")}`}
       data-testid="language-button"
       className="inline-flex h-6 items-center rounded-md px-1.5 hover:bg-fill-hover disabled:hover:bg-transparent coarse:h-9"

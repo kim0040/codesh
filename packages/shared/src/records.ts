@@ -1,5 +1,6 @@
 import { ACCESS_LEVELS } from "./constants.js";
 import { clientIdSchema, joinCodeSchema, shareIdSchema, uploadIdSchema } from "./ids.js";
+import { participantPermissionFields } from "./permissions.js";
 import { z } from "./zod.js";
 
 /**
@@ -17,6 +18,7 @@ export const accessSchema = z.object({
   pinHash: z.string().nullable(),
   requireApproval: z.boolean(),
   nearby: z.boolean(),
+  ...participantPermissionFields,
 });
 export type Access = z.infer<typeof accessSchema>;
 

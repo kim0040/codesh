@@ -94,12 +94,19 @@ export async function importFiles(
   doc: Y.Doc,
   existing: readonly FileEntry[],
   files: readonly File[],
+  options: { canChangeLanguage?: boolean | (() => boolean); mayApply?: () => boolean } = {},
 ): Promise<ImportResult> {
   const { items, skipped } = await expand(files);
+  if (options.mayApply && !options.mayApply())
+    return { added: 0, skipped: skipped + items.length, firstId: null, tooMany: false };
   let added = 0;
   let firstId: string | null = null;
   let tooMany = false;
   const known = [...existing];
+  const canChangeLanguage =
+    typeof options.canChangeLanguage === "function"
+      ? options.canChangeLanguage()
+      : options.canChangeLanguage !== false;
 
   // A fresh, empty share takes the first file in place instead of keeping an empty "main".
   const only = known.length === 1 ? known[0] : undefined;
@@ -107,7 +114,12 @@ export async function importFiles(
     const [first] = items.splice(0, 1);
     if (first) {
       renameFile(doc, only.id, first.path);
-      setFileLanguage(doc, only.id, languageForFilename(baseName(first.path))?.id ?? PLAIN_TEXT_ID);
+      if (canChangeLanguage)
+        setFileLanguage(
+          doc,
+          only.id,
+          languageForFilename(baseName(first.path))?.id ?? PLAIN_TEXT_ID,
+        );
       fileText(doc, only.id).insert(0, first.content);
       known[0] = { ...only, path: first.path };
       firstId = only.id;

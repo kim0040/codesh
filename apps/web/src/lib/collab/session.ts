@@ -2,6 +2,8 @@ import {
   COLLAB_CLOSE_REASONS,
   COLLAB_DENY_REASONS,
   type CollabStateless,
+  type ParticipantPermissions,
+  participantPermissionsSchema,
   type Role,
   type UserRef,
 } from "@codesh/shared";
@@ -46,6 +48,7 @@ export interface SessionState {
   /** The first sync with the server (or the local copy, when offline) is done. */
   synced: boolean;
   role: Role;
+  permissions?: ParticipantPermissions;
   /** Typing is blocked: view-only link, or the owner locked editing. */
   readOnly: boolean;
   locked: boolean;
@@ -80,6 +83,7 @@ export interface SessionOptions {
   /** Called once when the connection came back and local offline edits are merged. */
   onMerged?: () => void;
   onRole?: (role: Role, readOnly: boolean) => void;
+  onPermissionRefused?: () => void;
 }
 
 const sessions = new Set<DocSession>();
@@ -135,6 +139,11 @@ export function parseStateless(payload: string): CollabStateless | null {
     }
     if (value.type === "too_large" && typeof value.maxDocBytes === "number") {
       return { type: "too_large", maxDocBytes: value.maxDocBytes };
+    }
+    if (value.type === "permission_refused") return { type: "permission_refused" };
+    if (value.type === "permissions") {
+      const parsed = participantPermissionsSchema.safeParse(value.permissions);
+      if (parsed.success) return { type: "permissions", permissions: parsed.data };
     }
   } catch {
     // Not one of ours.
@@ -504,6 +513,17 @@ export class DocSession {
   private handleStateless(payload: string) {
     const message = parseStateless(payload);
     if (!message) return;
+    if (message.type === "permissions") {
+      this.patch({ permissions: message.permissions });
+      this.options.onRole?.(this.state.role, this.state.readOnly);
+      return;
+    }
+    if (message.type === "permission_refused") {
+      this.patch({ readOnly: true });
+      this.options.onPermissionRefused?.();
+      void this.resync();
+      return;
+    }
     if (message.type === "too_large") {
       this.patch({ tooLarge: message.maxDocBytes, readOnly: this.state.readOnly });
       void this.resync();

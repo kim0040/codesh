@@ -64,7 +64,10 @@ describe.runIf(available)("collab resilience", () => {
     ctl.down = false;
     await stored(share.id, "before;during;");
     await waitFor(
-      () => member.stateless.some((m) => JSON.stringify(m).includes('"locked":true')),
+      () =>
+        member.stateless
+          .filter((message) => (message as { type: string }).type === "locked")
+          .some((m) => JSON.stringify(m).includes('"locked":true')),
       "lock applied after recovery",
     );
   });
@@ -216,8 +219,15 @@ describe.runIf(available)("collab resilience", () => {
     await sleep(200);
     lockGate.open();
     await member.synced;
-    await waitFor(() => member.stateless.length > 0, "lock notice");
-    expect(member.stateless).toEqual([{ type: "locked", locked: true, readOnly: true }]);
+    await waitFor(
+      () =>
+        member.stateless.filter((message) => (message as { type: string }).type === "locked")
+          .length > 0,
+      "lock notice",
+    );
+    expect(
+      member.stateless.filter((message) => (message as { type: string }).type === "locked"),
+    ).toEqual([{ type: "locked", locked: true, readOnly: true }]);
     member.text.insert(0, "blocked");
     await sleep(300);
     expect(server.collab.docs.get(lockShare.id)?.document.getText("file:main").toString()).toBe("");

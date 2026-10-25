@@ -5,6 +5,7 @@ import {
   keys,
   PIN_ATTEMPT_WINDOW_SECONDS,
   PIN_MAX_ATTEMPTS,
+  participantPermissions,
   type Role,
   type ShareMeta,
   type ShareRecord,
@@ -274,6 +275,7 @@ export function shareView(share: ShareRecord, session: Session, access: Access):
     role: access.role,
     needsPin: access.needsPin,
     requireApproval: access.needsApproval,
+    ...(access.role !== null ? { permissions: participantPermissions(share.access) } : {}),
     ...(access.owner
       ? {
           access: {
@@ -282,6 +284,9 @@ export function shareView(share: ShareRecord, session: Session, access: Access):
             requireApproval: share.access.requireApproval,
             nearby: share.access.nearby,
             editKey: share.access.editKey,
+            allowParticipantRename: share.access.allowParticipantRename ?? false,
+            allowParticipantFiles: share.access.allowParticipantFiles ?? false,
+            allowParticipantLanguage: share.access.allowParticipantLanguage ?? false,
           },
         }
       : {}),

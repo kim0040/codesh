@@ -138,6 +138,10 @@ export class Harness {
         pinHash: null,
         requireApproval: false,
         nearby: true,
+        // General sync fixtures opt into metadata/structure edits; permission tests use strict access.
+        allowParticipantRename: true,
+        allowParticipantFiles: true,
+        allowParticipantLanguage: true,
       },
       bans: [],
       joinCode: generateJoinCode(),

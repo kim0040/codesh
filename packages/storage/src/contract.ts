@@ -60,6 +60,23 @@ function lab(id: string, overrides: Partial<LabRecord> = {}): LabRecord {
 export function storeContract(name: string, open: () => Promise<Stores>) {
   describe(name, () => {
     describe("ShareStore", () => {
+      it("persists participant toggles separately without replacing existing access settings", async () => {
+        const { shares } = await open();
+        await shares.create(share("perm0001"));
+        await Promise.all([
+          shares.update("perm0001", { access: { allowParticipantRename: true } }),
+          shares.update("perm0001", { access: { allowParticipantFiles: true } }),
+          shares.update("perm0001", { access: { allowParticipantLanguage: false } }),
+        ]);
+        expect((await shares.get("perm0001"))?.access).toMatchObject({
+          editKey: "key",
+          default: "edit",
+          pinHash: null,
+          allowParticipantRename: true,
+          allowParticipantFiles: true,
+          allowParticipantLanguage: false,
+        });
+      });
       it("lists admin metadata without content or credentials and summarizes recent creation", async () => {
         const { shares } = await open();
         const now = new Date();

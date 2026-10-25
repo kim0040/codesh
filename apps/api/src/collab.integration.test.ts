@@ -53,11 +53,22 @@ describe.runIf(available)("content changes through a real collab server", () => 
     await Promise.all([studentEditor.synced, teacherEditor.synced]);
     expect((await teacher.patch(`/api/labs/${labId}`, { locked: true })).statusCode).toBe(200);
     await waitFor(
-      () => studentEditor.stateless.length > 0 && teacherEditor.stateless.length > 0,
+      () =>
+        [studentEditor, teacherEditor].every((client) =>
+          client.stateless.some((message) => (message as { type: string }).type === "locked"),
+        ),
       "lock delivered",
     );
-    expect(studentEditor.stateless.at(-1)).toMatchObject({ type: "locked", readOnly: true });
-    expect(teacherEditor.stateless.at(-1)).toMatchObject({ type: "locked", readOnly: false });
+    expect(
+      studentEditor.stateless.findLast(
+        (message) => (message as { type: string }).type === "locked",
+      ),
+    ).toMatchObject({ type: "locked", readOnly: true });
+    expect(
+      teacherEditor.stateless.findLast(
+        (message) => (message as { type: string }).type === "locked",
+      ),
+    ).toMatchObject({ type: "locked", readOnly: false });
     studentEditor.text.insert(0, "forbidden student text");
     teacherEditor.text.insert(0, "teacher text");
     await waitFor(

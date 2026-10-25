@@ -19,7 +19,7 @@ export type CollabTokenPayload = z.infer<typeof collabTokenPayloadSchema>;
 /** Message on the Valkey channel `perm:<shareId>` (§6.7). */
 export const permMessageSchema = z.object({
   version: z.number().int().nonnegative(),
-  kind: z.enum(["role", "kick", "lock", "delete"]),
+  kind: z.enum(["role", "kick", "lock", "delete", "permissions"]),
   clientId: clientIdSchema.optional(),
   /** With `kind: 'role'` and `clientId`: the new role. Without it, collab asks the client to rejoin. */
   role: roleSchema.optional(),

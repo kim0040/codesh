@@ -2,7 +2,7 @@ import { Button, Dialog, DialogContent, Spinner, toast } from "@codesh/ui";
 import { FolderUp, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { useT } from "../../lib/i18n";
-import { useEditor } from "./context";
+import { useDocumentPermissions, useEditor } from "./context";
 import { collectDroppedFiles } from "./dropped-files";
 import { importFiles } from "./import-files";
 
@@ -10,10 +10,17 @@ import { importFiles } from "./import-files";
 export function useImport() {
   const t = useT();
   const ctx = useEditor();
+  const canImport = useDocumentPermissions().files;
+  const canChangeLanguage = useDocumentPermissions().language;
+  const allowed = useRef({ files: canImport, language: canChangeLanguage });
+  allowed.current = { files: canImport, language: canChangeLanguage };
   return async (files: File[]) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || !canImport) return;
     try {
-      const result = await importFiles(ctx.doc, ctx.files, files);
+      const result = await importFiles(ctx.doc, ctx.files, files, {
+        canChangeLanguage: () => allowed.current.language,
+        mayApply: () => allowed.current.files,
+      });
       if (result.firstId) ctx.setActiveFileId(result.firstId);
       if (result.added > 0)
         toast({ title: t("toast.uploaded", { count: result.added }), tone: "success" });
@@ -32,8 +39,9 @@ export function useImport() {
 export function UploadDialog() {
   const t = useT();
   const ctx = useEditor();
+  const canImport = useDocumentPermissions().files;
   const run = useImport();
-  const open = ctx.panel.name === "upload";
+  const open = canImport && ctx.panel.name === "upload";
   const [busy, setBusy] = useState(0);
   const [over, setOver] = useState(false);
   const filesInput = useRef<HTMLInputElement>(null);

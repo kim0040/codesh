@@ -1,5 +1,10 @@
 import type { EditorView } from "@codemirror/view";
-import type { GetShareResponse, UserRef } from "@codesh/shared";
+import {
+  canChangeDocument,
+  type GetShareResponse,
+  participantPermissions,
+  type UserRef,
+} from "@codesh/shared";
 import { createContext, type MutableRefObject, useContext } from "react";
 import type * as Y from "yjs";
 import type { Participant } from "../../lib/collab/hooks";
@@ -56,4 +61,13 @@ export function useEditor(): EditorCtx {
   const value = useContext(EditorContext);
   if (!value) throw new Error("useEditor must be used inside the editor page");
   return value;
+}
+
+/** Central UI guard; the collab server independently checks the actual update. */
+export function useDocumentPermissions() {
+  const ctx = useEditor();
+  const permissions = ctx.state.permissions ?? ctx.share.permissions ?? participantPermissions();
+  const can = (action: "rename" | "files" | "language") =>
+    canChangeDocument(ctx.state.role, ctx.readOnly, permissions, action);
+  return { rename: can("rename"), files: can("files"), language: can("language") };
 }

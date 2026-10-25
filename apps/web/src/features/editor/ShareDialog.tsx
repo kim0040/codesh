@@ -424,53 +424,55 @@ function SendTab() {
         )}
       </section>
 
-      <section
-        className="flex flex-col gap-2 border-t border-line pt-4"
-        aria-labelledby="broadcast-title"
-      >
-        <h3 id="broadcast-title" className="text-body-sm font-semibold">
-          {t("share.dialog.broadcast.title")}
-        </h3>
-        <p className="text-caption text-fg-3">
-          {room ? t("share.dialog.broadcast.room", { room }) : t("share.dialog.broadcast.net")}
-        </p>
-        {confirmBroadcast ? (
-          <div
-            role="alertdialog"
-            aria-label={t("share.dialog.broadcast.confirmTitle")}
-            className="flex flex-col gap-2 rounded-lg border border-line bg-fill-hover p-3"
-          >
-            <p className="text-body-sm font-medium">{t("share.dialog.broadcast.confirmTitle")}</p>
-            <p className="text-caption text-fg-2">{t("share.dialog.broadcast.confirmBody")}</p>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => setConfirmBroadcast(false)}>
-                {t("common.cancel")}
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                loading={broadcast.isPending}
-                loadingLabel={t("common.loading")}
-                data-testid="broadcast-confirm"
-                onClick={() =>
-                  broadcast.mutate(undefined, { onSettled: () => setConfirmBroadcast(false) })
-                }
-              >
-                {t("share.dialog.broadcast.action")}
-              </Button>
+      {ctx.isOwner ? (
+        <section
+          className="flex flex-col gap-2 border-t border-line pt-4"
+          aria-labelledby="broadcast-title"
+        >
+          <h3 id="broadcast-title" className="text-body-sm font-semibold">
+            {t("share.dialog.broadcast.title")}
+          </h3>
+          <p className="text-caption text-fg-3">
+            {room ? t("share.dialog.broadcast.room", { room }) : t("share.dialog.broadcast.net")}
+          </p>
+          {confirmBroadcast ? (
+            <div
+              role="alertdialog"
+              aria-label={t("share.dialog.broadcast.confirmTitle")}
+              className="flex flex-col gap-2 rounded-lg border border-line bg-fill-hover p-3"
+            >
+              <p className="text-body-sm font-medium">{t("share.dialog.broadcast.confirmTitle")}</p>
+              <p className="text-caption text-fg-2">{t("share.dialog.broadcast.confirmBody")}</p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => setConfirmBroadcast(false)}>
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={broadcast.isPending}
+                  loadingLabel={t("common.loading")}
+                  data-testid="broadcast-confirm"
+                  onClick={() =>
+                    broadcast.mutate(undefined, { onSettled: () => setConfirmBroadcast(false) })
+                  }
+                >
+                  {t("share.dialog.broadcast.action")}
+                </Button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <Button
-            leading={<Radio />}
-            className="self-start"
-            onClick={() => setConfirmBroadcast(true)}
-            data-testid="broadcast-button"
-          >
-            {t("share.dialog.broadcast.action")}
-          </Button>
-        )}
-      </section>
+          ) : (
+            <Button
+              leading={<Radio />}
+              className="self-start"
+              onClick={() => setConfirmBroadcast(true)}
+              data-testid="broadcast-button"
+            >
+              {t("share.dialog.broadcast.action")}
+            </Button>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -650,6 +652,29 @@ function AccessTab() {
         </Field>
       </section>
 
+      <section className="flex flex-col gap-3" aria-labelledby="access-permissions">
+        <h3 id="access-permissions" className="text-body-sm font-semibold">
+          {t("share.dialog.access.permissions")}
+        </h3>
+        <p className="text-caption text-fg-3">{t("share.dialog.access.permissionsHint")}</p>
+        {(
+          [
+            ["allowParticipantRename", "share.dialog.access.allowRename"],
+            ["allowParticipantFiles", "share.dialog.access.allowFiles"],
+            ["allowParticipantLanguage", "share.dialog.access.allowLanguage"],
+          ] as const
+        ).map(([field, label]) => (
+          <Switch
+            key={field}
+            label={t(label)}
+            checked={access[field] ?? false}
+            disabled={patch.isPending}
+            onCheckedChange={(checked) => patch.mutate({ access: { [field]: checked } })}
+            data-testid={`switch-${field}`}
+          />
+        ))}
+      </section>
+
       <section className="flex flex-col gap-3">
         <Switch
           label={t("share.dialog.access.approval")}
@@ -665,13 +690,17 @@ function AccessTab() {
           onCheckedChange={(checked) => patch.mutate({ access: { nearby: checked } })}
           data-testid="switch-nearby"
         />
-        <Switch
-          label={t("share.dialog.access.lock")}
-          description={t("share.dialog.access.lockHint")}
-          checked={ctx.share.locked}
-          onCheckedChange={(checked) => patch.mutate({ locked: checked })}
-          data-testid="switch-lock"
-        />
+        {ctx.share.labId ? (
+          <p className="text-caption text-fg-3">{t("perm.labLock")}</p>
+        ) : (
+          <Switch
+            label={t("share.dialog.access.lock")}
+            description={t("share.dialog.access.lockHint")}
+            checked={ctx.share.locked}
+            onCheckedChange={(checked) => patch.mutate({ locked: checked })}
+            data-testid="switch-lock"
+          />
+        )}
       </section>
 
       <p className="text-caption text-fg-3">

@@ -11,6 +11,10 @@ import {
 } from "./testing/harness.js";
 
 const available = await servicesAvailable();
+const notices = (client: Client) =>
+  client.stateless.filter((message) =>
+    ["role", "locked"].includes((message as { type: string }).type),
+  );
 
 /** Milliseconds until `condition` holds, polling every millisecond. */
 async function elapsedUntil(condition: () => boolean, label: string): Promise<number> {
@@ -165,6 +169,30 @@ describe.runIf(available)("collab permissions", () => {
     ]);
   });
 
+  it("restricts comment deletion to the author or share owner", async () => {
+    const {
+      clients: [owner, author, other],
+    } = await room(["owner", "edit", "edit"]);
+    if (!owner || !author || !other) throw new Error("clients missing");
+    const comment = {
+      id: "deletion-owned",
+      fileId: "main",
+      anchor: {},
+      head: {},
+      author: { clientId: author.clientId, name: "Author", color: "#336699" },
+      body: "current comment",
+      createdAt: Date.now(),
+      resolved: false,
+    };
+    author.doc.getArray("comments").push([comment]);
+    await waitFor(() => other.doc.getArray("comments").length === 1, "comment synced");
+    other.doc.getArray("comments").delete(0);
+    await waitFor(() => other.closes.includes("reauth"), "foreign deletion refused");
+    expect(owner.doc.getArray("comments").toJSON()).toEqual([comment]);
+    owner.doc.getArray("comments").delete(0);
+    await waitFor(() => author.doc.getArray("comments").length === 0, "owner deletion allowed");
+  });
+
   it("rejects updates from viewers", async () => {
     const {
       share,
@@ -216,20 +244,20 @@ describe.runIf(available)("collab permissions", () => {
       harness.publishPerm(share.id, { version: ++version, kind: "role", clientId, role: next });
 
     await role(member.clientId, "view");
-    const ms = await elapsedUntil(() => member.stateless.length > 0, "role notice");
+    const ms = await elapsedUntil(() => notices(member).length > 0, "role notice");
     expect(ms).toBeLessThan(PERMISSION_APPLY_MS);
-    expect(member.stateless).toEqual([{ type: "role", role: "view", readOnly: true }]);
+    expect(notices(member)).toEqual([{ type: "role", role: "view", readOnly: true }]);
     member.text.insert(0, "blocked;");
     await sleep(300);
     expect(owner.text.toString()).toBe("base;");
-    expect(other.stateless).toEqual([]);
+    expect(notices(other)).toEqual([]);
 
     // Down and up again; a client that did not type meanwhile edits normally afterwards.
     await role(other.clientId, "view");
-    await waitFor(() => other.stateless.length === 1, "other demoted");
+    await waitFor(() => notices(other).length === 1, "other demoted");
     await role(other.clientId, "edit");
-    await waitFor(() => other.stateless.length === 2, "other promoted");
-    expect(other.stateless[1]).toEqual({ type: "role", role: "edit", readOnly: false });
+    await waitFor(() => notices(other).length === 2, "other promoted");
+    expect(notices(other)[1]).toEqual({ type: "role", role: "edit", readOnly: false });
     other.text.insert(other.text.length, "allowed;");
     await waitFor(() => owner.text.toString() === "base;allowed;", "edits apply again");
   });
@@ -253,9 +281,9 @@ describe.runIf(available)("collab permissions", () => {
     if (!owner || !member) throw new Error("clients missing");
     await harness.stores.shares.update(share.id, { locked: true });
     await harness.publishPerm(share.id, { version: ++version, kind: "lock" });
-    await waitFor(() => member.stateless.length > 0 && owner.stateless.length > 0, "lock notices");
-    expect(member.stateless).toEqual([{ type: "locked", locked: true, readOnly: true }]);
-    expect(owner.stateless).toEqual([{ type: "locked", locked: true, readOnly: false }]);
+    await waitFor(() => notices(member).length > 0 && notices(owner).length > 0, "lock notices");
+    expect(notices(member)).toEqual([{ type: "locked", locked: true, readOnly: true }]);
+    expect(notices(owner)).toEqual([{ type: "locked", locked: true, readOnly: false }]);
 
     member.text.insert(0, "member;");
     owner.text.insert(0, "owner;");
@@ -271,8 +299,8 @@ describe.runIf(available)("collab permissions", () => {
 
     await harness.stores.shares.update(share.id, { locked: false });
     await harness.publishPerm(share.id, { version: ++version, kind: "lock" });
-    await waitFor(() => member.stateless.length === 2, "unlock notice");
-    expect(member.stateless[1]).toEqual({ type: "locked", locked: false, readOnly: false });
+    await waitFor(() => notices(member).length === 2, "unlock notice");
+    expect(notices(member)[1]).toEqual({ type: "locked", locked: false, readOnly: false });
   });
 
   it("applies kick and delete whatever their version, and ignores only a stale role", async () => {
@@ -287,7 +315,7 @@ describe.runIf(available)("collab permissions", () => {
       clientId: member.clientId,
       role: "view",
     });
-    await waitFor(() => member.stateless.length === 1, "current role");
+    await waitFor(() => notices(member).length === 1, "current role");
     // An older role message for the same client would undo the newer one.
     await harness.publishPerm(share.id, {
       version: 49,
@@ -299,7 +327,7 @@ describe.runIf(available)("collab permissions", () => {
     // other kinds still apply.
     await harness.publishPerm(share.id, { version: 1, kind: "kick", clientId: kicked.clientId });
     await waitFor(() => kicked.closes.includes("kicked"), "kick with a lower version");
-    expect(member.stateless).toEqual([{ type: "role", role: "view", readOnly: true }]);
+    expect(notices(member)).toEqual([{ type: "role", role: "view", readOnly: true }]);
 
     await harness.stores.shares.delete(share.id);
     await harness.publishPerm(share.id, { version: 0, kind: "delete" });

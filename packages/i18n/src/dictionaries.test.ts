@@ -22,6 +22,7 @@ const NAMESPACES = new Set([
   "status",
   "conn",
   "pin",
+  "perm",
   "wait",
   "myshares",
   "nearby",
