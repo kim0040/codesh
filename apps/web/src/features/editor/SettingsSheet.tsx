@@ -37,6 +37,7 @@ import {
   usePrefs,
 } from "../../lib/prefs";
 import { useSession } from "../../lib/session";
+import { requestTour } from "../tour/seen";
 import { useEditor } from "./context";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 
@@ -370,6 +371,19 @@ function SettingsBody() {
           checked={prefs.notifications && permission !== "denied"}
           onCheckedChange={(on) => void toggleNotifications(on)}
         />
+        <div className="flex flex-col gap-1.5">
+          <Button
+            className="self-start"
+            onClick={() => {
+              ctx.closePanel();
+              requestTour();
+            }}
+            data-testid="replay-tour"
+          >
+            {t("tour.replay.action")}
+          </Button>
+          <p className="text-caption text-fg-3">{t("tour.replay.hint")}</p>
+        </div>
         {canInstall ? (
           <Button className="self-start" onClick={() => void promptInstall()}>
             {t("settings.install.action")}

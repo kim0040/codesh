@@ -71,16 +71,33 @@
     animation: ui-shake var(--duration-slow) var(--easing-in-out);
   }
 
-  /* Indeterminate progress bar sweeps; the reduced-motion form is a static partial bar. */
+  /*
+   * Indeterminate progress bar sweeps across the track (a transform, so it never lays out); the
+   * reduced-motion form is a static partial bar.
+   */
   .ui-indeterminate {
+    inset-inline-start: 0;
+    width: 40%;
     animation: ui-indeterminate 1.4s var(--easing-in-out) infinite;
+  }
+  [dir="rtl"] .ui-indeterminate {
+    --ui-dir: -1;
   }
   @media (prefers-reduced-motion: reduce) {
     .ui-indeterminate {
       animation: none;
-      inset-inline-start: 0;
-      width: 40%;
     }
+  }
+
+  /*
+   * Something that appears in a list or panel (participants, nearby shares, tab content): fades in,
+   * `ui-appear` also rises 4px. Runs once when the element mounts; leaving is instant.
+   */
+  .ui-appear {
+    animation: ui-appear var(--duration-normal) var(--easing-out) backwards;
+  }
+  .ui-appear-fade {
+    animation: ui-appear-fade var(--duration-normal) var(--easing-out) backwards;
   }
 }
 
@@ -188,16 +205,22 @@
 }
 @keyframes ui-indeterminate {
   0% {
-    inset-inline-start: -40%;
-    width: 40%;
+    transform: translateX(calc(var(--ui-dir, 1) * -100%));
   }
-  60% {
-    inset-inline-start: 100%;
-    width: 40%;
-  }
+  60%,
   100% {
-    inset-inline-start: 100%;
-    width: 40%;
+    transform: translateX(calc(var(--ui-dir, 1) * 250%));
+  }
+}
+@keyframes ui-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes ui-appear-fade {
+  from {
+    opacity: 0;
   }
 }
 

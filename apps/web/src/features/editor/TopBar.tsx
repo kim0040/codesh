@@ -141,6 +141,7 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
           leading={<Share2 />}
           onClick={() => ctx.openPanel("share")}
           data-testid="share-button"
+          data-tour="share"
         >
           <span className="hidden sm:inline">{t("editor.top.shareAction")}</span>
           <span className="sr-only sm:hidden">{t("editor.top.shareAction")}</span>
@@ -148,7 +149,11 @@ export function TopBar({ actions }: { actions: TopBarActions }) {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <IconButton aria-label={t("editor.top.menu")} data-testid="menu-button">
+            <IconButton
+              aria-label={t("editor.top.menu")}
+              data-testid="menu-button"
+              data-tour="menu"
+            >
               <MoreHorizontal />
             </IconButton>
           </DropdownMenuTrigger>
@@ -308,7 +313,7 @@ function People() {
   const shown = people.slice(0, 4);
   const hidden = people.length - shown.length;
   return (
-    <fieldset className="me-1 flex items-center" data-testid="people">
+    <fieldset className="me-1 flex items-center" data-testid="people" data-tour="people">
       <legend className="sr-only">{t("editor.top.participantsLabel")}</legend>
       {shown.map((person, index) => (
         <PersonAvatar key={person.clientId} person={person} overlap={index > 0} />
@@ -356,7 +361,7 @@ function PersonAvatar({ person, overlap }: { person: Participant; overlap: boole
           }
           onClick={() => ctx.setFollowing(isFollowed ? null : person.clientId)}
           data-drop-over={transfer.over || undefined}
-          className={`inline-flex rounded-full ring-2 ring-panel ${overlap ? "-ms-1.5" : ""} coarse:p-1`}
+          className={`ui-appear-fade inline-flex rounded-full ring-2 ring-panel ${overlap ? "-ms-1.5" : ""} coarse:p-1`}
           {...transfer.props}
         >
           {content}

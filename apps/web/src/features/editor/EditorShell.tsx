@@ -36,6 +36,7 @@ import { getPrefs } from "../../lib/prefs";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { useStore } from "../../lib/store";
 import { useWindowShortcuts } from "../../lib/use-shortcuts";
+import { TourMount } from "../tour/TourMount";
 import { copyAll, downloadFile, downloadZip, looksLikeSecret } from "./actions";
 import { EditorBanners } from "./banners";
 import { CommentsPanel } from "./CommentsPanel";
@@ -64,7 +65,7 @@ function AloneHint() {
     return null;
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
-      <div className="pointer-events-auto max-w-sm rounded-xl border border-line bg-panel p-3 shadow-2">
+      <div className="ui-appear pointer-events-auto max-w-sm rounded-xl border border-line bg-panel p-3 shadow-2">
         <EmptyState
           size="sm"
           title={t("empty.alone.title")}
@@ -447,13 +448,15 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
             <HistoryView />
           ) : (
             <>
-              <FileTabs
-                ops={ops}
-                treeOpen={treeOpen || (narrow && ctx.panel.name === "files")}
-                onToggleTree={() =>
-                  narrow ? ctx.openPanel("files") : setTreeOpen((open) => !open)
-                }
-              />
+              <div className="shrink-0" data-tour="files">
+                <FileTabs
+                  ops={ops}
+                  treeOpen={treeOpen || (narrow && ctx.panel.name === "files")}
+                  onToggleTree={() =>
+                    narrow ? ctx.openPanel("files") : setTreeOpen((open) => !open)
+                  }
+                />
+              </div>
               <div className="relative min-h-0 flex-1">
                 <EditorPane
                   key={`${ctx.activeFile.id}`}
@@ -482,6 +485,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
       <CommentsPanel />
       <UploadDialog />
       <IdentityDialog />
+      <TourMount />
       <Sheet
         open={narrow && ctx.panel.name === "files"}
         onOpenChange={(open) => !open && ctx.closePanel()}

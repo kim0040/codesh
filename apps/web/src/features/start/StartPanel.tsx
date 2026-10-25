@@ -185,11 +185,11 @@ function Nearby() {
           {nearby.map((item) => {
             const language = getLanguage(item.language);
             return (
-              <li key={item.id}>
+              <li key={item.id} className="ui-appear">
                 <Link
                   to="/$id"
                   params={{ id: item.id }}
-                  className="group flex h-full flex-col gap-2 rounded-xl border border-line bg-panel p-3 hover:border-fg-3"
+                  className="group flex h-full flex-col gap-2 rounded-xl border border-line bg-panel p-3 transition-[border-color,scale] duration-(--duration-fast) ease-out hover:border-fg-3 motion-safe:active:scale-[0.99]"
                   data-testid={`nearby-${item.id}`}
                 >
                   <span className="flex items-center gap-2">
@@ -256,11 +256,11 @@ function Recent() {
         {recent.map((share) => {
           const language = getLanguage(share.language);
           return (
-            <li key={share.id}>
+            <li key={share.id} className="ui-appear-fade">
               <Link
                 to="/$id"
                 params={{ id: share.id }}
-                className="flex min-h-12 items-center gap-3 px-3 py-2 hover:bg-fill-hover"
+                className="flex min-h-12 items-center gap-3 px-3 py-2 transition-colors duration-(--duration-fast) ease-out hover:bg-fill-hover"
               >
                 <span className="min-w-0 flex-1 truncate text-body-sm">
                   {share.title || t("common.untitled")}

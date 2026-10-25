@@ -6,5 +6,14 @@ export const BASE_URL = `http://localhost:${WEB_PORT}`;
 export const MONGO_URL = process.env.E2E_MONGO_URL ?? "mongodb://localhost:27017/codesh_e2e";
 export const VALKEY_URL = process.env.E2E_VALKEY_URL ?? "redis://localhost:6379/5";
 
+/**
+ * The first-run tour has been seen: a browser profile that starts with this key skips it, so specs
+ * about other things never meet the tour. Any version at or above the app's counts as seen.
+ */
+export const TOUR_SEEN_STORAGE = {
+  cookies: [],
+  origins: [{ origin: BASE_URL, localStorage: [{ name: "codesh.tour", value: "9999" }] }],
+};
+
 /** Token of the admin API in the end-to-end stack (the API switches the admin console off without one). */
 export const ADMIN_TOKEN = process.env.E2E_ADMIN_TOKEN ?? "e2e-admin-token";

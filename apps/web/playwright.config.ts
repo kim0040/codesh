@@ -5,6 +5,7 @@ import {
   BASE_URL,
   COLLAB_PORT,
   MONGO_URL,
+  TOUR_SEEN_STORAGE,
   VALKEY_URL,
   WEB_PORT,
 } from "./e2e/env";
@@ -24,6 +25,8 @@ const DEVICE = /r-edit-key-and-device\.spec\.ts$/;
 const MOTION = /(?:p-smooth-typing|s-projector|s-remote-cursors)\.spec\.ts$/;
 // The marketing pages: their layout and menu differ per engine.
 const GUIDE = /(?:l-intro-header|m-intro-detail|u-guide-pages)\.spec\.ts$/;
+// The first-run tour and the motion polish: focus, placement and transitions differ per engine.
+const TOUR = /w-[a-z-]+\.spec\.ts$/;
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
 const shared = { MONGO_URL, VALKEY_URL, COLLAB_SECRET: secret, NODE_ENV: "development" };
@@ -40,6 +43,8 @@ export default defineConfig({
     baseURL: BASE_URL,
     locale: "en-US",
     trace: "retain-on-failure",
+    // Every spec starts with the first-run tour already seen; w-tour.spec.ts opts out.
+    storageState: TOUR_SEEN_STORAGE,
   },
   projects: [
     ...(ENGINES.includes("chromium")
@@ -50,7 +55,7 @@ export default defineConfig({
           {
             name: "firefox",
             use: { browserName: "firefox" as const },
-            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE],
+            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE, TOUR],
           },
         ]
       : []),
@@ -59,7 +64,7 @@ export default defineConfig({
           {
             name: "webkit",
             use: { browserName: "webkit" as const },
-            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE],
+            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE, TOUR],
           },
         ]
       : []),
