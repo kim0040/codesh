@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectPlatform, isAltGraph, keyLabelsFor } from "./platform";
+import { detectPlatform, isAltGraph, isIosSafari, keyLabelsFor } from "./platform";
 
 describe("detectPlatform", () => {
   it("tells Apple devices, Windows and the rest apart", () => {
@@ -11,6 +11,45 @@ describe("detectPlatform", () => {
     );
     expect(detectPlatform({ platform: "Linux x86_64" })).toBe("other");
     expect(detectPlatform(undefined)).toBe("other");
+  });
+});
+
+describe("isIosSafari", () => {
+  it("recognizes iPhone and iPadOS Safari only", () => {
+    expect(
+      isIosSafari({
+        platform: "iPhone",
+        userAgent:
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit Safari/604.1",
+      }),
+    ).toBe(true);
+    expect(
+      isIosSafari({
+        platform: "MacIntel",
+        maxTouchPoints: 5,
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit Version/18.0 Safari/605.1",
+      }),
+    ).toBe(true);
+    expect(
+      isIosSafari({
+        platform: "iPhone",
+        userAgent: "Mozilla/5.0 (iPhone) AppleWebKit CriOS/130.0 Mobile Safari/604.1",
+      }),
+    ).toBe(false);
+    expect(
+      isIosSafari({
+        platform: "MacIntel",
+        maxTouchPoints: 0,
+        userAgent: "Mozilla/5.0 (Macintosh) AppleWebKit Version/18.0 Safari/605.1",
+      }),
+    ).toBe(false);
+    expect(
+      isIosSafari({
+        platform: "Linux armv8l",
+        userAgent: "Mozilla/5.0 (Linux; Android 15) AppleWebKit Chrome/130.0 Safari/537.36",
+      }),
+    ).toBe(false);
   });
 });
 

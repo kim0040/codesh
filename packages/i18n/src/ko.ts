@@ -392,6 +392,7 @@ export const ko: KoDictionary = {
   "settings.smoothTyping.label": "부드러운 입력",
   "settings.smoothTyping.hint":
     "입력할 때 커서가 부드럽게 움직여요. 기기에서 동작 줄이기가 켜져 있으면 꺼져요.",
+  "settings.codeCompletion.label": "코드 자동 완성",
   "settings.keymap.label": "키맵",
   "settings.keymap.default": "기본",
   "settings.keymap.vim": "Vim",
@@ -453,6 +454,9 @@ export const ko: KoDictionary = {
   "status.language.noResults": "“{query}”에 맞는 언어가 없어요",
   "status.language.syncNote": "이 공유의 모든 참여자에게 적용돼요",
   "status.language.changed": "언어를 바꿨어요: {language}",
+  "status.language.suggestion": "{language} 코드로 보여요",
+  "status.language.suggestionUse": "사용",
+  "status.language.suggestionDismiss": "언어 제안 닫기",
   "conn.reconnecting.title": "다시 연결하는 중…",
   "conn.reconnecting.body": "변경 내용은 이 기기에 보관되고, 연결되면 바로 동기화돼요.",
   "conn.reconnecting.bodyMemory":

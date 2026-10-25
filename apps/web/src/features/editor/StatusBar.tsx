@@ -1,4 +1,10 @@
-import { detectLanguage, getLanguage, LANGUAGES, PLAIN_TEXT_ID } from "@codesh/highlight";
+import {
+  detectLanguage,
+  getLanguage,
+  LANGUAGES,
+  type LanguageEntry,
+  PLAIN_TEXT_ID,
+} from "@codesh/highlight";
 import { LanguageBadge, Popover, PopoverContent, PopoverTrigger, toast } from "@codesh/ui";
 import { Check, Users } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -23,7 +29,15 @@ const STATUS_DOT = {
   disconnected: "bg-danger",
 } as const;
 
-export function StatusBar() {
+export function StatusBar({
+  suggestedLanguage,
+  onUseSuggestion,
+  onDismissSuggestion,
+}: {
+  suggestedLanguage: LanguageEntry | null;
+  onUseSuggestion: () => void;
+  onDismissSuggestion: () => void;
+}) {
   const t = useT();
   const ctx = useEditor();
   const info = useStore(ctx.info);
@@ -64,6 +78,31 @@ export function StatusBar() {
           <Users aria-hidden="true" className="size-3.5" />
           {t("status.participants", { count: online })}
         </span>
+        {suggestedLanguage && !ctx.readOnly ? (
+          <span
+            role="status"
+            aria-live="polite"
+            className="inline-flex min-h-7 items-center gap-1 rounded-md border border-line px-1.5 text-caption text-fg coarse:min-h-9"
+            data-testid="language-suggestion"
+          >
+            <span>{t("status.language.suggestion", { language: suggestedLanguage.name })}</span>
+            <button
+              type="button"
+              onClick={onUseSuggestion}
+              className="rounded px-1 font-medium text-accent-text hover:bg-fill-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-text"
+            >
+              {t("status.language.suggestionUse")}
+            </button>
+            <button
+              type="button"
+              aria-label={t("status.language.suggestionDismiss")}
+              onClick={onDismissSuggestion}
+              className="rounded px-1 text-fg-2 hover:bg-fill-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-text"
+            >
+              ×
+            </button>
+          </span>
+        ) : null}
         <LanguagePicker
           label={language?.name ?? t("status.language.auto")}
           color={language?.color ?? "#8b949e"}

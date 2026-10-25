@@ -7,7 +7,7 @@ import {
   type LanguageSupport,
 } from "@codemirror/language";
 import { highlightSelectionMatches } from "@codemirror/search";
-import { EditorState, type Extension } from "@codemirror/state";
+import { EditorState, type Extension, Prec } from "@codemirror/state";
 import {
   crosshairCursor,
   drawSelection,
@@ -21,7 +21,7 @@ import {
 } from "@codemirror/view";
 import { getEditorTheme, type ThemeId } from "@codesh/highlight";
 import type { EditorPrefs, Keymap } from "../../../lib/prefs";
-import { baseKeymap, sublimeKeymap, undoKeymap } from "./keymaps";
+import { baseKeymap, editorCompletionKeymap, sublimeKeymap, undoKeymap } from "./keymaps";
 import { smoothCaret } from "./smooth-caret";
 
 /** Pure builders for the editor's reconfigurable parts; EditorPane puts each in a Compartment. */
@@ -62,11 +62,13 @@ export function languageExtension(support: LanguageSupport | null): Extension {
 }
 
 const undoKeys = keymap.of(undoKeymap);
+const completionKeys = Prec.highest(keymap.of(editorCompletionKeymap));
 
 /** The bindings that need no extra chunk; vim and emacs fall back to these until theirs loads. */
 export function plainKeymap(mode: Keymap): Extension {
-  if (mode === "sublime") return [undoKeys, keymap.of([...sublimeKeymap, ...baseKeymap])];
-  return [undoKeys, keymap.of(baseKeymap)];
+  if (mode === "sublime")
+    return [completionKeys, undoKeys, keymap.of([...sublimeKeymap, ...baseKeymap])];
+  return [completionKeys, undoKeys, keymap.of(baseKeymap)];
 }
 
 /**
@@ -88,11 +90,11 @@ export async function keymapExtension(mode: Keymap): Promise<Extension> {
     } catch {
       // The editor still works; only undo from normal mode is affected.
     }
-    return [vim(), undoKeys, keymap.of(baseKeymap)];
+    return [completionKeys, vim(), undoKeys, keymap.of(baseKeymap)];
   }
   if (mode === "emacs") {
     const { emacs } = await import("@replit/codemirror-emacs");
-    return [emacs(), undoKeys, keymap.of(baseKeymap)];
+    return [completionKeys, emacs(), undoKeys, keymap.of(baseKeymap)];
   }
   return plainKeymap(mode);
 }

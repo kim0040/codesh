@@ -296,6 +296,12 @@ function SettingsBody() {
           onCheckedChange={(smoothTyping) => setPrefs({ smoothTyping })}
           data-testid="switch-smooth-typing"
         />
+        <Switch
+          label={t("settings.codeCompletion.label")}
+          checked={prefs.codeCompletion}
+          onCheckedChange={(codeCompletion) => setPrefs({ codeCompletion })}
+          data-testid="switch-code-completion"
+        />
       </Section>
 
       <Section title={t("settings.section.keys")}>

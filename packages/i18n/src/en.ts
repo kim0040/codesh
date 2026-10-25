@@ -372,6 +372,7 @@ export const en = {
   "settings.smoothTyping.label": "Smooth typing",
   "settings.smoothTyping.hint":
     "The cursor glides as you type. Off when your device is set to reduce motion.",
+  "settings.codeCompletion.label": "Code completion",
   "settings.keymap.label": "Key bindings",
   "settings.keymap.default": "Default",
   "settings.keymap.vim": "Vim",
@@ -434,6 +435,9 @@ export const en = {
   "status.language.noResults": "No language matches “{query}”",
   "status.language.syncNote": "Applies to everyone in this share",
   "status.language.changed": "Language changed: {language}",
+  "status.language.suggestion": "Looks like {language}",
+  "status.language.suggestionUse": "Use",
+  "status.language.suggestionDismiss": "Dismiss language suggestion",
   "conn.reconnecting.title": "Reconnecting…",
   "conn.reconnecting.body": "Your changes are kept on this device and sync once you're back.",
   "conn.reconnecting.bodyMemory":

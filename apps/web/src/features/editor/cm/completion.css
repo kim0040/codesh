@@ -1,0 +1,20 @@
+@keyframes codesh-completion-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cm-tooltip-autocomplete {
+    animation: codesh-completion-fade 120ms ease-out;
+  }
+}
+
+@media (pointer: coarse) {
+  .cm-tooltip-autocomplete li {
+    min-height: 44px;
+  }
+}
