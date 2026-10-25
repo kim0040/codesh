@@ -12,8 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as IdRouteImport } from './routes/$id'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as GuideRouteImport } from './routes/guide'
 import { Route as MeRouteImport } from './routes/me'
 import { Route as NewRouteImport } from './routes/new'
+import { Route as GuideIndexRouteImport } from './routes/guide.index'
+import { Route as GuideFaqRouteImport } from './routes/guide.faq'
+import { Route as GuideFeaturesRouteImport } from './routes/guide.features'
+import { Route as GuideHowRouteImport } from './routes/guide.how'
+import { Route as GuideNetworkRouteImport } from './routes/guide.network'
+import { Route as GuideSecurityRouteImport } from './routes/guide.security'
 import { Route as LabIdRouteImport } from './routes/lab.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -31,6 +38,11 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuideRoute = GuideRouteImport.update({
+  id: '/guide',
+  path: '/guide',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MeRoute = MeRouteImport.update({
   id: '/me',
   path: '/me',
@@ -40,6 +52,36 @@ const NewRoute = NewRouteImport.update({
   id: '/new',
   path: '/new',
   getParentRoute: () => rootRouteImport,
+} as any)
+const GuideIndexRoute = GuideIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => GuideRoute,
+} as any)
+const GuideFaqRoute = GuideFaqRouteImport.update({
+  id: '/faq',
+  path: '/faq',
+  getParentRoute: () => GuideRoute,
+} as any)
+const GuideFeaturesRoute = GuideFeaturesRouteImport.update({
+  id: '/features',
+  path: '/features',
+  getParentRoute: () => GuideRoute,
+} as any)
+const GuideHowRoute = GuideHowRouteImport.update({
+  id: '/how',
+  path: '/how',
+  getParentRoute: () => GuideRoute,
+} as any)
+const GuideNetworkRoute = GuideNetworkRouteImport.update({
+  id: '/network',
+  path: '/network',
+  getParentRoute: () => GuideRoute,
+} as any)
+const GuideSecurityRoute = GuideSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => GuideRoute,
 } as any)
 const LabIdRoute = LabIdRouteImport.update({
   id: '/lab/$id',
@@ -51,9 +93,16 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$id': typeof IdRoute
   '/admin': typeof AdminRoute
+  '/guide': typeof GuideRouteWithChildren
   '/me': typeof MeRoute
   '/new': typeof NewRoute
+  '/guide/faq': typeof GuideFaqRoute
+  '/guide/features': typeof GuideFeaturesRoute
+  '/guide/how': typeof GuideHowRoute
+  '/guide/network': typeof GuideNetworkRoute
+  '/guide/security': typeof GuideSecurityRoute
   '/lab/$id': typeof LabIdRoute
+  '/guide/': typeof GuideIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,29 +110,82 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/me': typeof MeRoute
   '/new': typeof NewRoute
+  '/guide/faq': typeof GuideFaqRoute
+  '/guide/features': typeof GuideFeaturesRoute
+  '/guide/how': typeof GuideHowRoute
+  '/guide/network': typeof GuideNetworkRoute
+  '/guide/security': typeof GuideSecurityRoute
   '/lab/$id': typeof LabIdRoute
+  '/guide': typeof GuideIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$id': typeof IdRoute
   '/admin': typeof AdminRoute
+  '/guide': typeof GuideRouteWithChildren
   '/me': typeof MeRoute
   '/new': typeof NewRoute
+  '/guide/faq': typeof GuideFaqRoute
+  '/guide/features': typeof GuideFeaturesRoute
+  '/guide/how': typeof GuideHowRoute
+  '/guide/network': typeof GuideNetworkRoute
+  '/guide/security': typeof GuideSecurityRoute
   '/lab/$id': typeof LabIdRoute
+  '/guide/': typeof GuideIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/$id' | '/admin' | '/me' | '/new' | '/lab/$id'
+  fullPaths:
+    | '/'
+    | '/$id'
+    | '/admin'
+    | '/guide'
+    | '/me'
+    | '/new'
+    | '/guide/faq'
+    | '/guide/features'
+    | '/guide/how'
+    | '/guide/network'
+    | '/guide/security'
+    | '/lab/$id'
+    | '/guide/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$id' | '/admin' | '/me' | '/new' | '/lab/$id'
-  id: '__root__' | '/' | '/$id' | '/admin' | '/me' | '/new' | '/lab/$id'
+  to:
+    | '/'
+    | '/$id'
+    | '/admin'
+    | '/me'
+    | '/new'
+    | '/guide/faq'
+    | '/guide/features'
+    | '/guide/how'
+    | '/guide/network'
+    | '/guide/security'
+    | '/lab/$id'
+    | '/guide'
+  id:
+    | '__root__'
+    | '/'
+    | '/$id'
+    | '/admin'
+    | '/guide'
+    | '/me'
+    | '/new'
+    | '/guide/faq'
+    | '/guide/features'
+    | '/guide/how'
+    | '/guide/network'
+    | '/guide/security'
+    | '/lab/$id'
+    | '/guide/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   IdRoute: typeof IdRoute
   AdminRoute: typeof AdminRoute
+  GuideRoute: typeof GuideRouteWithChildren
   MeRoute: typeof MeRoute
   NewRoute: typeof NewRoute
   LabIdRoute: typeof LabIdRoute
@@ -112,6 +214,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/guide': {
+      id: '/guide'
+      path: '/guide'
+      fullPath: '/guide'
+      preLoaderRoute: typeof GuideRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/me': {
       id: '/me'
       path: '/me'
@@ -126,6 +235,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/guide/': {
+      id: '/guide/'
+      path: '/'
+      fullPath: '/guide/'
+      preLoaderRoute: typeof GuideIndexRouteImport
+      parentRoute: typeof GuideRoute
+    }
+    '/guide/faq': {
+      id: '/guide/faq'
+      path: '/faq'
+      fullPath: '/guide/faq'
+      preLoaderRoute: typeof GuideFaqRouteImport
+      parentRoute: typeof GuideRoute
+    }
+    '/guide/features': {
+      id: '/guide/features'
+      path: '/features'
+      fullPath: '/guide/features'
+      preLoaderRoute: typeof GuideFeaturesRouteImport
+      parentRoute: typeof GuideRoute
+    }
+    '/guide/how': {
+      id: '/guide/how'
+      path: '/how'
+      fullPath: '/guide/how'
+      preLoaderRoute: typeof GuideHowRouteImport
+      parentRoute: typeof GuideRoute
+    }
+    '/guide/network': {
+      id: '/guide/network'
+      path: '/network'
+      fullPath: '/guide/network'
+      preLoaderRoute: typeof GuideNetworkRouteImport
+      parentRoute: typeof GuideRoute
+    }
+    '/guide/security': {
+      id: '/guide/security'
+      path: '/security'
+      fullPath: '/guide/security'
+      preLoaderRoute: typeof GuideSecurityRouteImport
+      parentRoute: typeof GuideRoute
+    }
     '/lab/$id': {
       id: '/lab/$id'
       path: '/lab/$id'
@@ -136,10 +287,31 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface GuideRouteChildren {
+  GuideFaqRoute: typeof GuideFaqRoute
+  GuideFeaturesRoute: typeof GuideFeaturesRoute
+  GuideHowRoute: typeof GuideHowRoute
+  GuideNetworkRoute: typeof GuideNetworkRoute
+  GuideSecurityRoute: typeof GuideSecurityRoute
+  GuideIndexRoute: typeof GuideIndexRoute
+}
+
+const GuideRouteChildren: GuideRouteChildren = {
+  GuideFaqRoute: GuideFaqRoute,
+  GuideFeaturesRoute: GuideFeaturesRoute,
+  GuideHowRoute: GuideHowRoute,
+  GuideNetworkRoute: GuideNetworkRoute,
+  GuideSecurityRoute: GuideSecurityRoute,
+  GuideIndexRoute: GuideIndexRoute,
+}
+
+const GuideRouteWithChildren = GuideRoute._addFileChildren(GuideRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   IdRoute: IdRoute,
   AdminRoute: AdminRoute,
+  GuideRoute: GuideRouteWithChildren,
   MeRoute: MeRoute,
   NewRoute: NewRoute,
   LabIdRoute: LabIdRoute,
