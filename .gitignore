@@ -46,3 +46,10 @@ deploy/state/*
 deploy/tls/*
 !deploy/tls/README.md
 !deploy/tls/*.example
+
+# Local working notes and the dev-box runner; kept out of the public repository.
+AGENTS.md
+CLAUDE.md
+docs/PLAN.md
+docs/research/
+scripts/box
