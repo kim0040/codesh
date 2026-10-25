@@ -57,6 +57,42 @@ describe("diagnostic privacy", () => {
     expect(diagnosticLocation(`https://host.test/${secret}`)).toBe("[source omitted]");
     expect(diagnosticError(secret)).toEqual({ message: "Non-Error rejection (text omitted)" });
   });
+  it("keeps engine messages whose only variable parts are names in the code", () => {
+    const kept = [
+      [new TypeError("Cannot read properties of undefined (reading 'state')"), "TypeError"],
+      [new TypeError("view.dispatch is not a function"), "TypeError"],
+      [new TypeError("undefined is not an object (evaluating 'a.b')"), "TypeError"],
+      [new ReferenceError("Cannot access 'x' before initialization"), "ReferenceError"],
+      [new RangeError("Maximum call stack size exceeded"), "RangeError"],
+      [
+        Object.assign(new Error("The quota has been exceeded."), { name: "QuotaExceededError" }),
+        "QuotaExceededError",
+      ],
+    ] as const;
+    for (const [error, name] of kept) {
+      const { message } = diagnosticError(error);
+      expect(message).toBe(`${name}: ${error.message}`);
+      expect(scrubDiagnosticDetails({ message }).message).toBe(message);
+    }
+  });
+  it("omits messages that quote text, even inside a known template's shape", () => {
+    for (const text of [
+      `Unexpected token 'N', "${secret}" is not valid JSON`,
+      `Cannot read properties of undefined (reading '${secret}')`,
+      "my password 482913 is not defined",
+      `${"a".repeat(300)} is not a function`,
+      "x is not a function\nsecond line with editor text",
+    ]) {
+      const { message } = diagnosticError(new SyntaxError(text));
+      expect(message).toBe("SyntaxError (text omitted)");
+    }
+    expect(scrubDiagnosticDetails({ message: `TypeError: ${secret}` }).message).toBe(
+      "Error (text omitted)",
+    );
+    expect(scrubDiagnosticDetails({ message: "Evil (text omitted)" }).message).toBe(
+      "Error (text omitted)",
+    );
+  });
 });
 describe("bounded diagnostic ring", () => {
   it("deduplicates a loop, preserves a different event and tracks worst duration", () => {

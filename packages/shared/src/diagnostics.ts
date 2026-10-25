@@ -104,33 +104,86 @@ export function diagnosticLocation(raw: string): string {
   return match?.[0]?.slice(-200) ?? "[source omitted]";
 }
 
-/** Arbitrary error messages can contain editor text or secrets, so preserve safe categories only. */
+const ERROR_NAMES = new Set([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "DOMException",
+  "AbortError",
+  "TimeoutError",
+  "QuotaExceededError",
+  "NotAllowedError",
+  "NotFoundError",
+  "NotSupportedError",
+  "InvalidStateError",
+  "SecurityError",
+  "DataCloneError",
+  "UnknownError",
+  "VersionError",
+  "TransactionInactiveError",
+  "MongoServerError",
+  "MongoNetworkError",
+  "MongoServerSelectionError",
+  "ReplyError",
+]);
+
+/** A name in code (`a`, `view.state`, `this.x`), never free text: no spaces, quotes or symbols. */
+const IDENT = String.raw`[A-Za-z_$][\w$]{0,40}(?:\.[A-Za-z_$#][\w$]{0,40}){0,3}`;
+/**
+ * Engine messages (V8, SpiderMonkey, JavaScriptCore) and a few fixed library messages, whose only
+ * variable parts are names from the code. Anything else becomes "(text omitted)": a message can
+ * quote editor text, a file name or a secret (`JSON.parse`, a thrown string, a server reply).
+ */
+const SAFE_MESSAGES = [
+  `Cannot read properties of (?:undefined|null) \\(reading '${IDENT}'\\)`,
+  `Cannot set properties of (?:undefined|null) \\(setting '${IDENT}'\\)`,
+  `Cannot read properties of (?:undefined|null)`,
+  `can't access property "${IDENT}", ${IDENT} is (?:undefined|null)`,
+  `${IDENT} is (?:undefined|null)`,
+  `undefined is not an object \\(evaluating '${IDENT}'\\)`,
+  `null is not an object \\(evaluating '${IDENT}'\\)`,
+  `${IDENT} is not a function`,
+  `${IDENT} is not a function\\. \\(In '${IDENT}\\(\\)', '${IDENT}' is (?:undefined|null)\\)`,
+  `${IDENT} is not a constructor`,
+  `${IDENT} is not iterable`,
+  `${IDENT} is not defined`,
+  `Can't find variable: ${IDENT}`,
+  `Cannot access '${IDENT}' before initialization`,
+  `can't access lexical declaration '${IDENT}' before initialization`,
+  "Assignment to constant variable\\.",
+  "Maximum call stack size exceeded",
+  "too much recursion",
+  "Invalid array length",
+  "Invalid time value",
+  "Failed to fetch",
+  "NetworkError when attempting to fetch resource\\.",
+  "Load failed",
+  "The operation was aborted\\.",
+  "signal is aborted without reason",
+  "The user aborted a request\\.",
+  "The request is not allowed by the user agent or the platform in the current context.*",
+  "The quota has been exceeded\\.",
+  "ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\\.)",
+].map((source) => new RegExp(`^${source}$`));
+
+/** The message itself when it is one of the safe templates, else null. */
+function safeMessage(text: string): string | null {
+  // Engine messages are one line; more lines mean text the code put there.
+  const line = text.trim();
+  if (line.length > 240 || line.includes("\n")) return null;
+  return SAFE_MESSAGES.some((pattern) => pattern.test(line)) ? line : null;
+}
+
+/** Arbitrary error messages can contain editor text or secrets: only safe templates are kept. */
 export function diagnosticError(
   error: unknown,
 ): Pick<DiagnosticDetails, "message" | "stack" | "errorCode"> {
   if (!(error instanceof Error)) return { message: "Non-Error rejection (text omitted)" };
-  const name = [
-    "Error",
-    "TypeError",
-    "RangeError",
-    "ReferenceError",
-    "SyntaxError",
-    "DOMException",
-    "AbortError",
-    "MongoServerError",
-    "MongoNetworkError",
-    "MongoServerSelectionError",
-    "ReplyError",
-  ].includes(error.name)
-    ? error.name
-    : "Error";
-  let message = `${name} (text omitted)`;
-  if (/^Cannot read properties of (undefined|null)/.test(error.message))
-    message = `${name}: Cannot read properties of null or undefined`;
-  else if (/^(Failed to fetch|NetworkError|Load failed)/.test(error.message))
-    message = `${name}: Network request failed`;
-  else if (/^Maximum call stack size exceeded/.test(error.message))
-    message = `${name}: Maximum call stack size exceeded`;
+  const name = ERROR_NAMES.has(error.name) ? error.name : "Error";
+  const kept = safeMessage(error.message);
+  const message = kept ? `${name}: ${kept}` : `${name} (text omitted)`;
   const stack = (error.stack ?? "")
     .split("\n")
     .slice(1, 13)
@@ -146,6 +199,17 @@ export function diagnosticError(
       ? { errorCode: error.code }
       : {}),
   };
+}
+
+/** True for exactly the messages diagnosticError can produce. */
+function isDiagnosticMessage(message: string): boolean {
+  if (message === "Non-Error rejection (text omitted)") return true;
+  const omitted = message.match(/^(\w+) \(text omitted\)$/);
+  if (omitted) return ERROR_NAMES.has(omitted[1] ?? "");
+  const split = message.indexOf(": ");
+  if (split < 0 || !ERROR_NAMES.has(message.slice(0, split))) return false;
+  const text = message.slice(split + 2);
+  return safeMessage(text) === text;
 }
 
 const CODES = new Set(
@@ -193,17 +257,7 @@ export function scrubDiagnosticDetails(input: unknown): DiagnosticDetails {
   if (typeof raw.location === "string") out.location = diagnosticLocation(raw.location);
   if (typeof raw.message === "string") {
     // Values are outputs of diagnosticError only; reject arbitrary text, including forged storage.
-    if (
-      /^(Error|TypeError|RangeError|ReferenceError|SyntaxError|DOMException|AbortError|MongoServerError|MongoNetworkError|MongoServerSelectionError|ReplyError) \(text omitted\)$/.test(
-        raw.message,
-      ) ||
-      raw.message === "Non-Error rejection (text omitted)" ||
-      /^(Error|TypeError|RangeError|ReferenceError|SyntaxError|DOMException|AbortError|MongoServerError|MongoNetworkError|MongoServerSelectionError|ReplyError): (Cannot read properties of null or undefined|Network request failed|Maximum call stack size exceeded)$/.test(
-        raw.message,
-      )
-    )
-      out.message = raw.message;
-    else out.message = "Error (text omitted)";
+    out.message = isDiagnosticMessage(raw.message) ? raw.message : "Error (text omitted)";
   }
   if (typeof raw.stack === "string")
     out.stack = raw.stack.split("\n").slice(0, 12).map(diagnosticLocation).join("\n");
