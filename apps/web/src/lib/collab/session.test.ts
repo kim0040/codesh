@@ -5,6 +5,7 @@ import { DocSession, isOutage } from "./session";
 /** The provider callbacks these tests call. */
 interface ProviderConfig {
   token: () => Promise<string>;
+  onStateless: (data: { payload: string }) => void;
   onAuthenticationFailed: (data: { reason: string }) => void;
   onAuthenticated: (data: { scope: string }) => void;
   onUnsyncedChanges: (data: { number: number }) => void;
@@ -214,5 +215,37 @@ describe("resync", () => {
     expect(session.getState().generation).toBe(1);
     session.destroy();
     expect(fakes.Provider.made[1]?.destroyed).toBe(1);
+  });
+});
+
+describe("permission messages", () => {
+  it("drops a refused local document and copy before reconnecting", async () => {
+    const session = open();
+    const previous = session.doc;
+    previous.getMap("meta").set("title", "forged");
+    const resync = vi.spyOn(session, "resync");
+    fakes.Provider.made[0]?.config.onStateless({
+      payload: JSON.stringify({ type: "permission_refused" }),
+    });
+    await vi.waitFor(() => expect(fakes.Provider.made).toHaveLength(2));
+    expect(resync).toHaveBeenCalledOnce();
+    expect(session.doc).not.toBe(previous);
+    expect(session.doc.getMap("meta").has("title")).toBe(false);
+    expect(fakes.dropCopy).toHaveBeenCalledWith("share1");
+    expect(session.getState().readOnly).toBe(true);
+    fakes.Provider.made[1]?.config.onAuthenticated({ scope: "read-write" });
+    expect(session.getState().readOnly).toBe(false);
+    session.destroy();
+  });
+  it("updates capabilities live without discarding text edits", () => {
+    const session = open();
+    const previous = session.doc;
+    const permissions = { rename: true, files: false, language: true };
+    fakes.Provider.made[0]?.config.onStateless({
+      payload: JSON.stringify({ type: "permissions", permissions }),
+    });
+    expect(session.getState().permissions).toEqual(permissions);
+    expect(session.doc).toBe(previous);
+    session.destroy();
   });
 });

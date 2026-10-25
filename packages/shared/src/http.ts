@@ -17,6 +17,7 @@ import {
   uploadIdSchema,
 } from "./ids.js";
 import { shareLabelsViewSchema } from "./labels.js";
+import { participantPermissionFields, participantPermissionsSchema } from "./permissions.js";
 import { settingsSchema } from "./settings.js";
 import { colorSchema, displayNameSchema } from "./user.js";
 import { z } from "./zod.js";
@@ -106,6 +107,7 @@ export type CreateShareResponse = z.infer<typeof createShareResponseSchema>;
  * edit key is shown to the owner only, so the owner can hand out an edit link next to a view link.
  */
 export const shareAccessViewSchema = z.object({
+  ...participantPermissionFields,
   default: accessLevelSchema,
   hasPin: z.boolean(),
   requireApproval: z.boolean(),
@@ -136,6 +138,8 @@ export const getShareResponseSchema = shareMetaSchema.extend({
   requireApproval: z.boolean(),
   /** Present for the owner only. */
   access: shareAccessViewSchema.optional(),
+  /** Safe capabilities for admitted participants; never includes keys or PIN details. */
+  permissions: participantPermissionsSchema.optional(),
 });
 export type GetShareResponse = z.infer<typeof getShareResponseSchema>;
 
@@ -161,6 +165,7 @@ export const patchShareBodySchema = z.object({
       pin: pinSchema.nullable().optional(),
       requireApproval: z.boolean().optional(),
       nearby: z.boolean().optional(),
+      ...participantPermissionFields,
       /** Invalidates the current edit link. */
       rotateEditKey: z.boolean().optional(),
     })

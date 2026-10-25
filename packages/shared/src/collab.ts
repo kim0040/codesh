@@ -1,5 +1,6 @@
 import { languageSchema, roleSchema, titleSchema } from "./http.js";
 import { fileIdSchema } from "./ids.js";
+import { participantPermissionsSchema } from "./permissions.js";
 import { z } from "./zod.js";
 
 /** Messages between apps/collab and the editor beyond the Yjs protocol (§6.7, §6.8). */
@@ -37,6 +38,9 @@ export type CollabDenyReason = (typeof COLLAB_DENY_REASONS)[keyof typeof COLLAB_
 export const collabStatelessSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("role"), role: roleSchema, readOnly: z.boolean() }),
   z.object({ type: z.literal("locked"), locked: z.boolean(), readOnly: z.boolean() }),
+  z.object({ type: z.literal("permissions"), permissions: participantPermissionsSchema }),
+  /** Drop the refused local update and reconnect with a fresh document. */
+  z.object({ type: z.literal("permission_refused") }),
   /** An update was refused because the document would exceed `settings.maxDocBytes`. */
   z.object({ type: z.literal("too_large"), maxDocBytes: z.number().int().positive() }),
 ]);

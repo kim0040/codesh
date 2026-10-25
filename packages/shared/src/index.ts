@@ -10,6 +10,7 @@ export * from "./http.js";
 export * from "./ids.js";
 export * from "./keys.js";
 export * from "./labels.js";
+export * from "./permissions.js";
 export * from "./records.js";
 export * from "./settings.js";
 export * from "./templates.js";

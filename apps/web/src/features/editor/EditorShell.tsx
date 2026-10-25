@@ -41,7 +41,7 @@ import { copyAll, downloadFile, downloadZip, looksLikeSecret } from "./actions";
 import { EditorBanners } from "./banners";
 import { CommentsPanel } from "./CommentsPanel";
 import { editorCommands } from "./cm/keymaps";
-import { useEditor } from "./context";
+import { useDocumentPermissions, useEditor } from "./context";
 import { showAloneHint } from "./doc-info";
 import { collectDroppedFiles } from "./dropped-files";
 import { EditorPane } from "./EditorPane";
@@ -89,6 +89,8 @@ function AloneHint() {
 export function EditorShell({ follow }: { follow: FollowResult }) {
   const t = useT();
   const ctx = useEditor();
+  const canImport = useDocumentPermissions().files;
+  const canChangeLanguage = useDocumentPermissions().language;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const narrow = useIsNarrow();
@@ -147,7 +149,9 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
     toggleSaved: async () => {
       const next = !ctx.share.saved;
       try {
-        const share = await api.patchShare(ctx.share.id, { saved: next });
+        if (next) await api.saveShare(ctx.share.id);
+        else await api.unsaveShare(ctx.share.id);
+        const share = await api.getShare(ctx.share.id);
         queryClient.setQueryData(["share", ctx.share.id], share);
         void queryClient.invalidateQueries({ queryKey: ["shares"] });
         toast({
@@ -356,7 +360,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         label: t("upload.title"),
         group,
         icon: <Upload />,
-        disabled: ctx.readOnly,
+        disabled: !canImport,
         run: () => ctx.openPanel("upload"),
       },
       {
@@ -386,6 +390,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
     return registerCommands("editor", commands);
   }, [
     t,
+    canImport,
     ctx.isOwner,
     ctx.readOnly,
     ctx.presenting,
@@ -401,7 +406,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
   const onPaste = useCallback(
     (text: string, wasEmpty: boolean) => {
       if (looksLikeSecret(text)) setSecretWarning(true);
-      if (!wasEmpty || (language && language !== PLAIN_TEXT_ID)) return;
+      if (!canChangeLanguage || !wasEmpty || (language && language !== PLAIN_TEXT_ID)) return;
       const result = detectLanguage({ filename: ctx.activeFile.path, content: text });
       if (result.language && result.confidence >= 0.5) {
         setFileLanguage(ctx.doc, ctx.activeFile.id, result.language.id);
@@ -414,15 +419,15 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         });
       }
     },
-    [ctx.activeFile.id, ctx.activeFile.path, ctx.doc, language, t],
+    [canChangeLanguage, ctx.activeFile.id, ctx.activeFile.path, ctx.doc, language, t],
   );
 
   const onDropFiles = useCallback(
     (transfer: DataTransfer) => {
-      if (ctx.readOnly) return;
+      if (!canImport) return;
       void collectDroppedFiles(transfer).then(importDropped);
     },
-    [ctx.readOnly, importDropped],
+    [canImport, importDropped],
   );
 
   const tree = <FileTree ops={ops} />;

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
+import { readFiles, setFileLanguage } from "../../lib/collab/model";
 import { isJunkFile } from "./dropped-files";
-import { decodeText } from "./import-files";
+import { decodeText, importFiles } from "./import-files";
 
 const bytes = (...values: number[]) => new Uint8Array(values);
 
@@ -44,5 +46,35 @@ describe("isJunkFile", () => {
     for (const path of [".gitignore", "src/main.ts", "docs/desktop-notes.md", "a._b"]) {
       expect(isJunkFile(path), path).toBe(false);
     }
+  });
+});
+
+describe("import permissions", () => {
+  function emptyShare() {
+    const doc = new Y.Doc();
+    const file = new Y.Map();
+    doc.getMap("files").set("main", file);
+    file.set("path", "main.txt");
+    file.set("order", 0);
+    setFileLanguage(doc, "main", "text");
+    return doc;
+  }
+  it("keeps an existing file language when only file management is allowed", async () => {
+    const doc = emptyShare();
+    const result = await importFiles(doc, readFiles(doc), [new File(["print(1)"], "new.py")], {
+      canChangeLanguage: false,
+    });
+    expect(result.added).toBe(1);
+    expect(readFiles(doc)[0]).toMatchObject({ path: "new.py", language: "text" });
+    expect(doc.getMap("meta").get("language")).toBe("text");
+  });
+  it("does not apply an import if permission was revoked while reading files", async () => {
+    const doc = emptyShare();
+    const result = await importFiles(doc, readFiles(doc), [new File(["print(1)"], "new.py")], {
+      mayApply: () => false,
+    });
+    expect(result.added).toBe(0);
+    expect(readFiles(doc)[0]?.path).toBe("main.txt");
+    expect(doc.getText("file:main").toString()).toBe("");
   });
 });

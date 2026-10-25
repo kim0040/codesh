@@ -40,7 +40,7 @@ import { useT } from "../../lib/i18n";
 import { openPalette, openShortcuts } from "../../lib/overlays";
 import { shortcutKeys } from "../../lib/shortcuts";
 import { labelColorFor } from "./cm/remote-cursors";
-import { useEditor } from "./context";
+import { useDocumentPermissions, useEditor } from "./context";
 import { canFormat } from "./format-code";
 import { useTransferTarget } from "./transfer";
 
@@ -248,15 +248,18 @@ function TitleField() {
   const ctx = useEditor();
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? ctx.meta.title;
-  const editable = !ctx.readOnly;
+  const editable = useDocumentPermissions().rename;
   const tooLong = value.length > MAX_TITLE_LENGTH;
 
   useEffect(() => {
     if (draft !== null && draft === ctx.meta.title) setDraft(null);
   }, [draft, ctx.meta.title]);
+  useEffect(() => {
+    if (!editable) setDraft(null);
+  }, [editable]);
 
   const commit = () => {
-    if (draft === null) return;
+    if (draft === null || !editable) return;
     const next = draft.trim();
     if (next.length <= MAX_TITLE_LENGTH && next !== ctx.meta.title) setTitle(ctx.doc, next);
     setDraft(null);
@@ -267,6 +270,7 @@ function TitleField() {
       <h1
         className="min-w-0 flex-1 truncate px-2 text-body-sm font-semibold sm:max-w-md sm:flex-none"
         data-testid="title"
+        title={t("perm.ownerOnly")}
       >
         {ctx.meta.title || t("editor.top.titlePlaceholder")}
       </h1>

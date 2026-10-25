@@ -1,6 +1,7 @@
 import {
   type Access,
   apiKeys,
+  canChangeDocument,
   createShareBodySchema,
   createShareResponseSchema,
   downloadQuerySchema,
@@ -12,6 +13,7 @@ import {
   keys,
   listSharesResponseSchema,
   okResponseSchema,
+  participantPermissions,
   patchShareBodySchema,
   type ShareListItem,
   shareParamsSchema,
@@ -229,7 +231,21 @@ export function shareRoutes(app: App, ctx: Ctx): void {
     async (request) => {
       const { session, body } = request;
       const share = await findShare(ctx, request.params.id);
-      requireOwner(share, session);
+      if (share.ownerId !== session.clientId) {
+        const access = await requireParticipant(ctx, share, session);
+        const permissions = participantPermissions(share.access);
+        if (
+          body.access !== undefined ||
+          body.locked !== undefined ||
+          body.saved !== undefined ||
+          (body.title === undefined && body.language === undefined) ||
+          (body.title !== undefined &&
+            !canChangeDocument(access.role, access.role === "view", permissions, "rename")) ||
+          (body.language !== undefined &&
+            !canChangeDocument(access.role, access.role === "view", permissions, "language"))
+        )
+          throw forbidden("The owner has not allowed this action");
+      }
       if (body.locked !== undefined && share.labId) {
         throw forbidden("A lab share is locked and unlocked by the teacher");
       }
@@ -265,6 +281,13 @@ export function shareRoutes(app: App, ctx: Ctx): void {
           }
         }
         if (wanted.nearby !== undefined) next.nearby = wanted.nearby;
+        for (const field of [
+          "allowParticipantRename",
+          "allowParticipantFiles",
+          "allowParticipantLanguage",
+        ] as const) {
+          if (wanted[field] !== undefined) next[field] = wanted[field];
+        }
         if (wanted.rotateEditKey) {
           next.editKey = randomKey();
           askRejoin = true;
@@ -318,6 +341,14 @@ export function shareRoutes(app: App, ctx: Ctx): void {
       if (body.access?.pin) await ctx.valkey.del(apiKeys.pinFailsShare(share.id));
       if (patch.locked !== undefined) await ctx.publishPerm(share.id, "lock");
       if (askRejoin) await ctx.publishPerm(share.id, "role");
+      if (
+        body.access &&
+        ["allowParticipantRename", "allowParticipantFiles", "allowParticipantLanguage"].some(
+          (field) => field in (body.access ?? {}),
+        )
+      ) {
+        await ctx.publishPerm(share.id, "permissions");
+      }
       if (updated.access.nearby && !share.access.nearby) {
         await announceShare(ctx, updated, session.net, await sharePreview(ctx, updated));
       } else if (!updated.access.nearby && share.access.nearby) {

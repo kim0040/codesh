@@ -48,7 +48,7 @@ import {
 import { baseName } from "../../lib/format";
 import { useT } from "../../lib/i18n";
 import { downloadFile } from "./actions";
-import { useEditor } from "./context";
+import { useDocumentPermissions, useEditor } from "./context";
 import { setFileDrag } from "./transfer";
 
 /** Keeps the selected tab in view when the strip scrolls. */
@@ -79,14 +79,21 @@ function normalizePath(raw: string): string {
 export function useFileOps(): FileOps {
   const t = useT();
   const ctx = useEditor();
+  const canChangeFiles = useDocumentPermissions().files;
   const [naming, setNaming] = useState<{ mode: "add" } | { mode: "rename"; target: Target } | null>(
     null,
   );
   const [deleting, setDeleting] = useState<Target | null>(null);
+  useEffect(() => {
+    if (!canChangeFiles) {
+      setNaming(null);
+      setDeleting(null);
+    }
+  }, [canChangeFiles]);
 
   const submitName = (name: string) => {
     const path = normalizePath(name);
-    if (!path) return;
+    if (!path || !canChangeFiles) return;
     if (naming?.mode === "add") {
       try {
         const entry = languageForFilename(baseName(path));
@@ -106,7 +113,7 @@ export function useFileOps(): FileOps {
   };
 
   const confirmDelete = () => {
-    if (!deleting) return;
+    if (!deleting || !canChangeFiles) return;
     if (deleting.kind === "file") deleteFile(ctx.doc, deleting.file.id);
     else deleteFolder(ctx.doc, deleting.path);
     setDeleting(null);
@@ -227,6 +234,7 @@ function NameDialog(props: {
 function FileMenu({ file, ops, label }: { file: FileEntry; ops: FileOps; label: string }) {
   const t = useT();
   const ctx = useEditor();
+  const canChangeFiles = useDocumentPermissions().files;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -235,7 +243,7 @@ function FileMenu({ file, ops, label }: { file: FileEntry; ops: FileOps; label: 
         </IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {!ctx.readOnly ? (
+        {canChangeFiles ? (
           <DropdownMenuItem icon={<Pencil />} onSelect={() => ops.rename({ kind: "file", file })}>
             {t("common.rename")}
           </DropdownMenuItem>
@@ -243,7 +251,7 @@ function FileMenu({ file, ops, label }: { file: FileEntry; ops: FileOps; label: 
         <DropdownMenuItem icon={<Download />} onSelect={() => downloadFile(ctx.doc, file)}>
           {t("editor.download.fileAction")}
         </DropdownMenuItem>
-        {!ctx.readOnly && ctx.files.length > 1 ? (
+        {canChangeFiles && ctx.files.length > 1 ? (
           <DropdownMenuItem
             icon={<Trash2 />}
             destructive
@@ -269,6 +277,7 @@ export function FileTabs({
 }) {
   const t = useT();
   const ctx = useEditor();
+  const canChangeFiles = useDocumentPermissions().files;
   const listRef = useRef<HTMLFieldSetElement>(null);
   const multi = ctx.files.length > 1;
 
@@ -338,14 +347,14 @@ export function FileTabs({
                 />
                 <span className="truncate">{baseName(file.path)}</span>
               </button>
-              {multi || !ctx.readOnly ? (
+              {multi || canChangeFiles ? (
                 <FileMenu file={file} ops={ops} label={`${t("common.more")}: ${file.path}`} />
               ) : null}
             </div>
           );
         })}
       </fieldset>
-      {!ctx.readOnly ? (
+      {canChangeFiles ? (
         <IconButton
           aria-label={t("editor.files.newAction")}
           size="sm"
@@ -363,6 +372,7 @@ export function FileTabs({
 export function FileTree({ ops }: { ops: FileOps }) {
   const t = useT();
   const ctx = useEditor();
+  const canChangeFiles = useDocumentPermissions().files;
   const tree = useMemo(() => buildTree(ctx.files), [ctx.files]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
@@ -423,7 +433,7 @@ export function FileTree({ ops }: { ops: FileOps }) {
             <Folder aria-hidden="true" className="size-3.5 shrink-0" />
             <span className="truncate">{node.name}</span>
           </button>
-          {!ctx.readOnly ? (
+          {canChangeFiles ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton aria-label={`${t("common.more")}: ${node.path}`} size="xs">
@@ -461,7 +471,7 @@ export function FileTree({ ops }: { ops: FileOps }) {
     >
       <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-line ps-3 pe-1.5">
         <h2 className="text-label font-medium text-fg-2">{t("editor.files.title")}</h2>
-        {!ctx.readOnly ? (
+        {canChangeFiles ? (
           <IconButton aria-label={t("editor.files.newAction")} size="sm" onClick={ops.add}>
             <FilePlus2 />
           </IconButton>

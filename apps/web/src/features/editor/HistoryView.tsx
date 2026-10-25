@@ -405,7 +405,7 @@ export function HistoryView() {
               size="sm"
               leading={<RotateCcw />}
               className="ms-auto"
-              disabled={!entry || target === last || stale}
+              disabled={ctx.readOnly || !entry || target === last || stale}
               onClick={() => setConfirming(true)}
               data-testid="history-restore"
             >
@@ -474,6 +474,7 @@ export function HistoryView() {
               <Button
                 variant="primary"
                 loading={restore.isPending}
+                disabled={ctx.readOnly}
                 loadingLabel={t("common.loading")}
                 onClick={() => entry && restore.mutate(entry.seq)}
                 data-testid="history-restore-confirm"

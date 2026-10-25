@@ -192,6 +192,9 @@ describe.skipIf(!integration)("GET /api/shares/:id", () => {
     });
     const share = await h.stores.shares.get(id);
     expect(view.access).toEqual({
+      allowParticipantRename: false,
+      allowParticipantFiles: false,
+      allowParticipantLanguage: false,
       default: "edit",
       hasPin: false,
       requireApproval: false,

@@ -10,10 +10,26 @@ import * as Y from "yjs";
 export function validCommentAuthors(
   document: Y.Doc,
   update: Uint8Array,
-  author: { clientId: string },
+  author: { clientId: string; role?: string },
+  decoded = Y.decodeUpdate(update),
 ): boolean {
-  const decoded = Y.decodeUpdate(update);
+  const comments = document.getArray(YDOC.comments);
+  let deletesComment = false;
+  for (const [client, ranges] of decoded.ds.clients) {
+    const items = document.store.clients.get(client);
+    if (!items) continue;
+    for (const range of ranges) {
+      if (range.clock >= Y.getState(document.store, client)) continue;
+      for (let i = Y.findIndexSS(items, range.clock); i < items.length; i++) {
+        const item = items[i];
+        if (!item || item.id.clock >= range.clock + range.len) break;
+        if (item instanceof Y.Item && !item.deleted && item.parent === comments)
+          deletesComment = true;
+      }
+    }
+  }
   if (
+    !deletesComment &&
     decoded.structs.every(
       (item) =>
         !(item instanceof Y.Item) ||
@@ -35,8 +51,10 @@ export function validCommentAuthors(
       before.set(id, { raw: JSON.stringify(value), comment: parsed.success ? parsed.data : null });
     }
     const ids = new Set<string>();
+    const present = new Set<string>();
     for (const value of projected.getArray(YDOC.comments).toJSON()) {
       const id = (value as { id?: unknown } | null)?.id;
+      if (typeof id === "string") present.add(id);
       const original = typeof id === "string" ? before.get(id) : undefined;
       if (original && original.raw === JSON.stringify(value)) continue;
       const parsed = commentSchema.safeParse(value);
@@ -51,6 +69,15 @@ export function validCommentAuthors(
         continue;
       }
       if (parsed.data.author.clientId !== author.clientId) return false;
+    }
+    for (const [id, original] of before) {
+      if (
+        !present.has(id) &&
+        original.comment &&
+        author.role !== "owner" &&
+        original.comment.author.clientId !== author.clientId
+      )
+        return false;
     }
     return true;
   } finally {

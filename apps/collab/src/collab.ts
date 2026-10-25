@@ -28,6 +28,7 @@ import {
   NEARBY_PREVIEW_LINES,
   NEARBY_THROTTLE_MS,
   type PermMessage,
+  participantPermissions,
   permMessageSchema,
   type Role,
   type Settings,
@@ -65,6 +66,7 @@ import { ValkeyLock } from "./lock.js";
 import type { CollabMetrics } from "./metrics.js";
 import { PersistedDoc } from "./persisted-doc.js";
 import { guardSlowClient } from "./slow-client.js";
+import { hasNewOperations, permitsUpdate } from "./update-permissions.js";
 
 export interface CollabContext {
   clientId: string;
@@ -431,6 +433,10 @@ export class Collab implements Extension<CollabContext> {
     );
     if (!share) return this.applyDelete(state);
     this.applyShare(state, share, false);
+    this.notify(connection, {
+      type: "permissions",
+      permissions: participantPermissions(share.access),
+    });
   }
 
   /**
@@ -581,11 +587,31 @@ export class Collab implements Extension<CollabContext> {
   /** §6.6 size limit: refuse an update that would grow the doc past `settings.maxDocBytes`. */
   async beforeSync({ connection, document, type, payload }: beforeSyncPayload<CollabContext>) {
     // y-protocols: 1 = SyncStep2, 2 = Update; SyncStep1 carries no content.
-    if ((type !== 1 && type !== 2) || connection.readOnly) return;
+    if (type !== 1 && type !== 2) return;
     const state = this.docs.get(document.name);
     if (!state) return;
-    if (!validCommentAuthors(document, payload, context(connection))) {
+    const actor = context(connection);
+    // Every opaque non-owner update can contain metadata, even if it appears to be plain text.
+    // Decode once and share it with the comment guard; owners skip the permission classifier.
+    let decoded: ReturnType<typeof Y.decodeUpdate> | undefined;
+    if (actor.role !== "owner" || connection.readOnly) {
+      decoded = Y.decodeUpdate(payload);
+      if (!hasNewOperations(document, decoded)) return;
+      if (
+        connection.readOnly ||
+        !permitsUpdate(document, decoded, participantPermissions(state.share.access))
+      ) {
+        this.refused.add(connection);
+        connection.readOnly = true;
+        console.warn("collab: permission refusal", { role: actor.role });
+        this.notify(connection, { type: "permission_refused" });
+        return;
+      }
+    }
+    if (!validCommentAuthors(document, payload, actor, decoded)) {
       connection.readOnly = true;
+      console.warn("collab: permission refusal", { role: actor.role });
+      this.notify(connection, { type: "permission_refused" });
       connection.close({ code: 4401, reason: COLLAB_CLOSE_REASONS.reauth });
       return;
     }
@@ -647,7 +673,8 @@ export class Collab implements Extension<CollabContext> {
         }
         owned++;
       }
-      const next = { ...state, user: { clientId, name, color } };
+      const next: Record<string, unknown> = { ...state, user: { clientId, name, color } };
+      if (context(connection).role !== "owner") delete next.presenting;
       if (JSON.stringify(next).length > AWARENESS_MAX_STATE_BYTES) states.delete(yClientId);
       else states.set(yClientId, next);
     }
@@ -848,6 +875,9 @@ export class Collab implements Extension<CollabContext> {
   /** Applies a freshly read share record; `announceLock` notifies even if `locked` is unchanged. */
   private applyShare(state: DocState, share: ShareRecord, announceLock: boolean) {
     const lockChanged = share.locked !== state.locked;
+    const permissions = participantPermissions(share.access);
+    const permissionsChanged =
+      JSON.stringify(permissions) !== JSON.stringify(participantPermissions(state.share.access));
     state.share = share;
     state.locked = share.locked;
     state.nearby = share.access.nearby;
@@ -867,6 +897,7 @@ export class Collab implements Extension<CollabContext> {
       if (announceLock || lockChanged) {
         this.notify(c, { type: "locked", locked: state.locked, readOnly });
       }
+      if (permissionsChanged) this.notify(c, { type: "permissions", permissions });
     }
   }
 
@@ -1178,6 +1209,13 @@ export class Collab implements Extension<CollabContext> {
         if (state.deleted || state.document.isDestroyed) return;
         if (!share) return this.applyDelete(state);
         this.applyShare(state, share, true);
+        return;
+      }
+      case "permissions": {
+        const share = await this.currentShare(state.name);
+        if (state.deleted || state.document.isDestroyed) return;
+        if (!share) return this.applyDelete(state);
+        this.applyShare(state, share, false);
         return;
       }
       case "delete":
