@@ -40,9 +40,7 @@ export function DiagnosticsSection() {
         onCheckedChange={setDiagnosticsEnabled}
         data-testid="diagnostics-enabled"
       />
-      <p role="status" className="text-body-sm">
-        {t("settings.diag.count", { count: state.count })}
-      </p>
+      <p className="text-body-sm">{t("settings.diag.count", { count: state.count })}</p>
       <div className="flex flex-wrap gap-2">
         <Button
           onClick={() => downloadDiagnostics(clientDiagnosticExport())}

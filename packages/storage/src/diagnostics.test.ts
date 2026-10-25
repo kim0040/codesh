@@ -1,5 +1,8 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { ServerDiagnostics } from "./diagnostics.js";
+import { ingestCrashDiagnostic, ServerDiagnostics, writeCrashDiagnostic } from "./diagnostics.js";
 import { createMemoryStores } from "./memory.js";
 
 describe("server diagnostic mirror", () => {
@@ -58,5 +61,51 @@ describe("server diagnostic mirror", () => {
     await recorder.flush();
     await recorder.flush();
     expect(replace).toHaveBeenCalledTimes(2);
+  });
+  it("writes scrubbed crash details synchronously and ingests them on the next start", () => {
+    const dir = mkdtempSync(join(tmpdir(), "codesh-diag-crash-"));
+    const path = join(dir, "tmp", "api-crash.json");
+    try {
+      writeCrashDiagnostic(path, "uncaught", {
+        message: "Error: PRIVATE_DOCUMENT_AND_TOKEN",
+        stack: "Error: text\n at boom (file:///private/PRIVATE_DOCUMENT.ts:1:2)",
+        code: "ECONNRESET",
+      });
+      const saved = readFileSync(path, "utf8");
+      expect(saved).not.toContain("PRIVATE_DOCUMENT");
+      expect(saved).toContain("ECONNRESET");
+      const diagnostics = new ServerDiagnostics("api", createMemoryStores().diagnostics);
+      expect(ingestCrashDiagnostic(path, diagnostics)).toBe(true);
+      expect(diagnostics.ring.list()[0]).toMatchObject({
+        kind: "uncaught",
+        level: "error",
+        details: { code: "ECONNRESET", message: "Error (text omitted)" },
+      });
+      expect(diagnostics.ring.listBreadcrumbs()[0]?.kind).toBe("uncaught");
+      expect(existsSync(path)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("caches admin diagnostics reads for five seconds and exports boot ids and timelines", async () => {
+    const list = vi.fn(async () => []);
+    const diagnostics = new ServerDiagnostics("api", { replace: async () => {}, list });
+    diagnostics.record("mongo_error", { errorCode: 91_234 }, "error");
+    const first = await diagnostics.recent();
+    const second = await diagnostics.recent();
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(first.snapshots[0]?.bootId).toBe(diagnostics.bootId);
+    expect(second.snapshots[0]?.breadcrumbs[0]).toMatchObject({
+      kind: "mongo_error",
+      code: 91_234,
+    });
+    diagnostics.record("response_5xx", {
+      route: "/api/admin/overview",
+      status: 500,
+      code: "unknown",
+    });
+    const afterRecord = await diagnostics.recent();
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(afterRecord.events.some((event) => event.kind === "response_5xx")).toBe(true);
   });
 });

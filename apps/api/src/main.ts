@@ -1,10 +1,14 @@
 import { diagnosticError, diagnosticRoute } from "@codesh/shared";
+import { crashDiagnosticPath, ingestCrashDiagnostic, writeCrashDiagnostic } from "@codesh/storage";
 import { buildApp } from "./app.js";
 import { loadConfig, proxyWarnings } from "./config.js";
 import { createRuntime } from "./runtime.js";
 
 const config = loadConfig();
 const runtime = await createRuntime(config);
+const crashPath = crashDiagnosticPath("api");
+const diagnostics = runtime.deps.diagnostics;
+if (diagnostics) ingestCrashDiagnostic(crashPath, diagnostics);
 const app = buildApp(runtime.deps, {
   logger: {
     level: config.production ? "info" : "debug",
@@ -16,12 +20,22 @@ const app = buildApp(runtime.deps, {
           type: "Error",
           message: details.message ?? "Error",
           stack: details.stack ?? "",
-          ...(details.errorCode !== undefined ? { code: details.errorCode } : {}),
+          ...(details.code !== undefined
+            ? { code: details.code }
+            : details.errorCode !== undefined
+              ? { code: details.errorCode }
+              : {}),
         };
       },
-      req: (req: { method: string; url: string }) => ({
+      req: (req: {
+        method: string;
+        url: string;
+        ip?: string;
+        socket?: { remoteAddress?: string };
+      }) => ({
         method: req.method,
         url: diagnosticRoute(req.url),
+        remoteAddress: req.ip ?? req.socket?.remoteAddress ?? "unknown",
       }),
     },
   },
@@ -31,11 +45,10 @@ for (const warning of proxyWarnings(config)) app.log.warn(warning);
 
 // Monitor preserves Node's default fatal-error behavior while recording safe diagnostic fields.
 process.on("uncaughtExceptionMonitor", (error, origin) => {
-  runtime.deps.diagnostics?.record(
-    origin === "unhandledRejection" ? "rejection" : "uncaught",
-    diagnosticError(error),
-    "error",
-  );
+  const kind = origin === "unhandledRejection" ? "rejection" : "uncaught";
+  const details = diagnosticError(error);
+  writeCrashDiagnostic(crashPath, kind, details);
+  runtime.deps.diagnostics?.record(kind, details, "error");
 });
 let closing = false;
 async function shutdown(signal: string) {

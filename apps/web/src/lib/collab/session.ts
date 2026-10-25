@@ -2,6 +2,8 @@ import {
   COLLAB_CLOSE_REASONS,
   COLLAB_DENY_REASONS,
   type CollabStateless,
+  diagnosticCountBucket,
+  diagnosticSizeBucket,
   type ParticipantPermissions,
   participantPermissionsSchema,
   type Role,
@@ -23,7 +25,13 @@ import {
   registerHolder,
   within,
 } from "../device";
-import { captureDiagnosticError, newDiagnosticReference, recordDiagnostic } from "../diagnostics";
+import {
+  captureDiagnosticError,
+  clearDiagnosticContext,
+  newDiagnosticReference,
+  recordDiagnostic,
+  updateDiagnosticContext,
+} from "../diagnostics";
 import { subscribePrefs } from "../prefs";
 import { acquireSocket } from "./socket";
 
@@ -292,12 +300,18 @@ export class DocSession {
       onAuthenticationFailed: ({ reason }) => this.handleDenied(reason),
       onSynced: ({ state }) => {
         if (!state) return;
+        const context = {
+          documentSize: diagnosticSizeBucket(Y.encodeStateAsUpdate(this.doc).byteLength),
+          fileCount: diagnosticCountBucket(this.doc.getMap(YDOC.files).size),
+          connectionCount: diagnosticCountBucket(this.provider.awareness?.getStates().size ?? 0),
+        };
+        updateDiagnosticContext(this.diagnosticRef, context);
         if (!this.diagnosticsSynced) {
           this.diagnosticsSynced = true;
           const durationMs = Date.now() - this.diagnosticsStarted;
           recordDiagnostic("first_sync", { durationMs, shareRef: this.diagnosticRef });
           if (durationMs > 5000)
-            recordDiagnostic("slow_sync", { durationMs, shareRef: this.diagnosticRef });
+            recordDiagnostic("slow_sync", { durationMs, shareRef: this.diagnosticRef, ...context });
         }
         this.patch({ synced: true });
         this.refreshStatus();
@@ -421,6 +435,7 @@ export class DocSession {
   async leave(): Promise<void> {
     if (this.left || this.destroyed) return;
     this.left = true;
+    clearDiagnosticContext(this.diagnosticRef);
     this.epoch++;
     this.credentials = {};
     this.clearRetry();
@@ -686,6 +701,7 @@ export class DocSession {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    clearDiagnosticContext(this.diagnosticRef);
     this.epoch++;
     sessions.delete(this);
     window.removeEventListener("online", this.onlineListener);

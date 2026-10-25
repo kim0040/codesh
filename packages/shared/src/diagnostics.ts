@@ -46,6 +46,14 @@ export interface DiagnosticEvent {
   count: number;
   details: DiagnosticDetails;
 }
+export interface DiagnosticBreadcrumb {
+  kind: DiagnosticKind;
+  at: string;
+  status?: number;
+  code?: string | number;
+}
+export type DiagnosticSizeBucket = "lt_64k" | "64k_1m" | "1m_10m" | "gte_10m";
+export type DiagnosticCountBucket = "0" | "1" | "2_5" | "6_20" | "gte_21";
 export interface DiagnosticDetails {
   /** Random session reference; exports rehash it with a fresh salt. Never a share id. */
   shareRef?: string;
@@ -66,7 +74,21 @@ export interface DiagnosticDetails {
   column?: number;
   backoffMs?: number;
   errorCode?: number;
+  documentSize?: DiagnosticSizeBucket;
+  fileCount?: DiagnosticCountBucket;
+  connectionCount?: DiagnosticCountBucket;
 }
+
+export const diagnosticSizeBucket = (bytes: number): DiagnosticSizeBucket =>
+  bytes < 64 * 1024
+    ? "lt_64k"
+    : bytes < 1024 * 1024
+      ? "64k_1m"
+      : bytes < 10 * 1024 * 1024
+        ? "1m_10m"
+        : "gte_10m";
+export const diagnosticCountBucket = (count: number): DiagnosticCountBucket =>
+  count <= 0 ? "0" : count === 1 ? "1" : count <= 5 ? "2_5" : count <= 20 ? "6_20" : "gte_21";
 
 const ROUTE_WORDS = new Set(
   (
@@ -128,22 +150,26 @@ const ERROR_NAMES = new Set([
   "MongoServerSelectionError",
   "ReplyError",
 ]);
+const ERRNO_CODES = new Set(
+  "ECONNREFUSED ETIMEDOUT ECONNRESET ENOTFOUND EAI_AGAIN EPIPE".split(" "),
+);
 
 /** A name in code (`a`, `view.state`, `this.x`), never free text: no spaces, quotes or symbols. */
 const IDENT = String.raw`[A-Za-z_$][\w$]{0,40}(?:\.[A-Za-z_$#][\w$]{0,40}){0,3}`;
+const PROP = "<prop>";
 /**
  * Engine messages (V8, SpiderMonkey, JavaScriptCore) and a few fixed library messages, whose only
  * variable parts are names from the code. Anything else becomes "(text omitted)": a message can
  * quote editor text, a file name or a secret (`JSON.parse`, a thrown string, a server reply).
  */
 const SAFE_MESSAGES = [
-  `Cannot read properties of (?:undefined|null) \\(reading '${IDENT}'\\)`,
-  `Cannot set properties of (?:undefined|null) \\(setting '${IDENT}'\\)`,
+  `Cannot read properties of (?:undefined|null) \\(reading '${PROP}'\\)`,
+  `Cannot set properties of (?:undefined|null) \\(setting '${PROP}'\\)`,
   `Cannot read properties of (?:undefined|null)`,
-  `can't access property "${IDENT}", ${IDENT} is (?:undefined|null)`,
+  `can't access property "${PROP}", ${IDENT} is (?:undefined|null)`,
   `${IDENT} is (?:undefined|null)`,
-  `undefined is not an object \\(evaluating '${IDENT}'\\)`,
-  `null is not an object \\(evaluating '${IDENT}'\\)`,
+  `undefined is not an object \\(evaluating '${PROP}'\\)`,
+  `null is not an object \\(evaluating '${PROP}'\\)`,
   `${IDENT} is not a function`,
   `${IDENT} is not a function\\. \\(In '${IDENT}\\(\\)', '${IDENT}' is (?:undefined|null)\\)`,
   `${IDENT} is not a constructor`,
@@ -171,27 +197,40 @@ const SAFE_MESSAGES = [
 /** The message itself when it is one of the safe templates, else null. */
 function safeMessage(text: string): string | null {
   // Engine messages are one line; more lines mean text the code put there.
-  const line = text.trim();
+  let line = text.trim();
   if (line.length > 240 || line.includes("\n")) return null;
+  line = line
+    .replace(/^(Cannot read properties of (?:undefined|null) \(reading )'.*'(\))$/, `$1'${PROP}'$2`)
+    .replace(/^(Cannot set properties of (?:undefined|null) \(setting )'.*'(\))$/, `$1'${PROP}'$2`)
+    .replace(/^(can't access property )".*", /, `$1"${PROP}", `)
+    .replace(
+      /^(undefined|null) is not an object \(evaluating '.*'\)$/,
+      `$1 is not an object (evaluating '${PROP}')`,
+    );
   return SAFE_MESSAGES.some((pattern) => pattern.test(line)) ? line : null;
 }
 
 /** Arbitrary error messages can contain editor text or secrets: only safe templates are kept. */
 export function diagnosticError(
   error: unknown,
-): Pick<DiagnosticDetails, "message" | "stack" | "errorCode"> {
+): Pick<DiagnosticDetails, "message" | "stack" | "errorCode" | "code"> {
   if (!(error instanceof Error)) return { message: "Non-Error rejection (text omitted)" };
   const name = ERROR_NAMES.has(error.name) ? error.name : "Error";
   const kept = safeMessage(error.message);
   const message = kept ? `${name}: ${kept}` : `${name} (text omitted)`;
-  const stack = (error.stack ?? "")
-    .split("\n")
-    .slice(1, 13)
+  const frames = (error.stack ?? "").split("\n");
+  const first = frames[0]?.trim() ?? "";
+  if (first && !first.startsWith("at ") && !first.includes("@")) frames.shift();
+  const stack = frames
+    .slice(0, 12)
     .map((frame) => diagnosticLocation(frame.trim().replace(/\)$/, "")))
     .join("\n");
   return {
     message,
     ...(stack ? { stack } : {}),
+    ...("code" in error && typeof error.code === "string" && ERRNO_CODES.has(error.code)
+      ? { code: error.code }
+      : {}),
     ...("code" in error &&
     typeof error.code === "number" &&
     Number.isSafeInteger(error.code) &&
@@ -201,19 +240,20 @@ export function diagnosticError(
   };
 }
 
-/** True for exactly the messages diagnosticError can produce. */
-function isDiagnosticMessage(message: string): boolean {
-  if (message === "Non-Error rejection (text omitted)") return true;
+/** Normalize previously stored messages too, so property keys are removed on the next read. */
+function scrubMessage(message: string): string | null {
+  if (message === "Non-Error rejection (text omitted)") return message;
   const omitted = message.match(/^(\w+) \(text omitted\)$/);
-  if (omitted) return ERROR_NAMES.has(omitted[1] ?? "");
+  if (omitted) return ERROR_NAMES.has(omitted[1] ?? "") ? message : null;
   const split = message.indexOf(": ");
-  if (split < 0 || !ERROR_NAMES.has(message.slice(0, split))) return false;
+  if (split < 0 || !ERROR_NAMES.has(message.slice(0, split))) return null;
   const text = message.slice(split + 2);
-  return safeMessage(text) === text;
+  const safe = safeMessage(text);
+  return safe === null ? null : `${message.slice(0, split)}: ${safe}`;
 }
 
 const CODES = new Set(
-  "network unknown forbidden not_found validation unavailable rate_limited pin_required pin_invalid pending_approval banned expired too_large unauthorized ECONNREFUSED ETIMEDOUT ECONNRESET".split(
+  "network unknown forbidden not_found validation unavailable rate_limited pin_required pin_invalid pending_approval banned expired too_large unauthorized lock_lost ECONNREFUSED ETIMEDOUT ECONNRESET ENOTFOUND EAI_AGAIN EPIPE".split(
     " ",
   ),
 );
@@ -252,12 +292,29 @@ export function scrubDiagnosticDetails(input: unknown): DiagnosticDetails {
   )
     out.method = raw.method;
   if (typeof raw.code === "string") out.code = CODES.has(raw.code) ? raw.code : "unknown";
+  const sizeBuckets: DiagnosticSizeBucket[] = ["lt_64k", "64k_1m", "1m_10m", "gte_10m"];
+  const countBuckets: DiagnosticCountBucket[] = ["0", "1", "2_5", "6_20", "gte_21"];
+  if (
+    typeof raw.documentSize === "string" &&
+    sizeBuckets.includes(raw.documentSize as DiagnosticSizeBucket)
+  )
+    out.documentSize = raw.documentSize as DiagnosticSizeBucket;
+  if (
+    typeof raw.fileCount === "string" &&
+    countBuckets.includes(raw.fileCount as DiagnosticCountBucket)
+  )
+    out.fileCount = raw.fileCount as DiagnosticCountBucket;
+  if (
+    typeof raw.connectionCount === "string" &&
+    countBuckets.includes(raw.connectionCount as DiagnosticCountBucket)
+  )
+    out.connectionCount = raw.connectionCount as DiagnosticCountBucket;
   if (typeof raw.reason === "string")
     out.reason = REASONS.has(raw.reason) ? raw.reason : "abnormal";
   if (typeof raw.location === "string") out.location = diagnosticLocation(raw.location);
   if (typeof raw.message === "string") {
     // Values are outputs of diagnosticError only; reject arbitrary text, including forged storage.
-    out.message = isDiagnosticMessage(raw.message) ? raw.message : "Error (text omitted)";
+    out.message = scrubMessage(raw.message) ?? "Error (text omitted)";
   }
   if (typeof raw.stack === "string")
     out.stack = raw.stack.split("\n").slice(0, 12).map(diagnosticLocation).join("\n");
@@ -265,106 +322,348 @@ export function scrubDiagnosticDetails(input: unknown): DiagnosticDetails {
 }
 
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
-/** In-memory ring with a stable fingerprint that excludes durations; repeated loops keep a max. */
+const eventFingerprint = (
+  source: DiagnosticSource,
+  kind: DiagnosticKind,
+  level: DiagnosticLevel,
+  details: DiagnosticDetails,
+) =>
+  JSON.stringify({
+    source,
+    kind,
+    level,
+    details: {
+      ...details,
+      durationMs: undefined,
+      worstMs: undefined,
+      offlineMs: undefined,
+      reconnects: undefined,
+      backoffMs: undefined,
+    },
+  });
+interface EvictionEntry {
+  key: string;
+  at: number;
+  version: number;
+  order: number;
+}
+const earlier = (a: EvictionEntry, b: EvictionEntry) =>
+  a.at < b.at || (a.at === b.at && a.order < b.order);
+function heapPush(heap: EvictionEntry[], value: EvictionEntry): void {
+  heap.push(value);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    const row = heap[parent];
+    if (!row || earlier(row, value)) break;
+    heap[index] = row;
+    index = parent;
+  }
+  heap[index] = value;
+}
+function heapPop(heap: EvictionEntry[]): EvictionEntry | undefined {
+  const first = heap[0];
+  const tail = heap.pop();
+  if (!first || !tail || heap.length === 0) return first;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    const right = left + 1;
+    if (left >= heap.length) break;
+    const child =
+      right < heap.length && heap[right] && heap[left] && earlier(heap[right], heap[left])
+        ? right
+        : left;
+    const row = heap[child];
+    if (!row || earlier(tail, row)) break;
+    heap[index] = row;
+    index = child;
+  }
+  heap[index] = tail;
+  return first;
+}
+
+/** In-memory ring with indexed dedupe, bounded pruning, and a short payload-free timeline. */
 export class DiagnosticRing {
-  private events: DiagnosticEvent[] = [];
+  private events = new Map<string, DiagnosticEvent>();
+  private eventBytes = new Map<string, number>();
+  private versions = new Map<string, number>();
+  private evictionHeap: EvictionEntry[] = [];
+  private breadcrumbs: DiagnosticBreadcrumb[] = [];
+  private breadcrumbKeys = new Set<string>();
+  private breadcrumbBytes = 0;
   private usedBytes = 2;
+  private lastPrunedAt = 0;
+  private order = 0;
   constructor(private readonly now: () => number = Date.now) {}
+  get count(): number {
+    return this.events.size;
+  }
   load(input: unknown): void {
-    this.events = [];
-    this.usedBytes = 2;
-    if (!Array.isArray(input)) return;
-    for (const row of input.slice(-DIAGNOSTIC_CAPS.events)) {
-      if (!row || typeof row !== "object") continue;
-      const e = row as DiagnosticEvent;
-      if (
-        !DIAGNOSTIC_KINDS.includes(e.kind) ||
-        !["client", "api", "collab"].includes(e.source) ||
-        !["warn", "error"].includes(e.level)
-      )
-        continue;
-      if (
-        !Number.isFinite(Date.parse(e.firstAt)) ||
-        !Number.isFinite(Date.parse(e.lastAt)) ||
-        Date.parse(e.lastAt) > this.now() + 60_000
-      )
-        continue;
-      this.events.push({
-        kind: e.kind,
-        source: e.source,
-        level: e.level,
-        firstAt: new Date(e.firstAt).toISOString(),
-        lastAt: new Date(e.lastAt).toISOString(),
-        count: Number.isSafeInteger(e.count) && e.count > 0 ? e.count : 1,
-        details: scrubDiagnosticDetails(e.details),
-      });
+    this.clear();
+    const data = Array.isArray(input) ? { events: input } : input;
+    if (!data || typeof data !== "object") return;
+    const raw = data as { events?: unknown; breadcrumbs?: unknown };
+    if (Array.isArray(raw.events)) {
+      for (const row of raw.events) {
+        const event = this.normalizeEvent(row);
+        if (event) this.mergeEvent(event);
+      }
     }
-    this.usedBytes = bytes(this.events);
-    this.prune();
+    if (Array.isArray(raw.breadcrumbs)) {
+      for (const row of raw.breadcrumbs) this.addBreadcrumb(row);
+    }
+    this.prune(true);
+  }
+  /** Merge another tab's last persisted snapshot without replacing this tab's newer records. */
+  merge(input: unknown): boolean {
+    const other = new DiagnosticRing(this.now);
+    other.load(input);
+    let changed = false;
+    for (const event of other.events.values()) changed = this.mergeEvent(event) || changed;
+    for (const breadcrumb of other.breadcrumbs) changed = this.addBreadcrumb(breadcrumb) || changed;
+    this.prune(true);
+    return changed;
   }
   record(
     source: DiagnosticSource,
     kind: DiagnosticKind,
     details: DiagnosticDetails = {},
     level: DiagnosticLevel = "warn",
+    at = this.now(),
   ): void {
     this.prune();
     const clean = scrubDiagnosticDetails(details);
-    const fingerprint = (d: DiagnosticDetails) =>
-      JSON.stringify({
-        ...d,
-        durationMs: undefined,
-        worstMs: undefined,
-        offlineMs: undefined,
-        reconnects: undefined,
-        backoffMs: undefined,
-      });
-    const found = this.events.find(
-      (e) =>
-        e.source === source &&
-        e.kind === kind &&
-        e.level === level &&
-        fingerprint(e.details) === fingerprint(clean),
-    );
-    const at = new Date(this.now()).toISOString();
-    if (found) {
-      const beforeBytes = bytes(found);
-      found.count = Math.min(found.count + 1, Number.MAX_SAFE_INTEGER);
-      found.lastAt = at;
-      found.details = {
-        ...clean,
-        worstMs: Math.max(
-          found.details.worstMs ?? found.details.durationMs ?? 0,
-          clean.durationMs ?? clean.worstMs ?? 0,
-        ),
-      };
-      this.usedBytes += bytes(found) - beforeBytes;
-    } else {
-      const event = { source, kind, level, firstAt: at, lastAt: at, count: 1, details: clean };
-      this.usedBytes += bytes(event) + (this.events.length ? 1 : 0);
-      this.events.push(event);
-    }
-    this.prune();
+    const key = eventFingerprint(source, kind, level, clean);
+    const atText = new Date(at).toISOString();
+    this.addBreadcrumb({
+      kind,
+      at: atText,
+      ...(clean.status !== undefined ? { status: clean.status } : {}),
+      ...(clean.code !== undefined
+        ? { code: clean.code }
+        : clean.errorCode !== undefined
+          ? { code: clean.errorCode }
+          : {}),
+    });
+    const found = this.events.get(key);
+    const event: DiagnosticEvent = found
+      ? {
+          ...found,
+          firstAt: atText < found.firstAt ? atText : found.firstAt,
+          count: Math.min(found.count + 1, Number.MAX_SAFE_INTEGER),
+          lastAt: atText > found.lastAt ? atText : found.lastAt,
+          details: {
+            ...clean,
+            ...(() => {
+              const worst = Math.max(
+                found.details.worstMs ?? found.details.durationMs ?? 0,
+                clean.durationMs ?? clean.worstMs ?? 0,
+              );
+              return found.details.worstMs !== undefined ||
+                found.details.durationMs !== undefined ||
+                clean.durationMs !== undefined ||
+                clean.worstMs !== undefined
+                ? { worstMs: worst }
+                : {};
+            })(),
+          },
+        }
+      : { source, kind, level, firstAt: atText, lastAt: atText, count: 1, details: clean };
+    this.putEvent(key, event);
+    this.enforceCaps();
   }
   list(): DiagnosticEvent[] {
     this.prune();
-    return structuredClone(this.events);
+    return structuredClone([...this.events.values()]);
+  }
+  listBreadcrumbs(): DiagnosticBreadcrumb[] {
+    this.prune();
+    return structuredClone(this.breadcrumbs);
+  }
+  snapshot(): { events: DiagnosticEvent[]; breadcrumbs: DiagnosticBreadcrumb[] } {
+    return { events: this.list(), breadcrumbs: this.listBreadcrumbs() };
   }
   clear(): void {
-    this.events = [];
+    this.events.clear();
+    this.eventBytes.clear();
+    this.versions.clear();
+    this.evictionHeap = [];
+    this.breadcrumbs = [];
+    this.breadcrumbKeys.clear();
+    this.breadcrumbBytes = 0;
     this.usedBytes = 2;
+    this.lastPrunedAt = 0;
   }
-  private prune(): void {
-    const cutoff = this.now() - DIAGNOSTIC_CAPS.days * 86400_000;
-    const live = this.events.filter((e) => Date.parse(e.lastAt) >= cutoff);
-    if (live.length !== this.events.length) {
-      this.events = live;
-      this.usedBytes = bytes(live);
+  private normalizeEvent(row: unknown): DiagnosticEvent | null {
+    if (!row || typeof row !== "object") return null;
+    const e = row as DiagnosticEvent;
+    if (
+      !DIAGNOSTIC_KINDS.includes(e.kind) ||
+      !["client", "api", "collab"].includes(e.source) ||
+      !["warn", "error"].includes(e.level)
+    )
+      return null;
+    const first = Date.parse(e.firstAt);
+    const last = Date.parse(e.lastAt);
+    if (!Number.isFinite(first) || !Number.isFinite(last) || last > this.now() + 60_000)
+      return null;
+    return {
+      kind: e.kind,
+      source: e.source,
+      level: e.level,
+      firstAt: new Date(first).toISOString(),
+      lastAt: new Date(last).toISOString(),
+      count: Number.isSafeInteger(e.count) && e.count > 0 ? e.count : 1,
+      details: scrubDiagnosticDetails(e.details),
+    };
+  }
+  private addBreadcrumb(input: unknown): boolean {
+    if (!input || typeof input !== "object") return false;
+    const raw = input as DiagnosticBreadcrumb;
+    const at = Date.parse(raw.at);
+    if (
+      !DIAGNOSTIC_KINDS.includes(raw.kind) ||
+      !Number.isFinite(at) ||
+      at > this.now() + 60_000 ||
+      at < this.now() - DIAGNOSTIC_CAPS.days * 86400_000
+    )
+      return false;
+    const breadcrumb: DiagnosticBreadcrumb = {
+      kind: raw.kind,
+      at: new Date(at).toISOString(),
+      ...(typeof raw.status === "number" && Number.isSafeInteger(raw.status) && raw.status >= 0
+        ? { status: raw.status }
+        : {}),
+      ...(typeof raw.code === "string" && CODES.has(raw.code)
+        ? { code: raw.code }
+        : typeof raw.code === "number" && Number.isSafeInteger(raw.code) && raw.code >= 0
+          ? { code: raw.code }
+          : {}),
+    };
+    const key = JSON.stringify(breadcrumb);
+    if (this.breadcrumbKeys.has(key)) return false;
+    const beforeBytes = this.breadcrumbBytes;
+    this.breadcrumbBytes += bytes(breadcrumb) + (this.breadcrumbs.length ? 1 : 0);
+    this.breadcrumbs.push(breadcrumb);
+    this.breadcrumbKeys.add(key);
+    if (this.breadcrumbs.length > 50) {
+      const removed = this.breadcrumbs.shift();
+      if (removed) {
+        this.breadcrumbKeys.delete(JSON.stringify(removed));
+        this.breadcrumbBytes -= bytes(removed) + (this.breadcrumbs.length ? 1 : 0);
+      }
     }
-    while (this.events.length > DIAGNOSTIC_CAPS.events || this.usedBytes > DIAGNOSTIC_CAPS.bytes) {
-      const removed = this.events.shift();
-      if (removed) this.usedBytes -= bytes(removed) + (this.events.length ? 1 : 0);
+    this.usedBytes += this.breadcrumbBytes - beforeBytes;
+    while (this.usedBytes > DIAGNOSTIC_CAPS.bytes && this.breadcrumbs.length) {
+      const removed = this.breadcrumbs.shift();
+      if (!removed) continue;
+      this.breadcrumbKeys.delete(JSON.stringify(removed));
+      this.breadcrumbBytes -= bytes(removed) + (this.breadcrumbs.length ? 1 : 0);
+      this.usedBytes -= bytes(removed) + (this.breadcrumbs.length ? 1 : 0);
     }
+    return true;
+  }
+  private mergeEvent(incoming: DiagnosticEvent): boolean {
+    const key = eventFingerprint(incoming.source, incoming.kind, incoming.level, incoming.details);
+    const current = this.events.get(key);
+    if (!current) {
+      this.putEvent(key, structuredClone(incoming));
+      return true;
+    }
+    const firstAt = current.firstAt < incoming.firstAt ? current.firstAt : incoming.firstAt;
+    const lastAt = current.lastAt > incoming.lastAt ? current.lastAt : incoming.lastAt;
+    const count = Math.max(current.count, incoming.count);
+    const worst = Math.max(
+      current.details.worstMs ?? current.details.durationMs ?? 0,
+      incoming.details.worstMs ?? incoming.details.durationMs ?? 0,
+    );
+    const hasDuration =
+      current.details.worstMs !== undefined ||
+      current.details.durationMs !== undefined ||
+      incoming.details.worstMs !== undefined ||
+      incoming.details.durationMs !== undefined;
+    const event: DiagnosticEvent = {
+      ...current,
+      firstAt,
+      lastAt,
+      count,
+      details: {
+        ...current.details,
+        ...incoming.details,
+        ...(hasDuration ? { worstMs: worst } : {}),
+      },
+    };
+    if (JSON.stringify(event) === JSON.stringify(current)) return false;
+    this.putEvent(key, event);
+    return true;
+  }
+  private putEvent(key: string, event: DiagnosticEvent): void {
+    const oldBytes = this.eventBytes.get(key);
+    if (oldBytes === undefined) this.usedBytes += bytes(event) + (this.events.size ? 1 : 0);
+    else this.usedBytes += bytes(event) - oldBytes;
+    const size = bytes(event);
+    const version = (this.versions.get(key) ?? 0) + 1;
+    this.eventBytes.set(key, size);
+    this.versions.set(key, version);
+    this.events.delete(key);
+    this.events.set(key, event);
+    heapPush(this.evictionHeap, {
+      key,
+      at: Date.parse(event.lastAt),
+      version,
+      order: this.order++,
+    });
+  }
+  private removeEvent(key: string): void {
+    const size = this.eventBytes.get(key);
+    if (size === undefined) return;
+    this.usedBytes -= size + (this.events.size > 1 ? 1 : 0);
+    this.events.delete(key);
+    this.eventBytes.delete(key);
+    this.versions.delete(key);
+  }
+  private enforceCaps(): void {
+    if (this.evictionHeap.length > DIAGNOSTIC_CAPS.events * 4) {
+      this.evictionHeap = [];
+      for (const [key, event] of this.events)
+        heapPush(this.evictionHeap, {
+          key,
+          at: Date.parse(event.lastAt),
+          version: this.versions.get(key) ?? 0,
+          order: this.order++,
+        });
+    }
+    while (this.events.size > DIAGNOSTIC_CAPS.events || this.usedBytes > DIAGNOSTIC_CAPS.bytes) {
+      let oldest = heapPop(this.evictionHeap);
+      while (
+        oldest &&
+        (this.versions.get(oldest.key) !== oldest.version ||
+          this.events.get(oldest.key)?.lastAt !== new Date(oldest.at).toISOString())
+      )
+        oldest = heapPop(this.evictionHeap);
+      if (!oldest) break;
+      this.removeEvent(oldest.key);
+    }
+  }
+  private prune(force = false): void {
+    const now = this.now();
+    if (!force && now - this.lastPrunedAt < 5000) return;
+    this.lastPrunedAt = now;
+    const cutoff = now - DIAGNOSTIC_CAPS.days * 86400_000;
+    for (const [key, event] of this.events)
+      if (Date.parse(event.lastAt) < cutoff) this.removeEvent(key);
+    const oldBreadcrumbBytes = this.breadcrumbBytes;
+    this.breadcrumbs = this.breadcrumbs
+      .filter((entry) => Date.parse(entry.at) >= cutoff)
+      .slice(-50);
+    this.breadcrumbBytes = this.breadcrumbs.reduce(
+      (total, entry, index) => total + bytes(entry) + (index ? 1 : 0),
+      0,
+    );
+    this.usedBytes += this.breadcrumbBytes - oldBreadcrumbBytes;
+    this.breadcrumbKeys = new Set(this.breadcrumbs.map((entry) => JSON.stringify(entry)));
+    this.enforceCaps();
   }
 }
 
@@ -378,6 +677,7 @@ export const DIAGNOSTIC_SERVER_CAPS = {
 export interface DiagnosticSnapshot {
   slot: string;
   source: "api" | "collab";
+  bootId: string;
   at: string;
   uptimeSeconds: number;
   documents: number;
@@ -386,6 +686,7 @@ export interface DiagnosticSnapshot {
   /** Minute-resolution rolling error counts, independent of deduplicated 14-day events. */
   errorMinutes?: [number, number][];
   events: DiagnosticEvent[];
+  breadcrumbs: DiagnosticBreadcrumb[];
 }
 export interface AdminShare {
   id: string;
@@ -431,6 +732,12 @@ export interface ServerDiagnosticBundle {
   health: AdminOverview["health"];
   config: Record<string, boolean | number | string>;
   counters: { errors24h: number };
+  processes: Array<{
+    slot: string;
+    source: "api" | "collab";
+    bootId: string;
+    breadcrumbs: DiagnosticBreadcrumb[];
+  }>;
   events: DiagnosticEvent[];
 }
 
@@ -443,12 +750,16 @@ export function scrubDiagnosticSnapshot(input: DiagnosticSnapshot): DiagnosticSn
   )
     return null;
   const ring = new DiagnosticRing();
-  ring.load(input.events);
+  ring.load({ events: input.events, breadcrumbs: input.breadcrumbs });
   const integer = (value: number) => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
   const minMinute = Math.floor(Date.now() / 60_000) - 1440;
   const result: DiagnosticSnapshot = {
     slot: input.slot,
     source: input.source,
+    bootId:
+      typeof input.bootId === "string" && /^[a-f0-9-]{16,36}$/.test(input.bootId)
+        ? input.bootId
+        : "unknown",
     at: new Date(input.at).toISOString(),
     uptimeSeconds: integer(input.uptimeSeconds),
     documents: integer(input.documents),
@@ -471,6 +782,7 @@ export function scrubDiagnosticSnapshot(input: DiagnosticSnapshot): DiagnosticSn
       )
       .slice(-DIAGNOSTIC_SERVER_CAPS.errorMinutes),
     events: ring.list(),
+    breadcrumbs: ring.listBreadcrumbs(),
   };
   while (bytes(result) > DIAGNOSTIC_SERVER_CAPS.snapshotBytes && result.events.length)
     result.events.shift();

@@ -1,5 +1,12 @@
 import { diagnosticError } from "@codesh/shared";
-import { connectMongo, createMongoStores, ensureIndexes } from "@codesh/storage";
+import {
+  connectMongo,
+  crashDiagnosticPath,
+  createMongoStores,
+  ensureIndexes,
+  ingestCrashDiagnostic,
+  writeCrashDiagnostic,
+} from "@codesh/storage";
 import { loadConfig } from "./config.js";
 import { createCollabServer } from "./server.js";
 
@@ -19,11 +26,14 @@ const server = createCollabServer({
       ? undefined
       : { broadcastWindowMs: config.broadcastWindowMs },
 });
+const crashPath = crashDiagnosticPath("collab");
+ingestCrashDiagnostic(crashPath, server.diagnostics);
 
 let mongoFailed = false;
-mongo.client.on("serverHeartbeatFailed", () => {
+mongo.client.on("serverHeartbeatFailed", (event) => {
   mongoFailed = true;
-  server.diagnostics.record("mongo_error", {}, "error");
+  const failure = event && typeof event === "object" && "failure" in event ? event.failure : event;
+  server.diagnostics.record("mongo_error", diagnosticError(failure), "error");
 });
 mongo.client.on("serverHeartbeatSucceeded", () => {
   if (mongoFailed) {
@@ -32,16 +42,21 @@ mongo.client.on("serverHeartbeatSucceeded", () => {
   }
 });
 process.on("uncaughtExceptionMonitor", (error) => {
-  server.diagnostics.record("uncaught", diagnosticError(error), "error");
+  const details = diagnosticError(error);
+  writeCrashDiagnostic(crashPath, "uncaught", details);
+  server.diagnostics.record("uncaught", details, "error");
 });
 
 /** Below the usual 30 s grace period of a container stop, so the log line still gets out. */
 const SHUTDOWN_TIMEOUT_MS = 25_000;
 
-// One failed background task must not end the process and drop every open doc with it.
+// Unhandled work is fatal; write the scrubbed crash record before the process exits.
 process.on("unhandledRejection", (reason) => {
-  server.diagnostics.record("rejection", diagnosticError(reason), "error");
-  console.error("collab: unhandled rejection", diagnosticError(reason));
+  const details = diagnosticError(reason);
+  writeCrashDiagnostic(crashPath, "rejection", details);
+  server.diagnostics.record("rejection", details, "error");
+  console.error("collab: unhandled rejection", details);
+  process.exit(1);
 });
 
 let closing = false;
@@ -58,7 +73,7 @@ async function shutdown(signal: string) {
     await mongo.close();
     process.exit(0);
   } catch (error) {
-    console.error(error);
+    console.error("collab: shutdown failed", diagnosticError(error));
     process.exit(1);
   }
 }

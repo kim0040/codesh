@@ -2,9 +2,40 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   vi.resetModules();
 });
 describe("local diagnostics", () => {
+  it("records only network, 5xx, and unexpected 4xx failures", async () => {
+    const d = await import("./diagnostics");
+    expect([0, 400, 422, 500, 503].map(d.shouldRecordApiFailure)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect([200, 301, 401, 403, 404, 409, 429].some(d.shouldRecordApiFailure)).toBe(false);
+    expect(
+      d.isBenignResizeObserverError(
+        "ResizeObserver loop completed with undelivered notifications.",
+      ),
+    ).toBe(true);
+    expect(d.isBenignResizeObserverError("TypeError: broken")).toBe(false);
+  });
+  it("keeps only coarse size and participant buckets for slow task context", async () => {
+    const d = await import("./diagnostics");
+    d.updateDiagnosticContext(d.newDiagnosticReference(), {
+      documentSize: "64k_1m",
+      fileCount: "2_5",
+      connectionCount: "6_20",
+    });
+    expect(d.diagnosticContextDetails()).toEqual({
+      documentSize: "64k_1m",
+      fileCount: "2_5",
+      connectionCount: "6_20",
+    });
+  });
   it("rehashes random session references independently for each export", async () => {
     const d = await import("./diagnostics");
     const ref = d.newDiagnosticReference();
@@ -77,5 +108,40 @@ describe("local diagnostics", () => {
     expect(d.diagnosticsState().count).toBe(1);
     d.clearDiagnostics();
     expect(values.has("codesh.diagnostics.v1")).toBe(false);
+  });
+  it("merges another tab's stored events before persisting", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    const d = await import("./diagnostics");
+    d.recordDiagnostic("api_failure", { status: 503, code: "unavailable" });
+    const at = new Date().toISOString();
+    values.set(
+      "codesh.diagnostics.v1",
+      JSON.stringify({
+        events: [
+          {
+            source: "client",
+            kind: "disconnect",
+            level: "warn",
+            firstAt: at,
+            lastAt: at,
+            count: 1,
+            details: { closeCode: 1012 },
+          },
+        ],
+        breadcrumbs: [],
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    const saved = JSON.parse(values.get("codesh.diagnostics.v1") ?? "{}");
+    expect(saved.events.map((event: { kind: string }) => event.kind).sort()).toEqual([
+      "api_failure",
+      "disconnect",
+    ]);
   });
 });

@@ -44,7 +44,7 @@ test("client diagnostics export contains real failures without document text, PI
         page.evaluate(() => {
           const raw = localStorage.getItem("codesh.diagnostics.v1");
           return raw
-            ? JSON.parse(raw).some(
+            ? JSON.parse(raw).events.some(
                 (e: { kind: string; details: { status?: number } }) =>
                   e.kind === "api_failure" && e.details.status === 503,
               )
@@ -55,6 +55,7 @@ test("client diagnostics export contains real failures without document text, PI
     await page.unroute(`**/api/shares/${id}/join`);
     await page.getByTestId("settings-button").click();
     await expect(page.getByTestId("diagnostics-section")).toBeVisible();
+    await expect(page.getByTestId("diagnostics-section").getByRole("status")).toHaveCount(0);
     const download = page.waitForEvent("download");
     await page.getByTestId("diagnostics-export").click();
     const file = await download;
@@ -64,6 +65,11 @@ test("client diagnostics export contains real failures without document text, PI
     const raw = await readFile(path as string, "utf8");
     const data = JSON.parse(raw);
     expect(data.format).toBe(1);
+    expect(data.bootId).toMatch(/^[a-f0-9]{16}$/);
+    expect(data.breadcrumbs.some((entry: { kind: string }) => entry.kind === "disconnect")).toBe(
+      true,
+    );
+    expect(data.header).toContain(`codesh-web-sourcemaps-${data.environment.appVersion}.tar.gz`);
     expect(data.environment.appVersion).toBeTruthy();
     expect(data.events.some((e: { kind: string }) => e.kind === "api_failure")).toBe(true);
     expect(data.events.some((e: { kind: string }) => e.kind === "disconnect")).toBe(true);

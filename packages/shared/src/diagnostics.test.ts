@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DIAGNOSTIC_CAPS,
   DiagnosticRing,
+  diagnosticCountBucket,
   diagnosticError,
   diagnosticLocation,
   diagnosticRoute,
+  diagnosticSizeBucket,
   scrubDiagnosticDetails,
 } from "./diagnostics.js";
 
@@ -60,8 +62,10 @@ describe("diagnostic privacy", () => {
   it("keeps engine messages whose only variable parts are names in the code", () => {
     const kept = [
       [new TypeError("Cannot read properties of undefined (reading 'state')"), "TypeError"],
+      [new TypeError("Cannot set properties of null (setting 'value')"), "TypeError"],
+      [new TypeError('can\'t access property "name", a is undefined'), "TypeError"],
       [new TypeError("view.dispatch is not a function"), "TypeError"],
-      [new TypeError("undefined is not an object (evaluating 'a.b')"), "TypeError"],
+      [new TypeError("undefined is not an object (evaluating 'state.field')"), "TypeError"],
       [new ReferenceError("Cannot access 'x' before initialization"), "ReferenceError"],
       [new RangeError("Maximum call stack size exceeded"), "RangeError"],
       [
@@ -71,14 +75,68 @@ describe("diagnostic privacy", () => {
     ] as const;
     for (const [error, name] of kept) {
       const { message } = diagnosticError(error);
-      expect(message).toBe(`${name}: ${error.message}`);
+      expect(message).toContain(`${name}:`);
+      expect(message).not.toContain("'state'");
+      expect(message).not.toContain('"name"');
       expect(scrubDiagnosticDetails({ message }).message).toBe(message);
     }
+    expect(
+      diagnosticError(new TypeError("Cannot read properties of undefined (reading 'state')"))
+        .message,
+    ).toBe("TypeError: Cannot read properties of undefined (reading '<prop>')");
+    expect(
+      diagnosticError(new TypeError("undefined is not an object (evaluating 'state.field')"))
+        .message,
+    ).toBe("TypeError: undefined is not an object (evaluating '<prop>')");
+  });
+  it("never retains runtime property keys, including file-like names, from old or new records", () => {
+    for (const key of ["kT3x9QpA", "readme.md", "main.py", "a.b.c"]) {
+      const messages = [
+        `Cannot read properties of undefined (reading '${key}')`,
+        `Cannot set properties of null (setting '${key}')`,
+        `can't access property "${key}", target is undefined`,
+        `undefined is not an object (evaluating 'target.${key}')`,
+      ];
+      for (const text of messages) {
+        const safe = diagnosticError(new TypeError(text)).message ?? "";
+        expect(safe).not.toContain(key);
+        expect(scrubDiagnosticDetails({ message: safe }).message).not.toContain(key);
+      }
+      const old = scrubDiagnosticDetails({
+        message: `TypeError: Cannot read properties of undefined (reading '${key}')`,
+      }).message;
+      expect(old).not.toContain(key);
+      expect(old).toContain("<prop>");
+    }
+  });
+  it("keeps the throwing frame for V8, SpiderMonkey, and JavaScriptCore stacks", () => {
+    const stacks = [
+      "TypeError: failed\n    at boom (https://private.test/assets/app.js:2:3)",
+      "TypeError: failed\nboom@https://private.test/src/client.ts:4:5",
+      "TypeError: failed\nglobal code@https://private.test/assets/app.js:6:7",
+    ];
+    const expected = ["/assets/app.js:2:3", "/src/client.ts:4:5", "/assets/app.js:6:7"];
+    stacks.forEach((stack, index) => {
+      const details = diagnosticError(Object.assign(new TypeError("failed"), { stack }));
+      expect(details.stack).toContain(expected[index]);
+    });
+  });
+  it("keeps only allowlisted network and numeric error codes", () => {
+    expect(
+      diagnosticError(Object.assign(new Error("failed"), { code: "EAI_AGAIN" })),
+    ).toMatchObject({
+      code: "EAI_AGAIN",
+    });
+    expect(diagnosticError(Object.assign(new Error("failed"), { code: 91_234 }))).toMatchObject({
+      errorCode: 91_234,
+    });
+    expect(
+      diagnosticError(Object.assign(new Error("secret"), { code: "SECRET_VALUE" })),
+    ).not.toHaveProperty("code");
   });
   it("omits messages that quote text, even inside a known template's shape", () => {
     for (const text of [
       `Unexpected token 'N', "${secret}" is not valid JSON`,
-      `Cannot read properties of undefined (reading '${secret}')`,
       "my password 482913 is not defined",
       `${"a".repeat(300)} is not a function`,
       "x is not a function\nsecond line with editor text",
@@ -86,6 +144,11 @@ describe("diagnostic privacy", () => {
       const { message } = diagnosticError(new SyntaxError(text));
       expect(message).toBe("SyntaxError (text omitted)");
     }
+    const property = diagnosticError(
+      new TypeError(`Cannot read properties of undefined (reading '${secret}')`),
+    ).message;
+    expect(property).toContain("<prop>");
+    expect(property).not.toContain(secret);
     expect(scrubDiagnosticDetails({ message: `TypeError: ${secret}` }).message).toBe(
       "Error (text omitted)",
     );
@@ -95,6 +158,37 @@ describe("diagnostic privacy", () => {
   });
 });
 describe("bounded diagnostic ring", () => {
+  it("keeps slow-operation context in coarse buckets", () => {
+    expect([0, 64 * 1024, 1024 * 1024, 10 * 1024 * 1024].map(diagnosticSizeBucket)).toEqual([
+      "lt_64k",
+      "64k_1m",
+      "1m_10m",
+      "gte_10m",
+    ]);
+    expect([0, 1, 2, 6, 21].map(diagnosticCountBucket)).toEqual([
+      "0",
+      "1",
+      "2_5",
+      "6_20",
+      "gte_21",
+    ]);
+    const ring = new DiagnosticRing();
+    for (const kind of ["slow_sync", "long_task", "slow_flush"] as const)
+      ring.record("client", kind, {
+        durationMs: 6000,
+        documentSize: diagnosticSizeBucket(700_000),
+        fileCount: diagnosticCountBucket(4),
+        connectionCount: diagnosticCountBucket(8),
+      });
+    expect(ring.list().map((event) => event.details)).toEqual(
+      Array.from({ length: 3 }, () => ({
+        durationMs: 6000,
+        documentSize: "64k_1m",
+        fileCount: "2_5",
+        connectionCount: "6_20",
+      })),
+    );
+  });
   it("deduplicates a loop, preserves a different event and tracks worst duration", () => {
     let now = Date.now();
     const ring = new DiagnosticRing(() => now);
@@ -109,6 +203,47 @@ describe("bounded diagnostic ring", () => {
       details: { worstMs: 1199, route: "/api/shares/:id" },
     });
     expect(ring.list()[1]?.firstAt).not.toBe(ring.list()[1]?.lastAt);
+  });
+  it("does not invent a worst duration and evicts by lastAt", () => {
+    let now = Date.now();
+    const ring = new DiagnosticRing(() => now);
+    ring.record("api", "mongo_error", {}, "error");
+    expect(ring.list()[0]?.details).not.toHaveProperty("worstMs");
+    for (let status = 1; status < DIAGNOSTIC_CAPS.events; status++) {
+      now++;
+      ring.record("api", "api_failure", { status });
+    }
+    now += 100;
+    ring.record("api", "api_failure", { status: 1 });
+    now++;
+    ring.record("api", "api_failure", { status: DIAGNOSTIC_CAPS.events });
+    expect(ring.list().some((event) => event.details.status === 1)).toBe(true);
+    expect(ring.list().some((event) => event.kind === "mongo_error")).toBe(false);
+  });
+  it("keeps record cost bounded with a full ring", () => {
+    const ring = new DiagnosticRing();
+    for (let status = 0; status < DIAGNOSTIC_CAPS.events; status++)
+      ring.record("api", "api_failure", { status });
+    const started = performance.now();
+    for (let i = 0; i < 1000; i++) ring.record("api", "api_failure", { status: 900 });
+    expect(performance.now() - started).toBeLessThan(250);
+    expect(ring.count).toBe(DIAGNOSTIC_CAPS.events);
+  });
+  it("stores only a short status and code breadcrumb timeline", () => {
+    let now = Date.now();
+    const ring = new DiagnosticRing(() => now);
+    for (let index = 0; index < 60; index++) {
+      now++;
+      ring.record("api", "api_failure", {
+        status: 503,
+        code: "ECONNRESET",
+        message: `secret-${index}`,
+      });
+    }
+    const crumbs = ring.listBreadcrumbs();
+    expect(crumbs).toHaveLength(50);
+    expect(crumbs[0]).toMatchObject({ kind: "api_failure", status: 503, code: "ECONNRESET" });
+    expect(JSON.stringify(crumbs)).not.toContain("secret-");
   });
   it("expires stale records and caps count and UTF-8 bytes", () => {
     let now = Date.now();

@@ -152,7 +152,8 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
   });
 
   // The update check runs in the background and never delays a request or the start.
-  const onValkeyError = () => ctx.diagnostics.record("valkey_error", {}, "error");
+  const onValkeyError = (error: unknown) =>
+    ctx.diagnostics.record("valkey_error", diagnosticError(error), "error");
   const onValkeyReady = () => ctx.diagnostics.record("valkey_recovered");
   app.addHook("onReady", async () => {
     await ctx.diagnostics.start();

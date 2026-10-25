@@ -92,5 +92,5 @@ export default defineConfig({
     },
   },
   preview: { port: webPort, strictPort: true, headers: { "Referrer-Policy": "no-referrer" } },
-  build: { target: "es2023" },
+  build: { target: "es2023", sourcemap: "hidden" },
 });
