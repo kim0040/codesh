@@ -7,28 +7,6 @@ text of its GitHub release (RELEASING.md).
 
 ## [Unreleased]
 
-### Fixed
-
-- Updates prepare and verify images before maintenance, wait for Collab's shutdown flush before
-  backup, and restore the database before restarting the previous app on failure. Online and
-  offline updates share transactional file recovery and an installation lock with backup/restore.
-- Stable release selection respects draft/prerelease flags and valid versions; readiness requests
-  have deadlines and require 2xx responses. Unsupported automatic-update install paths are refused.
-- Offline upgrades accept the release's SHA256SUMS beside the bundle. Mongo image changes require
-  a separate supported migration instead of attempting an unsafe automatic rollback.
-- PWA reload approval applies only to the tab whose user clicked, after its pending edits are
-  acknowledged; other tabs continue running until their users reload.
-
-### Security
-
-- Edit links carry the key in the URL fragment (`#key=`), which browsers do not send to servers.
-  The key is moved into memory and removed from the address bar at once; links with `?key=` still
-  work and are cleaned the same way.
-- Offline copies on shared devices: a setting to keep (default) or not keep an offline copy, and
-  "Forget on this device". Removal, a ban, a refused authorization, a deleted share, signing out
-  and switching accounts delete the copies and remembered edit keys, in every open tab. Shares with
-  a PIN or approval load their copy only after the server accepted the connection.
-
 ## [1.0.0] - 2026-10-25
 
 The first release: real-time code sharing for one network, with no outside service at runtime.
@@ -48,14 +26,32 @@ The first release: real-time code sharing for one network, with no outside servi
 - `codesh` CLI: `push`, `open`, `pull`.
 - Admin console: settings, rooms, templates, sign-in through OIDC or LDAP, audit log, status.
 - Updates: the admin console shows when a newer release exists (one plain GET to the GitHub
-  API, off with `UPDATE_CHECK=off`), open tabs offer a reload after the server was updated, and
-  `deploy/update.sh` updates a server with a backup first and a rollback if the new version does
-  not start, optionally every day within a chosen window.
+  API, off with `UPDATE_CHECK=off`); only stable, non-draft releases are offered unless the
+  pre-release channel is chosen. After a server update, open tabs offer a reload; a reload
+  applies only to the tab where the person clicked, after its pending edits are confirmed.
+  `update.sh` updates a server (optionally every day within a chosen window): it verifies
+  checksums and prepares images before maintenance, waits for the collab server to save its data
+  before the backup, and restores the database before starting the previous version if the new one
+  fails. Online and offline updates share file recovery and one installation lock with
+  backup/restore. A MongoDB image change is refused (it needs a separate migration). Offline
+  upgrades accept the release's SHA256SUMS next to the bundle.
 - Deployment: Docker Compose with Caddy, MongoDB 8 and Valkey 8; images on GHCR for
   linux/amd64 and linux/arm64 with build provenance; offline bundles with checksums for hosts
   without internet; backup, restore and upgrade scripts.
 - Korean and English UI, keyboard operation throughout, WCAG 2.2 AA contrast, layouts down to
   320 px.
+
+### Security
+
+- Edit links carry the key in the URL fragment (`#key=`), which browsers do not send to servers;
+  it is moved into memory and removed from the address bar; `?key=` links still work and are
+  cleaned the same way.
+- Offline copies: the browser keeps no offline copy until the person answers a one-time question
+  in the editor (keep / not on this device; changeable in Settings). "Forget on this device" closes
+  the share in every tab, deletes its copy and saved edit key. Removal, a ban, a refused
+  authorization, a deleted share, signing out and switching accounts delete copies and remembered
+  edit keys in every open tab. Shares with a PIN or approval load their copy only after the server
+  accepts the connection. Lab previews never keep copies.
 
 [Unreleased]: https://github.com/kim0040/codesh/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/kim0040/codesh/releases/tag/v1.0.0
