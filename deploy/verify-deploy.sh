@@ -124,7 +124,7 @@ TLS_PORT="${VERIFY_HTTPS_PORT:-18643}"
 FJ="$WORK/fresh.jar"
 tar xzf "$DIST/gachipad-$OLD.tar.gz" -C "$FRESH" --strip-components=1
 cp "$FRESH/.env.example" "$FRESH/.env"
-for kv in HTTP_PORT=$P HTTPS_PORT=$TLS_PORT NETWORK_SUBNET=172.29.95.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb; do
+for kv in HTTP_PORT=$P HTTPS_PORT=$TLS_PORT NETWORK_SUBNET=172.29.95.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb GACHIPAD_DB=mongodb; do
   setenv "$FRESH/.env" "${kv%%=*}" "${kv#*=}"
 done
 in_dir "$FRESH" gachipad-verify-fresh ./install.sh

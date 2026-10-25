@@ -374,6 +374,16 @@ candidate() {
   docker compose --project-directory "$PWD" --env-file "$CANDIDATE/.env" -f "$CANDIDATE/docker-compose.yml" "$@"
 }
 
+candidate_merge_env() {
+  local name
+  while read -r name; do
+    case "$name" in
+      GACHIPAD_DB | GACHIPAD_DATABASE_URL | COMPOSE_PROFILES) continue ;;
+    esac
+    grep -q "^$name=" .env || sed -n "s/^$name=.*/&/p" .env.example >>.env
+  done < <(sed -n 's/^\([A-Z0-9_]*\)=.*/\1/p' .env.example)
+}
+
 mongo_compatible() {
   local old new
   old="$(docker compose config --format json | mongo_image)" || return 2
@@ -408,8 +418,11 @@ verify_images() {
 }
 
 healthy() {
-  docker compose up -d --wait --wait-timeout "$HEALTH_TIMEOUT" mongo mongo-users valkey api collab &&
-    wait_api "$HEALTH_TIMEOUT"
+  case "$(database_kind)" in
+    mongodb) docker compose up -d --wait --wait-timeout "$HEALTH_TIMEOUT" mongo mongo-users valkey api collab ;;
+    postgres) docker compose up -d --wait --wait-timeout "$HEALTH_TIMEOUT" postgres valkey api collab ;;
+    sqlite | external) docker compose up -d --wait --wait-timeout "$HEALTH_TIMEOUT" valkey api collab ;;
+  esac && wait_api "$HEALTH_TIMEOUT"
 }
 
 open_ingress() {
@@ -424,11 +437,15 @@ rollback() {
   docker compose stop --timeout 40 api collab || return 1
   restore_files || return 1
   if [ "$DB_TOUCHED" = 1 ]; then
+    if [ "$(database_kind)" = external ]; then
+      say "external database was not restored; restore its external backup before starting the previous application"
+      return 1
+    fi
     [ -n "$BACKUP" ] || return 1
     [ -s "$BACKUP" ] || return 1
-    docker compose up -d --wait --wait-timeout "$HEALTH_TIMEOUT" mongo valkey || return 1
+    database_start "$HEALTH_TIMEOUT" || return 1
     say "restoring the database from $BACKUP before starting $CURRENT"
-    mongo_restore "$BACKUP" || return 1
+    database_restore "$BACKUP" || return 1
   fi
   healthy && open_ingress || return 1
   rm -f "$MARKER" || say "warning: cannot clear $MARKER; remove it after verifying recovery" >&2
@@ -471,6 +488,10 @@ update() {
   [ -f .env ] || die "no .env here: this is not an installed gachipad"
   if [ -e ../.git ] && [ -f ../package.json ] && [ "$mode" != check ]; then
     die "this is a source checkout: update it with git pull && docker compose build && docker compose up -d"
+  fi
+  assert_database_backend
+  if [ "$(database_kind)" = external ] && [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-}" != 1 ]; then
+    fail refused "DATABASE_URL uses an external database; back up that server first, then rerun with GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1"
   fi
   if [ -n "$BUNDLE" ]; then
     verify_archive "$BUNDLE"
@@ -553,9 +574,7 @@ update() {
   cp -p .env "$CANDIDATE/.env"
   (
     cd "$CANDIDATE"
-    while read -r name; do
-      grep -q "^$name=" .env || sed -n "s/^$name=.*/&/p" .env.example >>.env
-    done < <(sed -n 's/^\([A-Z0-9_]*\)=.*/\1/p' .env.example)
+    candidate_merge_env
     ./generate-secrets.sh .env >/dev/null
     env_set GACHIPAD_VERSION "$TARGET"
     if [ -n "$BUNDLE" ]; then
@@ -568,10 +587,12 @@ update() {
   if [ -n "$BUNDLE" ]; then
     docker load -i "$CANDIDATE/images.tar" || fail failed "loading bundle images failed; nothing was stopped"
   fi
-  if mongo_compatible; then :; else
-    local compatible_status=$?
-    [ "$compatible_status" = 1 ] || fail failed "cannot read Compose JSON; install host node/python3/jq or load the installed API image; nothing was stopped"
-    fail refused "MongoDB image changes require a supported migration; nothing was stopped or backed up"
+  if [ "$(database_kind)" = mongodb ]; then
+    if mongo_compatible; then :; else
+      local compatible_status=$?
+      [ "$compatible_status" = 1 ] || fail failed "cannot read Compose JSON; install host node/python3/jq or load the installed API image; nothing was stopped"
+      fail refused "MongoDB image changes require a supported migration; nothing was stopped or backed up"
+    fi
   fi
   if [ -z "$BUNDLE" ]; then
     candidate pull || fail failed "pulling the images of $TARGET failed; nothing was stopped"
@@ -580,7 +601,9 @@ update() {
   if [ -z "$BUNDLE" ]; then verify_images || fail failed "image verification failed; nothing was stopped"; fi
 
   # Snapshot before the first mutation. Until commit, every error/signal goes through cleanup.
-  backup_space || fail failed "not enough backup space; nothing was stopped"
+  if [ "$(database_kind)" != external ]; then
+    backup_space || fail failed "not enough backup space; nothing was stopped"
+  fi
   # Older installers kept secrets under the API state mount. Preserve them outside it as well.
   [ ! -e "$STATE/rollback" ] || mv "$STATE/rollback" "$ROLLBACK.legacy.$(date +%s).$$"
   [ ! -e "$ROLLBACK" ] || mv "$ROLLBACK" "$ROLLBACK.previous.$(date +%s).$$"
@@ -593,12 +616,17 @@ update() {
   record failed "$CURRENT" "$TARGET" "maintenance started; completion not confirmed; ingress closed until verification"
   stop_writes backup || fail failed "writers did not shut down cleanly"
   local out
-  out="$(./backup.sh ./backups)" || fail failed "backup failed"
-  printf '%s\n' "$out"
-  BACKUP="$(sed -n 's/^backup: \(.*\) ([0-9]* bytes)$/\1/p' <<<"$out")"
-  [ -n "$BACKUP" ] || fail failed "backup path was not returned"
-  [ -s "$BACKUP" ] || fail failed "backup is empty"
-  gzip -t -- "$BACKUP" || fail failed "backup archive is corrupt; installed files unchanged"
+  if [ "$(database_kind)" = external ]; then
+    out="$(GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 ./backup.sh ./backups)" || fail failed "external database backup acknowledgement failed"
+    BACKUP=external
+  else
+    out="$(./backup.sh ./backups)" || fail failed "backup failed"
+    BACKUP="$(sed -n 's/^backup: \(.*\) ([0-9]* bytes)$/\1/p' <<<"$out")"
+    [ -n "$BACKUP" ] || fail failed "backup path was not returned"
+    [ -s "$BACKUP" ] || fail failed "backup is empty"
+    gzip -t -- "$BACKUP" || fail failed "backup archive is corrupt; installed files unchanged"
+  fi
+  [ -z "$out" ] || printf '%s\n' "$out"
   transaction_phase backed-up
   install_files "$CANDIDATE"
   transaction_phase installed
@@ -613,6 +641,7 @@ update() {
     fail failed "app verified but ingress failed; current files and DB retained; inspect logs and run docker compose up -d"
   fi
   record updated "$CURRENT" "$TARGET" "" || say "warning: update complete but status could not be written" >&2
+  record_database_backend
   say "gachipad $TARGET is running (backup: ${BACKUP:-none})"
 }
 

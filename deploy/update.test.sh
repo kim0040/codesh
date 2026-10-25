@@ -55,6 +55,11 @@ if [ "$1" = compose ]; then
       else for n in web api collab; do printf '%s/gachipad-%s:%s\n' "$registry" "$n" "$version"; done; fi ;;
     run)
       if [ -n "${FAKE_NO_API_IMAGE:-}" ]; then echo 'installed API image is missing' >&2; exit 125; fi
+      if [[ "$*" == *readdirSync* ]] && [ -n "${FAKE_NONEMPTY_VOLUME:-}" ]; then
+        printf 'nonempty'
+        exit 0
+      fi
+      if [[ " $* " == *' mongo-users '* ]]; then exit 0; fi
       while [ "$1" != -e ]; do shift; done
       node "$@" ;;
     pull)
@@ -104,6 +109,10 @@ if [ "$1" = compose ]; then
       esac ;;
   esac
   exit 0
+fi
+if [ "$1" = volume ] && [ "$2" = inspect ]; then
+  [ "${FAKE_NONEMPTY_VOLUME:-}" = "${3:-}" ] && exit 0
+  exit 1
 fi
 if [ "$1" = inspect ]; then
   writer_exit="${FAKE_WRITER_EXIT:-0}"
@@ -190,7 +199,7 @@ for _ in $(seq 50); do curl -fs "$base/healthz" >/dev/null 2>&1 && break; sleep 
 # --- an installation of 1.0.0 --------------------------------------------------------------------
 I="$F/install"
 cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml,.env.example,README.md} "$I/"
-sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" "$I/.env.example" >"$I/.env"
+sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" -e 's/^GACHIPAD_DB=sqlite/GACHIPAD_DB=mongodb/' "$I/.env.example" >"$I/.env"
 (cd "$I" && ./generate-secrets.sh .env >/dev/null)
 envv() { sed -n "s/^$1=//p" "$I/.env" | tail -n 1; }
 status() { cat "$I/state/update.json"; }
@@ -406,6 +415,86 @@ mongo_names() { # <env lines> -> the -e arguments the transfer passed to the con
 [ "$(mongo_names $'CODESH_VERSION=1.0.1\n')" = 'exec -T -e MONGO_DATABASE=codesh -e MONGO_INITDB_ROOT_USERNAME=codesh' ] || fail "unmigrated legacy names"
 [ "$(mongo_names $'MONGO_DATABASE=mine\nMONGO_ROOT_USER=root1\nGACHIPAD_LEGACY_INSTALL=1\n')" = 'exec -T -e MONGO_DATABASE=mine -e MONGO_INITDB_ROOT_USERNAME=root1' ] || fail "explicit names"
 ok "database and root user resolved on the host: explicit, legacy codesh, else gachipad"
+
+step "backup and restore dispatch follow GACHIPAD_DB"
+for db in sqlite postgres mongodb; do
+  route="$F/route-$db"
+  mkdir -p "$route"
+  printf 'GACHIPAD_DB=%s\n' "$db" >"$route/.env"
+  : >"$DOCKER_CALLS"
+  (
+    cd "$route"
+    # shellcheck source=/dev/null
+    source "$I/lib.sh"
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    sqlite_backup() { echo sqlite-backup; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    postgres_backup() { echo postgres-backup; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    mongo_backup() { echo mongodb-backup; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    sqlite_restore() { echo sqlite-restore; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    postgres_restore() { echo postgres-restore; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    mongo_restore() { echo mongodb-restore; }
+    database_start 3
+    database_backup ./backups
+    database_restore fixture.archive.gz
+  ) >"$F/route-$db.log" 2>&1 || fail "$db backup/restore route failed"
+  grep -qx "$db-backup" "$F/route-$db.log" || fail "$db backup route"
+  grep -qx "$db-restore" "$F/route-$db.log" || fail "$db restore route"
+  case "$db" in
+    sqlite) grep -q '^compose up .* valkey$' "$DOCKER_CALLS"; ! grep -Eq '^compose up .* (mongo|postgres)' "$DOCKER_CALLS" ;;
+    postgres) grep -q '^compose up .* postgres valkey$' "$DOCKER_CALLS"; ! grep -q ' mongo' "$DOCKER_CALLS" ;;
+    mongodb)
+      grep -q '^compose up .* mongo valkey$' "$DOCKER_CALLS"
+      grep -q '^compose run --rm --no-deps --pull never -T mongo-users$' "$DOCKER_CALLS"
+      ;;
+  esac || fail "$db startup service selection"
+done
+ok "selected database startup and SQLite, PostgreSQL and MongoDB backup/restore dispatch match GACHIPAD_DB"
+
+route="$F/route-external"
+mkdir -p "$route"
+printf 'GACHIPAD_DB=external\nDATABASE_URL=postgresql://user:secret@db.invalid/gachipad\n' >"$route/.env"
+(
+  cd "$route"
+  # shellcheck source=/dev/null
+  source "$I/lib.sh"
+  GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 database_backup ./backups
+) >"$F/route-external.log" 2>&1 || fail "external backup acknowledgement failed"
+grep -q 'no local backup was made' "$F/route-external.log" || fail "external backup notice"
+if grep -q 'secret@db' "$F/route-external.log"; then fail "external URL was printed"; fi
+# shellcheck source=/dev/null
+if (cd "$route" && source "$I/lib.sh" && database_restore fixture.archive.gz) >"$F/route-external-restore.log" 2>&1; then
+  fail "external database accepted a local restore"
+fi
+grep -q 'external databases cannot be restored' "$F/route-external-restore.log" || fail "external restore notice"
+if grep -q 'secret@db' "$F/route-external-restore.log"; then fail "external URL leaked from restore"; fi
+ok "external backup prints its operator duty and creates no local archive; local restore is refused"
+
+mkdir -p "$F/route-switch/state"
+printf 'mongodb\n' >"$F/route-switch/state/database-kind"
+printf 'GACHIPAD_DB=postgres\n' >"$F/route-switch/.env"
+# shellcheck source=/dev/null
+if (cd "$F/route-switch" && source "$I/lib.sh" && assert_database_backend) >"$F/route-switch.log" 2>&1; then
+  fail "backend switch without data-copy support was accepted"
+fi
+grep -q 'database backend change refused (mongodb -> postgres)' "$F/route-switch.log" || fail "switch refusal message"
+ok "recorded MongoDB installations refuse a switch to PostgreSQL"
+
+mkdir -p "$F/route-volume"
+printf 'GACHIPAD_DB=postgres\nGACHIPAD_PROJECT=volume-switch\n' >"$F/route-volume/.env"
+export FAKE_NONEMPTY_VOLUME=volume-switch_mongo-data
+# shellcheck source=/dev/null
+if (cd "$F/route-volume" && source "$I/lib.sh" && assert_database_backend) >"$F/route-volume.log" 2>&1; then
+  fail "backend switch with an existing MongoDB volume was accepted"
+fi
+grep -q 'database backend change refused: non-empty mongodb volume volume-switch_mongo-data' "$F/route-volume.log" ||
+  fail "volume switch refusal message"
+unset FAKE_NONEMPTY_VOLUME
+ok "non-empty old MongoDB volume refuses a switch even without the state marker"
 
 step "Mongo image changes are refused before maintenance and backup"
 : >"$DOCKER_CALLS"

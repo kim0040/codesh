@@ -35,23 +35,26 @@ SESSION_SECRET=build
 COLLAB_SECRET=build
 MONGO_PASSWORD=build
 MONGO_APP_PASSWORD=build
+POSTGRES_PASSWORD=build
 VALKEY_PASSWORD=build
 GACHIPAD_VERSION=$VERSION
 GACHIPAD_REGISTRY=$REGISTRY
+GACHIPAD_DB=sqlite
+GACHIPAD_DATABASE_URL=sqlite:///data/gachipad.db
 ENV
-compose() { docker compose --env-file "$BUILD_ENV" --profile mdns -f docker-compose.yml "$@"; }
+compose() { docker compose --env-file "$BUILD_ENV" --profile mdns --profile mongodb --profile postgres -f docker-compose.yml "$@"; }
 GACHIPAD_SERVICES="api collab caddy mdns"
 
 case "$SOURCE" in
   build)
     echo "bundle: building gachipad $VERSION"
     compose build
-    compose pull mongo valkey
+    compose pull mongo mongo-users postgres valkey
     ;;
   registry)
     echo "bundle: pulling gachipad $VERSION from $REGISTRY"
     # shellcheck disable=SC2086
-    compose pull $GACHIPAD_SERVICES mongo valkey
+    compose pull $GACHIPAD_SERVICES mongo mongo-users postgres valkey
     ;;
   *) die "BUNDLE_SOURCE must be build or registry" ;;
 esac

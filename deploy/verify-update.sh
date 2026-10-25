@@ -90,7 +90,7 @@ docker run -d --name gachipad-verify-registry -p "127.0.0.1:$REG_PORT:5000" -v "
 OWNED_REGISTRY=1
 for _ in $(seq 30); do curl -fs "http://localhost:$REG_PORT/v2/" >/dev/null && break; sleep 1; done
 BUILD_ENV="$WORK/build.env"
-printf 'SESSION_SECRET=x\nCOLLAB_SECRET=x\nMONGO_PASSWORD=x\nMONGO_APP_PASSWORD=x\nVALKEY_PASSWORD=x\nGACHIPAD_VERSION=1.0.0\nGACHIPAD_REGISTRY=%s\n' "$REG" >"$BUILD_ENV"
+printf 'SESSION_SECRET=x\nCOLLAB_SECRET=x\nMONGO_PASSWORD=x\nMONGO_APP_PASSWORD=x\nPOSTGRES_PASSWORD=x\nVALKEY_PASSWORD=x\nGACHIPAD_DB=mongodb\nCOMPOSE_PROFILES=mongodb\nGACHIPAD_VERSION=1.0.0\nGACHIPAD_REGISTRY=%s\n' "$REG" >"$BUILD_ENV"
 # Existing real images may serve as bases on a small shared box. No preview/dev containers,
 # tags, volumes or build cache are removed. Default remains a full source build.
 for service in api collab caddy mdns; do
@@ -115,7 +115,7 @@ for service in api collab caddy mdns; do
     df -h /
     docker build -q -t "$REG/gachipad-$name:1.0.0" "$WORK/build-web" >/dev/null
   elif [ -n "$base" ]; then docker tag "$base" "$REG/gachipad-$name:1.0.0"
-  else docker compose --env-file "$BUILD_ENV" --profile mdns -f "$ROOT/deploy/docker-compose.yml" build "$service"; fi
+  else docker compose --env-file "$BUILD_ENV" --profile mdns --profile mongodb -f "$ROOT/deploy/docker-compose.yml" build "$service"; fi
 done
 # The previous version cannot boot against the deliberate schema marker. This detects rollback
 # that incorrectly starts the old API before restoring, rather than merely checking old health.
@@ -187,7 +187,7 @@ step "install 1.0.0 from the offline bundle"
 docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E "^$REG/gachipad-[a-z]+:1\.0\.[12]$" | xargs -r docker image rm -f >/dev/null
 tar xzf "$WORK/deploy/dist/gachipad-1.0.0-linux-amd64.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
-for kv in HTTP_PORT=$P HTTPS_PORT="${VERIFY_HTTPS_PORT:-18843}" NETWORK_SUBNET=172.29.97.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
+for kv in HTTP_PORT=$P HTTPS_PORT="${VERIFY_HTTPS_PORT:-18843}" NETWORK_SUBNET=172.29.97.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off GACHIPAD_DB=mongodb; do
   sed -i "s|^${kv%%=*}=.*|$kv|" "$INSTALL/.env"
 done
 in_install ./install.sh | tail -n 2

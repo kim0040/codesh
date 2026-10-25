@@ -4,12 +4,12 @@
 # Run through verify-update.sh --rename, on the box only. Every Docker resource is isolated.
 set -euo pipefail
 ROOT="$(pwd)"
-WORK="${VERIFY_DIR:-/data/workspace/gp-upgrade-test}"
-PROJECT="${VERIFY_PROJECT:-gp-upgrade-test}"
+WORK="${VERIFY_DIR:-/data/workspace/gp-dbdeploy-rename}"
+PROJECT="${VERIFY_PROJECT:-gp-dbdeploy-rename}"
 P="${VERIFY_HTTP_PORT:-18080}"
 TLS_P="${VERIFY_HTTPS_PORT:-18443}"
 REG_PORT="${VERIFY_REGISTRY_PORT:-5056}"
-REG="localhost:$REG_PORT/rename-test"
+REG="localhost:$REG_PORT/gp-dbdeploy-rename"
 TARGET=1.0.2
 INSTALL="$WORK/install"
 SERVER_PID=""
@@ -17,6 +17,12 @@ REGISTRY_STARTED=0
 BUILDER_STARTED=0
 BUILDER_VOLUME_STARTED=0
 BUILDER_VOLUME="buildx_buildkit_${PROJECT}0_state"
+OLD_IMAGES=(
+  ghcr.io/kim0040/codesh-api:1.0.1
+  ghcr.io/kim0040/codesh-collab:1.0.1
+  ghcr.io/kim0040/codesh-web:1.0.1
+)
+PREEXISTING_OLD_IMAGES=()
 REPORT="$ROOT/.box-out/rename2-real-upgrade.log"
 mkdir -p "$ROOT/.box-out"
 [ ! -e "$WORK" ] || { echo "$WORK already exists; choose a fresh VERIFY_DIR" >&2; exit 1; }
@@ -24,8 +30,16 @@ mkdir -p "$WORK" "$INSTALL" "$WORK/registry"
 exec > >(tee "$REPORT") 2>&1
 
 in_install() { (cd "$INSTALL" && COMPOSE_PROJECT_NAME="$PROJECT" "$@"); }
+prepare_old_bundle_images() {
+  local name
+  docker load -i "$INSTALL/images.tar" >/dev/null
+  for name in api collab web; do
+    docker tag "ghcr.io/kim0040/codesh-$name:1.0.1" "$REG/codesh-$name:1.0.1"
+  done
+  sed -i "s|^CODESH_REGISTRY=.*|CODESH_REGISTRY=$REG|" "$INSTALL/.env"
+}
 cleanup() {
-  local status=$?
+  local status=$? image saved existing
   trap - EXIT
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
   if [ -f "$INSTALL/docker-compose.yml" ]; then
@@ -40,6 +54,11 @@ cleanup() {
     docker run --rm --pull never -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry /w/buildkit
   fi
   docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -F "$REG/" | xargs -r docker image rm -f >/dev/null 2>&1 || true
+  for image in "${OLD_IMAGES[@]}"; do
+    saved=0
+    for existing in "${PREEXISTING_OLD_IMAGES[@]}"; do [ "$existing" = "$image" ] && saved=1; done
+    [ "$saved" = 1 ] || docker image rm -f "$image" >/dev/null 2>&1 || true
+  done
   rm -rf "$WORK"
   echo "cleanup: isolated stack, volumes, registry, branch image tags and working files removed (status=$status)"
   exit "$status"
@@ -57,8 +76,24 @@ volumes() {
   docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" | sort |
     xargs -r docker volume inspect --format '{{.Name}} {{.CreatedAt}}'
 }
+same_volumes() {
+  local before="$1" after="$2" line name
+  while IFS= read -r line; do
+    grep -qxF "$line" "$after" || fail "existing volume changed or disappeared: ${line%% *}"
+  done <"$before"
+  while IFS= read -r line; do
+    grep -qxF "$line" "$before" && continue
+    name="${line%% *}"
+    [ "$name" = "${PROJECT}_gachipad-data" ] || fail "unexpected volume created: $name"
+  done <"$after"
+}
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
-[ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 3 ] || fail 'need 3 GiB free in Docker root'
+MIN_DOCKER_GIB="${VERIFY_MIN_DOCKER_GIB:-3}"
+[ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge "$MIN_DOCKER_GIB" ] ||
+  fail "need $MIN_DOCKER_GIB GiB free in Docker root"
+for image in "${OLD_IMAGES[@]}"; do
+  docker image inspect "$image" >/dev/null 2>&1 && PREEXISTING_OLD_IMAGES+=("$image")
+done
 
 echo 'build: all four production Dockerfiles from a branch snapshot (synthetic next release 1.0.2)'
 mkdir -p "$WORK/source"
@@ -94,6 +129,7 @@ curl -fsSL --retry 2 "$base/codesh-1.0.1-linux-amd64.tar.gz.sha256" -o "$WORK/ol
 [ "$(sha256sum "$WORK/old.tar.gz" | cut -d' ' -f1)" = "$(cut -d' ' -f1 "$WORK/old.sha256")" ] || fail 'published old bundle checksum'
 tar xzf "$WORK/old.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
+prepare_old_bundle_images
 for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" SITE_ADDRESS=http://codesh.local NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
   sed -i "s|^${setting%%=*}=.*|$setting|" "$INSTALL/.env"
 done
@@ -167,8 +203,10 @@ UPDATE_API_URL="http://127.0.0.1:$server_port/api" UPDATE_DOWNLOAD_URL="http://1
 grep -q 'codesh-deploy-1.0.2.tar.gz.*301' "$WORK/requests.log" || fail 'legacy filename/redirect not exercised'
 HEADER=X-Gachipad
 volumes >"$WORK/volumes-after"
-cmp "$WORK/volumes-before" "$WORK/volumes-after" || fail 'volumes were replaced'
+same_volumes "$WORK/volumes-before" "$WORK/volumes-after"
 [ "$(envv GACHIPAD_VERSION)" = "$TARGET" ] || fail 'new version missing'
+[ "$(envv GACHIPAD_DB)" = mongodb ] || fail 'legacy database selection changed'
+grep -q '^COMPOSE_PROFILES=.*mongodb' "$INSTALL/.env" || fail 'MongoDB profile was not enabled for the legacy install'
 [ "$(envv MONGO_DATABASE)" = codesh ] || fail 'old database not pinned'
 [ "$(envv MDNS_HOSTNAME)" = gachipad.local ] || fail 'new mDNS default missing'
 [ "$(envv MDNS_ALIASES)" = codesh.local ] || fail 'old mDNS alias missing'
@@ -199,6 +237,7 @@ rm -rf "$INSTALL"
 mkdir "$INSTALL"
 tar xzf "$WORK/old.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
+prepare_old_bundle_images
 for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" SITE_ADDRESS=http://codesh.local NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
   sed -i "s|^${setting%%=*}=.*|$setting|" "$INSTALL/.env"
 done
@@ -211,7 +250,7 @@ in_install ./upgrade.sh "$WORK/source/deploy/dist/gachipad-$TARGET-linux-amd64.t
 HEADER=X-Gachipad
 [ "$(envv GACHIPAD_REGISTRY)" = "$REG" ] || fail 'offline registry not taken from bundle'
 volumes >"$WORK/offline-volumes-after"
-cmp "$WORK/offline-volumes-before" "$WORK/offline-volumes-after" || fail 'offline volumes replaced'
+same_volumes "$WORK/offline-volumes-before" "$WORK/offline-volumes-after"
 call "/api/shares/$OFFLINE_ID/download" -o "$WORK/offline.zip"
 unzip -p "$WORK/offline.zip" | grep -q 'offline registry data' || fail 'offline share ownership/content lost'
 echo 'PASS: unmodified 1.0.1 offline upgrader accepts the renamed bundle and its different registry; data and volumes preserved'
@@ -222,7 +261,7 @@ rm -rf "$INSTALL"
 mkdir "$INSTALL"
 tar xzf "$WORK/source/deploy/dist/gachipad-$TARGET-linux-amd64.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
-for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
+for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off GACHIPAD_DB=mongodb; do
   sed -i "s|^${setting%%=*}=.*|$setting|" "$INSTALL/.env"
 done
 in_install ./install.sh

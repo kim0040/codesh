@@ -26,6 +26,16 @@ random_hex() {
 TMP="$(mktemp "$FILE.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 cp "$FILE" "$TMP"
+set_tmp() {
+  local name="$1" value="$2" next="$TMP.next" line found=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" == "$name="* ]]; then
+      if [ "$found" = 0 ]; then printf '%s=%s\n' "$name" "$value" >>"$next"; found=1; fi
+    else printf '%s\n' "$line" >>"$next"; fi
+  done <"$TMP"
+  [ "$found" = 1 ] || printf '%s=%s\n' "$name" "$value" >>"$next"
+  mv "$next" "$TMP"
+}
 filled=()
 for name in "${SECRETS[@]}"; do
   if grep -Eq "^${name}=[[:space:]]*$" "$TMP"; then
@@ -55,10 +65,7 @@ tls_internal() {
 # Pin the old installation's project and Mongo names; no live data is copied or renamed.
 if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' "$TMP"; then
   legacy_get() { sed -n "s/^$1=//p" "$TMP" | tail -n 1; }
-  migrate_set() {
-    sed "/^$1=/d" "$TMP" >"$TMP.next" && mv "$TMP.next" "$TMP"
-    printf '%s=%s\n' "$1" "$2" >>"$TMP"
-  }
+  migrate_set() { set_tmp "$1" "$2"; }
   while IFS='=' read -r name value; do
     [[ "$name" == CODESH_* ]] || continue
     migrate_set "GACHIPAD_${name#CODESH_}" "$value"
@@ -72,6 +79,7 @@ if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' 
   migrate_set MONGO_ROOT_USER codesh
   migrate_set MONGO_APP_USER codesh_app
   migrate_set MONGO_DATABASE codesh
+  migrate_set GACHIPAD_DB mongodb
   if [ "$(legacy_get UPDATE_REPO)" = kim0040/codesh ]; then
     migrate_set UPDATE_REPO kim0040/gachipad
   fi
@@ -94,6 +102,79 @@ if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' 
   migrate_set GACHIPAD_LEGACY_INSTALL 1
   echo "warning: migrated legacy installation settings; existing data locations retained" >&2
 fi
+
+tmp_get() { sed -n "s/^$1=//p" "$TMP" | tail -n 1; }
+database_url="${DATABASE_URL:-$(tmp_get DATABASE_URL)}"
+if [ -n "$database_url" ]; then
+  [[ "$database_url" != *$'\n'* && "$database_url" != *$'\r'* ]] || {
+    echo "generate-secrets: DATABASE_URL must be a single line" >&2; exit 1;
+  }
+  scheme="${database_url%%:*}"
+  case "$scheme" in sqlite | postgres | postgresql | mysql | mariadb | mongodb | mongodb+srv) ;;
+    *) echo "generate-secrets: DATABASE_URL has an unsupported scheme" >&2; exit 1 ;;
+  esac
+  [ -z "${DATABASE_URL:-}" ] || set_tmp DATABASE_URL "$DATABASE_URL"
+  if [ "$scheme" = sqlite ]; then db=sqlite; else db=external; fi
+else
+  db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"
+  if [ -z "$db" ]; then
+    if grep -Eq '^MONGO_[A-Z0-9_]+=' "$TMP"; then db=mongodb; else db=sqlite; fi
+  fi
+fi
+case "$db" in
+  sqlite)
+    compose_database_url=sqlite:///data/gachipad.db
+    ;;
+  postgres)
+    if grep -Eq '^POSTGRES_PASSWORD=[[:space:]]*$' "$TMP" || ! grep -Eq '^POSTGRES_PASSWORD=' "$TMP"; then
+      set_tmp POSTGRES_PASSWORD "$(random_hex)"
+      filled+=(POSTGRES_PASSWORD)
+    fi
+    pg_user="${POSTGRES_USER:-$(tmp_get POSTGRES_USER)}"; pg_user="${pg_user:-gachipad_app}"
+    pg_db="${POSTGRES_DATABASE:-$(tmp_get POSTGRES_DATABASE)}"; pg_db="${pg_db:-gachipad}"
+    pg_password="$(tmp_get POSTGRES_PASSWORD)"
+    compose_database_url="postgresql://$pg_user:$pg_password@postgres:5432/$pg_db"
+    ;;
+  mongodb)
+    mongo_user="$(tmp_get MONGO_APP_USER)"; mongo_user="${mongo_user:-gachipad_app}"
+    mongo_db="$(tmp_get MONGO_DATABASE)"; mongo_db="${mongo_db:-gachipad}"
+    mongo_password="$(tmp_get MONGO_APP_PASSWORD)"
+    compose_database_url="mongodb://$mongo_user:$mongo_password@mongo:27017/$mongo_db?authSource=$mongo_db"
+    ;;
+  external)
+    [ -n "$database_url" ] || { echo "generate-secrets: DATABASE_URL is required when GACHIPAD_DB=external" >&2; exit 1; }
+    compose_database_url=
+    ;;
+  *) echo "generate-secrets: GACHIPAD_DB must be sqlite, postgres, mongodb or external" >&2; exit 1 ;;
+esac
+
+set_tmp GACHIPAD_DB "$db"
+set_tmp GACHIPAD_DATABASE_URL "$compose_database_url"
+
+profiles="${COMPOSE_PROFILES:-$(tmp_get COMPOSE_PROFILES)}"
+profile_list=()
+IFS=',' read -r -a existing_profiles <<<"$profiles"
+for profile in "${existing_profiles[@]}"; do
+  profile="${profile#"${profile%%[![:space:]]*}"}"
+  profile="${profile%"${profile##*[![:space:]]}"}"
+  [ -n "$profile" ] || continue
+  case "$profile" in mongodb | postgres) continue ;; esac
+  found=0
+  for existing in "${profile_list[@]}"; do [ "$existing" = "$profile" ] && found=1; done
+  [ "$found" = 1 ] || profile_list+=("$profile")
+done
+case "$db" in mongodb | postgres)
+  found=0
+  for existing in "${profile_list[@]}"; do [ "$existing" = "$db" ] && found=1; done
+  [ "$found" = 1 ] || profile_list+=("$db")
+  ;;
+esac
+profiles=""
+for profile in "${profile_list[@]}"; do
+  [ -z "$profiles" ] || profiles+=,
+  profiles+="$profile"
+done
+set_tmp COMPOSE_PROFILES "$profiles"
 
 # Replace atomically (same directory) so an interrupted run never leaves a truncated .env.
 chmod 600 "$TMP" && mv "$TMP" "$FILE"
