@@ -831,6 +831,8 @@ test("a join that never reaches the API keeps the document, its copy and its edi
     expect((await access({ default: "edit" })).ok()).toBe(true);
     await expect.poll(() => refused).toBeGreaterThan(0);
     await type(guest.page, " typed during the outage");
+    await expect.poll(() => editorText(guest.page)).toContain("typed during the outage");
+    expect(await editorText(owner.page)).toBe("base");
     // View-only again before the API is back: only the edit key lets these edits in.
     expect((await access({ default: "view" })).ok()).toBe(true);
     await guest.page.waitForTimeout(1500);
@@ -842,7 +844,9 @@ test("a join that never reaches the API keeps the document, its copy and its edi
     await expect
       .poll(() => editorText(owner.page), { timeout: 30_000 })
       .toContain("typed during the outage");
+    await expect.poll(() => editorText(guest.page)).toContain("typed during the outage");
     await expectCopy(guest.page, id, true);
+    expect((await idbLog(guest.page)).filter((entry) => entry.startsWith("delete"))).toEqual([]);
   } finally {
     await closeAll(owner, guest);
   }

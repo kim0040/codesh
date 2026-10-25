@@ -484,6 +484,39 @@ test("reduced motion: nothing on a guide page stays hidden or moves", async ({ b
   }
 });
 
+test("a scroll jump reveals passed content even when the observer misses it", async ({
+  browser,
+}) => {
+  const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
+  const { page } = user;
+  try {
+    await page.addInitScript(() => {
+      const Observer = window.IntersectionObserver;
+      window.IntersectionObserver = class extends Observer {
+        constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+          // A fast jump can leave a short reveal target non-intersecting at both samples.
+          super(options?.threshold === 0.08 ? () => {} : callback, options);
+        }
+      };
+    });
+    await openGuide(page, "features", "en");
+    const hidden = () =>
+      page.evaluate(
+        () =>
+          [...document.querySelectorAll<HTMLElement>("main [data-reveal]")].filter(
+            (node) => getComputedStyle(node).opacity !== "1",
+          ).length,
+      );
+    await expect.poll(hidden).toBeGreaterThan(0);
+    await page.evaluate(() =>
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }),
+    );
+    await expect.poll(hidden).toBe(0);
+  } finally {
+    await closeAll(user);
+  }
+});
+
 for (const scheme of ["light", "dark"] as const) {
   test(`${scheme}: scrolling reveals every part of every page`, async ({ browser }) => {
     const user = await newUser(browser, "Maya", {
@@ -494,11 +527,15 @@ for (const scheme of ["light", "dark"] as const) {
     try {
       for (const { slug } of PAGES) {
         await openGuide(page, slug, "en");
-        const height = await page.evaluate(() => document.documentElement.scrollHeight);
-        for (let y = 0; y < height; y += 400) {
+        for (
+          let y = 0;
+          y < (await page.evaluate(() => document.documentElement.scrollHeight));
+          y += 400
+        ) {
           await page.evaluate((top) => window.scrollTo(0, top), y);
           await page.waitForTimeout(40);
         }
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
         await expect
           .poll(
             () =>

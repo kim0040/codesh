@@ -263,6 +263,7 @@ export class Collab implements Extension<CollabContext> {
   private settingsAt = 0;
   private timers: NodeJS.Timeout[] = [];
   private readonly refused = new WeakSet<Connection>();
+  private readonly initialSync = new WeakSet<Connection>();
   private readonly awarenessBudget = new WeakMap<Connection, { tokens: number; at: number }>();
   private readonly updateBudget = new WeakMap<Connection, { tokens: number; at: number }>();
   /** Perm messages received so far, and the recent ones per share (see `catchUp`). */
@@ -617,6 +618,15 @@ export class Collab implements Extension<CollabContext> {
       connection.close({ code: 4401, reason: "Document state unavailable" });
       return;
     }
+    // Failed auth clears Hocuspocus's queued updates. A retry can drain later increments
+    // before SyncStep2 supplies their missing prefix; wait without poisoning the local doc.
+    // Nothing is applied or queued in Yjs here. The complete sync still passes every guard.
+    if (type === 2 && !this.initialSync.has(connection)) {
+      this.refused.add(connection);
+      connection.readOnly = true;
+      return;
+    }
+    if (type === 1) this.initialSync.add(connection);
     const actor = context(connection);
     // Every opaque non-owner update can contain metadata, even if it appears to be plain text.
     // Decode once and share it with the comment guard; owners skip the permission classifier.
