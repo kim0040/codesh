@@ -65,7 +65,8 @@ export const en = {
   "intro.more.action": "Read more",
   "intro.more.faqAction": "All questions",
   "intro.hero.title": "Share code and edit it together",
-  "intro.hero.sub": "No sign-up by default. Enter the 6-digit code you were given, or start a new share.",
+  "intro.hero.sub":
+    "No sign-up by default. Enter the 6-digit code you were given, or start a new share.",
   "intro.hero.startAction": "Create a share",
   "intro.join.hint": "Enter the 6 digits you were given",
   "intro.join.submitAction": "Join",

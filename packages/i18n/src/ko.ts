@@ -93,7 +93,8 @@ export const ko: KoDictionary = {
   "intro.more.action": "자세히 보기",
   "intro.more.faqAction": "질문 모두 보기",
   "intro.hero.title": "코드를 공유하고 함께 고쳐요",
-  "intro.hero.sub": "기본 설정은 가입 없이 시작해요. 받은 6자리 코드를 입력하거나 새 공유를 만드세요.",
+  "intro.hero.sub":
+    "기본 설정은 가입 없이 시작해요. 받은 6자리 코드를 입력하거나 새 공유를 만드세요.",
   "intro.hero.startAction": "새 공유 만들기",
   "intro.join.hint": "전달받은 6자리 숫자를 입력하세요",
   "intro.join.submitAction": "입장",
@@ -998,8 +999,7 @@ export const ko: KoDictionary = {
   "admin.ops.newest": "최신",
   "admin.ops.older": "이전",
   "admin.ops.confirm": "작업 확인",
-  "admin.ops.confirmBody":
-    "선택한 공유에 이 작업을 적용해요. 삭제한 공유는 복구할 수 없어요.",
+  "admin.ops.confirmBody": "선택한 공유에 이 작업을 적용해요. 삭제한 공유는 복구할 수 없어요.",
   // ── Identity ──
   "identity.title": "이름을 정해 주세요",
   "identity.body": "커서 옆에 다른 참여자에게 보여요. 이 기기에 기억해 둬요.",
