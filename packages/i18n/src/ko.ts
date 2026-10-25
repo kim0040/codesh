@@ -87,6 +87,11 @@ export const ko: KoDictionary = {
   "intro.nav.how": "이렇게 써요",
   "intro.nav.features": "기능",
   "intro.nav.faq": "질문",
+  "intro.nav.network": "네트워크",
+  "intro.nav.security": "개인정보",
+  "intro.nav.menuAction": "메뉴",
+  "intro.more.action": "자세히 보기",
+  "intro.more.faqAction": "질문 모두 보기",
   "intro.hero.title": "코드를 공유하고 함께 고쳐요",
   "intro.hero.sub": "가입 없이 시작해요. 받은 6자리 코드를 입력하거나 새 공유를 만드세요.",
   "intro.hero.startAction": "새 공유 만들기",
@@ -189,6 +194,7 @@ export const ko: KoDictionary = {
   "intro.footer.contact": "문의: {contact}",
   "intro.footer.noTracking": "광고, 추적, 외부 스크립트가 없어요. 모두 이 서버에서 불러와요.",
   "intro.footer.licenses": "오픈소스 라이선스",
+  "intro.footer.navLabel": "페이지",
 
   // ── Share basics (kept from the first dictionary) ──
   "share.new": "새 공유",

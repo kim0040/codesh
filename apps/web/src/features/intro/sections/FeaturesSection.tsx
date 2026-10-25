@@ -25,12 +25,13 @@ const FEATURES = [
 export function FeaturesSection() {
   const t = useT();
   return (
-    <section id="features" className="ix-section" aria-labelledby="ix-features-title">
+    <section className="ix-section" aria-labelledby="ix-features-title">
       <div className="ix-wrap">
         <SectionHead
           id="ix-features-title"
           title={t("intro.features.title")}
           sub={t("intro.features.sub")}
+          more="features"
         />
         <div className="ix-tiles">
           {FEATURES.map(({ key, span, Art }, index) => (

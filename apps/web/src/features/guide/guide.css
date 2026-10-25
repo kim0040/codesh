@@ -1,0 +1,548 @@
+/*
+ * Guide pages. Same rules as the home page (intro.css): sizes from its type steps, surfaces
+ * separated by a step in tone instead of lines, only opacity and transform move. Interface
+ * fragments (.ix-mock) carry data-ui and keep the product's own look.
+ */
+
+.ix main:focus {
+  outline: none;
+}
+
+.ix-page {
+  --ix-tile: var(--panel);
+  padding-block: clamp(24px, 4vw, 56px) clamp(56px, 8vw, 120px);
+}
+
+/* ── Title ── */
+
+.ix-gh {
+  display: grid;
+  gap: clamp(14px, 2vw, 22px);
+  justify-items: start;
+  padding-block-end: clamp(8px, 2vw, 24px);
+}
+.ix-gh1 {
+  max-width: 14em;
+  font-size: var(--ix-h2);
+  font-weight: 730;
+  line-height: 1.1;
+  letter-spacing: var(--ix-track-h2);
+  text-wrap: balance;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ix-gh1 {
+    animation: ix-rise 700ms var(--ix-ease) both;
+  }
+  .ix-gh .ix-lead {
+    animation: ix-rise-fade 700ms 90ms var(--ix-ease) both;
+  }
+}
+
+/* ── Table of contents beside the sections ── */
+
+.ix-gbody {
+  display: grid;
+  gap: clamp(8px, 2vw, 24px);
+  margin-top: clamp(16px, 3vw, 32px);
+}
+.ix-toc {
+  padding: 16px clamp(16px, 2vw, 22px);
+  border-radius: var(--ix-radius);
+  background: var(--panel);
+}
+.ix-toc-title {
+  margin-bottom: 6px;
+  font-size: var(--ix-small);
+  font-weight: 650;
+  color: var(--fg-2);
+}
+.ix-toc ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 20px;
+}
+.ix-toc a {
+  display: inline-block;
+  padding-block: 8px;
+  font-size: var(--ix-small);
+  font-weight: 560;
+  color: var(--fg);
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 5px;
+  transition: text-decoration-color 140ms var(--ix-ease);
+}
+.ix-toc a:hover {
+  text-decoration-color: var(--accent-text);
+}
+@media (min-width: 1100px) {
+  .ix-gbody[data-toc] {
+    grid-template-columns: 224px minmax(0, 1fr);
+    gap: clamp(32px, 5vw, 72px);
+    align-items: start;
+  }
+  .ix-toc {
+    position: sticky;
+    top: calc(var(--ix-header-h) + 16px);
+    padding: 20px;
+  }
+  .ix-toc ol {
+    display: grid;
+    gap: 0;
+  }
+}
+
+/* ── Sections ── */
+
+.ix-gmain {
+  display: grid;
+  min-width: 0;
+}
+.ix-gsec,
+.ix-ganchor {
+  scroll-margin-top: calc(var(--ix-header-h) + 8px);
+}
+.ix-gsec {
+  display: grid;
+  gap: 16px;
+  justify-items: start;
+  padding-block-start: clamp(40px, 6vw, 88px);
+}
+.ix-gsec > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.ix-gh2 {
+  font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.25rem);
+  font-weight: 730;
+  line-height: 1.2;
+  letter-spacing: var(--ix-track-title);
+  text-wrap: balance;
+}
+.ix-glead {
+  max-width: 40em;
+  font-size: var(--ix-lead);
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+.ix-gp {
+  max-width: 62ch;
+}
+.ix-gsub {
+  margin-top: 12px;
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+.ix-glist {
+  display: grid;
+  gap: 8px;
+  max-width: 62ch;
+}
+.ix-glist li {
+  position: relative;
+  padding-inline-start: 22px;
+}
+.ix-glist li::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0.7em;
+  inset-inline-start: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ── Cards: a heading and a few words, side by side ── */
+
+.ix-gcards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  gap: 8px;
+  width: 100%;
+}
+.ix-gcards-ways {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+}
+.ix-gcard {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: clamp(18px, 2vw, 26px);
+  border-radius: var(--ix-radius);
+  background: var(--ix-tile);
+}
+.ix-gcard h3 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.ix-gcard p {
+  color: var(--fg-2);
+}
+.ix-gcard dl {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.ix-gcard dt {
+  margin-top: 8px;
+  font-size: var(--ix-small);
+  font-weight: 650;
+  color: var(--fg-2);
+}
+.ix-gcard dd {
+  margin: 0;
+}
+
+/* ── A drawing from the home page beside its words ── */
+
+.ix-gart {
+  container-type: inline-size;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: clamp(16px, 3vw, 36px);
+  border-radius: var(--ix-radius);
+  background: var(--accent-soft);
+}
+.ix-gart .ix-code {
+  font-size: calc(var(--ix-code-size) + 1px);
+}
+.ix-grows {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.ix-grow {
+  display: grid;
+  gap: clamp(16px, 3vw, 40px);
+  align-items: center;
+  padding: clamp(14px, 2vw, 24px);
+  border-radius: var(--ix-radius);
+  background: var(--ix-tile);
+}
+.ix-grow-text {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  padding: clamp(0px, 1vw, 12px);
+}
+.ix-grow-text h3 {
+  font-size: var(--ix-title);
+  font-weight: 700;
+  letter-spacing: var(--ix-track-title);
+  line-height: 1.3;
+}
+.ix-grow-text p {
+  max-width: 44ch;
+  color: var(--fg-2);
+}
+.ix-gsplit {
+  display: grid;
+  gap: clamp(16px, 3vw, 40px);
+  width: 100%;
+}
+.ix-gsplit-text {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+@media (min-width: 900px) {
+  .ix-grow {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  }
+  .ix-gsplit > .ix-gart {
+    position: sticky;
+    top: calc(var(--ix-header-h) + 16px);
+  }
+  .ix-grow[data-flip] .ix-gart {
+    order: 2;
+  }
+  .ix-gsplit {
+    grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+    align-items: start;
+  }
+  .ix-gsplit[data-flip] .ix-gart {
+    order: -1;
+  }
+  .ix-gsplit-mock {
+    grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  }
+  .ix-gsplit-mock > .ix-gfig {
+    position: sticky;
+    top: calc(var(--ix-header-h) + 16px);
+  }
+}
+
+/* ── Mock-up of a real screen ── */
+
+.ix-gfig {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+}
+.ix-gfig figcaption {
+  font-size: var(--ix-small);
+  color: var(--fg-2);
+}
+.ix-mock {
+  display: grid;
+  gap: 16px;
+  padding: clamp(16px, 2.4vw, 24px);
+  border-radius: var(--ix-radius);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: var(--ix-small);
+  line-height: 1.5;
+  pointer-events: none;
+  user-select: none;
+}
+.ix-mock-title {
+  font-weight: 700;
+}
+.ix-mock-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.ix-mock-people {
+  display: grid;
+  gap: 8px;
+}
+.ix-mock-people li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ix-mock-people li > span:nth-child(2) {
+  flex: 1;
+  font-weight: 560;
+}
+
+/* ── Tables ── */
+
+.ix-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.ix-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 2px;
+  font-size: var(--ix-small);
+  text-align: start;
+}
+.ix-table caption {
+  padding-block-end: 10px;
+  font-size: 1rem;
+  font-weight: 650;
+  text-align: start;
+}
+.ix-table th,
+.ix-table td {
+  padding: 10px clamp(8px, 1.4vw, 16px);
+  background: var(--panel);
+  text-align: start;
+  vertical-align: top;
+}
+.ix-table thead th {
+  background: transparent;
+  font-weight: 650;
+  color: var(--fg-2);
+}
+.ix-table th[scope="row"] {
+  font-weight: 560;
+}
+.ix-table tbody > tr > :first-child {
+  border-start-start-radius: var(--rad-md);
+  border-end-start-radius: var(--rad-md);
+}
+.ix-table tbody > tr > :last-child {
+  border-start-end-radius: var(--rad-md);
+  border-end-end-radius: var(--rad-md);
+}
+.ix-table [data-yes] {
+  font-weight: 650;
+  color: var(--accent-text);
+}
+.ix-table-roles td {
+  white-space: nowrap;
+}
+.ix-shortcuts {
+  display: grid;
+  gap: 28px;
+  width: 100%;
+}
+.ix-sc-group {
+  display: grid;
+  gap: 10px;
+}
+.ix-sc-group h3 {
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+.ix-sc-group td {
+  text-align: end;
+}
+.ix-sc-group td > div + div {
+  margin-top: 6px;
+}
+.ix-keys {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ix-chords {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+}
+.ix-chord-or {
+  margin-inline: 8px;
+  color: var(--fg-2);
+}
+.ix-guide-seg {
+  justify-self: start;
+}
+
+/* ── Languages ── */
+
+.ix-langbox {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  max-width: 880px;
+}
+.ix-langbox-label {
+  font-size: var(--ix-small);
+  font-weight: 650;
+}
+.ix-langbox .ix-input {
+  width: 100%;
+  max-width: 420px;
+}
+.ix-langbox-status {
+  min-height: 1.6em;
+  font-size: var(--ix-small);
+  color: var(--fg-2);
+}
+.ix-langbox .ix-btn {
+  justify-self: start;
+}
+.ix-langs-scroll {
+  max-height: 420px;
+  padding: 8px;
+  overflow: auto;
+  border-radius: var(--ix-radius);
+  background: var(--panel);
+}
+.ix-langs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 2px;
+}
+.ix-langs li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 4px 10px;
+  border-radius: var(--rad-md);
+}
+.ix-langs .ix-dot {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fg) 30%, transparent);
+}
+.ix-lang-name {
+  font-weight: 560;
+}
+.ix-lang-ext {
+  margin-inline-start: auto;
+  font-size: 0.8125rem;
+  color: var(--fg-2);
+}
+.ix-chips-static .ix-chip {
+  cursor: default;
+  color: var(--fg);
+}
+
+/* ── Previous and next ── */
+
+.ix-pn {
+  display: grid;
+  gap: 8px;
+  margin-top: clamp(64px, 9vw, 128px);
+}
+.ix-pn-link {
+  display: grid;
+  align-content: end;
+  gap: 4px;
+  min-height: 120px;
+  padding: clamp(18px, 2.2vw, 30px);
+  border-radius: var(--ix-radius);
+  background: var(--panel);
+  text-decoration: none;
+  transition:
+    background-color 180ms var(--ix-ease),
+    transform 140ms var(--ix-ease);
+}
+.ix-pn-link:hover {
+  background: var(--raised);
+}
+.ix-pn-link:active {
+  transform: scale(0.99);
+}
+.ix-pn-link[data-dir="next"] {
+  text-align: end;
+}
+.ix-pn-dir {
+  font-size: var(--ix-small);
+  color: var(--fg-2);
+}
+.ix-pn-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--ix-title);
+  font-weight: 700;
+  letter-spacing: var(--ix-track-title);
+  line-height: 1.3;
+}
+.ix-pn-link[data-dir="next"] .ix-pn-name {
+  justify-self: end;
+}
+.ix-pn-link svg {
+  transition: transform 180ms var(--ix-ease);
+}
+.ix-pn-link:hover svg {
+  transform: translateX(4px);
+}
+@media (min-width: 640px) {
+  .ix-pn {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── Waiting for the page text ── */
+
+.ix-page-wait {
+  min-height: 70vh;
+}
+.ix-skel {
+  border-radius: var(--rad-md);
+  background: var(--fill-hover);
+}
+.ix-skel-title {
+  width: min(60%, 520px);
+  height: clamp(40px, 6vw, 72px);
+}
+.ix-skel-line {
+  width: min(100%, 560px);
+  height: 22px;
+  margin-top: 18px;
+}

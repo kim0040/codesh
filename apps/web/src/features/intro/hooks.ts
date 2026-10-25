@@ -24,6 +24,15 @@ export function usePrefersReducedMotion(): boolean {
   );
 }
 
+/** True while the media query matches. */
+export function useMatchMedia(query: string): boolean {
+  return useSyncExternalStore(
+    (callback) => subscribeMedia(query, callback),
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
+
 export type Appearance = "dark" | "light";
 
 function readAppearance(): Appearance {
@@ -160,7 +169,12 @@ export function useHidingHeader<T extends HTMLElement>(): RefObject<T | null> {
       // A direction change restarts the count.
       if (delta !== 0) travel = Math.sign(delta) === Math.sign(travel) ? travel + delta : delta;
       let hidden = header.hasAttribute("data-hidden");
-      if (y < header.offsetHeight || header.matches(":focus-within") || travel <= -HEADER_TRAVEL) {
+      if (
+        y < header.offsetHeight ||
+        header.matches(":focus-within") ||
+        header.hasAttribute("data-menu") ||
+        travel <= -HEADER_TRAVEL
+      ) {
         hidden = false;
       } else if (travel >= HEADER_TRAVEL) {
         hidden = true;

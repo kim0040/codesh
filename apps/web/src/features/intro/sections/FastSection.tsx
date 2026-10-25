@@ -18,10 +18,15 @@ export function FastSection() {
   const [active, setActive] = useState(0);
   const Current = WAYS[active]?.Art ?? CodeArt;
   return (
-    <section id="fast" className="ix-section ix-section-panel" aria-labelledby="ix-fast-title">
+    <section className="ix-section ix-section-panel" aria-labelledby="ix-fast-title">
       <div className="ix-wrap ix-fast">
         <div className="ix-fast-copy">
-          <SectionHead id="ix-fast-title" title={t("intro.fast.title")} sub={t("intro.fast.sub")} />
+          <SectionHead
+            id="ix-fast-title"
+            title={t("intro.fast.title")}
+            sub={t("intro.fast.sub")}
+            more="network"
+          />
           <ul className="ix-ways" {...reveal(140)}>
             {WAYS.map((way, index) => (
               <li className="ix-way" data-on={index === active ? "" : undefined} key={way.key}>
