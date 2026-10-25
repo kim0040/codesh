@@ -22,19 +22,16 @@
       })();
     </script>
     <script>
-      // iOS Safari keeps pinch zoom while this prevents its focus zoom on small form controls.
+      // Every iOS browser is WebKit: it keeps pinch zoom while this prevents its focus zoom on small
+      // form controls.
       (() => {
         const nav = window.navigator;
         const platform = `${nav.platform || ""} ${nav.userAgentData?.platform || ""}`;
         const iosDevice =
           /iPhone|iPad|iPod/i.test(platform) ||
           (/MacIntel/i.test(platform) && nav.maxTouchPoints > 1);
-        const userAgent = nav.userAgent || "";
-        const safari =
-          /Safari/i.test(userAgent) &&
-          !/(?:CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo|GSA|YaBrowser|Brave)/i.test(userAgent);
         const viewport = document.querySelector('meta[name="viewport"]');
-        if (iosDevice && safari && viewport && !/(?:^|,)\s*maximum-scale=/i.test(viewport.content)) {
+        if (iosDevice && viewport && !/(?:^|,)\s*maximum-scale=/i.test(viewport.content)) {
           viewport.content += ", maximum-scale=1";
         }
       })();

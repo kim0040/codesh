@@ -18,18 +18,17 @@ export function detectPlatform(nav: NavigatorLike | undefined): Platform {
   return "other";
 }
 
-/** True for Safari on iPhone, iPad or iPadOS, and false for other iOS browsers. */
-export function isIosSafari(nav: NavigatorLike | undefined): boolean {
+/**
+ * True on iPhone, iPad and iPadOS in any browser: all of them are WebKit and zoom into a focused
+ * control whose text is under 16 px. The same check runs inline in index.html before the app loads.
+ */
+export function isIos(nav: NavigatorLike | undefined): boolean {
   if (!nav) return false;
   const platform = `${nav.platform ?? ""} ${nav.userAgentData?.platform ?? ""}`;
-  const iosDevice =
+  return (
     /iPhone|iPad|iPod/i.test(platform) ||
-    (/MacIntel/i.test(platform) && (nav.maxTouchPoints ?? 0) > 1);
-  const userAgent = nav.userAgent ?? "";
-  const safari =
-    /Safari/i.test(userAgent) &&
-    !/(?:CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo|GSA|YaBrowser|Brave)/i.test(userAgent);
-  return iosDevice && safari;
+    (/MacIntel/i.test(platform) && (nav.maxTouchPoints ?? 0) > 1)
+  );
 }
 
 export const PLATFORM: Platform = detectPlatform(

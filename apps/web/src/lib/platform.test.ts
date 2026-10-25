@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectPlatform, isAltGraph, isIosSafari, keyLabelsFor } from "./platform";
+import { detectPlatform, isAltGraph, isIos, keyLabelsFor } from "./platform";
 
 describe("detectPlatform", () => {
   it("tells Apple devices, Windows and the rest apart", () => {
@@ -14,17 +14,17 @@ describe("detectPlatform", () => {
   });
 });
 
-describe("isIosSafari", () => {
-  it("recognizes iPhone and iPadOS Safari only", () => {
+describe("isIos", () => {
+  it("recognizes iPhone and iPadOS in every browser", () => {
     expect(
-      isIosSafari({
+      isIos({
         platform: "iPhone",
         userAgent:
           "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit Safari/604.1",
       }),
     ).toBe(true);
     expect(
-      isIosSafari({
+      isIos({
         platform: "MacIntel",
         maxTouchPoints: 5,
         userAgent:
@@ -32,20 +32,20 @@ describe("isIosSafari", () => {
       }),
     ).toBe(true);
     expect(
-      isIosSafari({
+      isIos({
         platform: "iPhone",
         userAgent: "Mozilla/5.0 (iPhone) AppleWebKit CriOS/130.0 Mobile Safari/604.1",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
-      isIosSafari({
+      isIos({
         platform: "MacIntel",
         maxTouchPoints: 0,
         userAgent: "Mozilla/5.0 (Macintosh) AppleWebKit Version/18.0 Safari/605.1",
       }),
     ).toBe(false);
     expect(
-      isIosSafari({
+      isIos({
         platform: "Linux armv8l",
         userAgent: "Mozilla/5.0 (Linux; Android 15) AppleWebKit Chrome/130.0 Safari/537.36",
       }),
