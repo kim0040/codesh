@@ -84,6 +84,10 @@ export default defineConfig({
         RATE_LIMIT_API_PER_MIN: "100000",
         RATE_LIMIT_CODE_PER_MIN: "100000",
         RATE_LIMIT_CREATE_PER_MIN: "100000",
+        // Every test creates shares from 127.0.0.1, so a day of runs would use up the per-address quota.
+        QUOTA_SHARES_PER_IP: "1000000",
+        QUOTA_UPLOADS_PER_IP: "1000000",
+        QUOTA_BYTES_PER_IP: "1099511627776",
         // No outbound request from tests; p-updates.spec.ts mocks the update state instead.
         UPDATE_CHECK: "off",
       },
