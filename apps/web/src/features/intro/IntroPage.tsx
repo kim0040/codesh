@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useT } from "../../lib/i18n";
+import { useFocusOnArrival } from "./arrival";
 import { usePrefersReducedMotion, useScrollReveal } from "./hooks";
 import "./intro.css";
 import { DiffSection } from "./sections/DiffSection";
@@ -31,8 +32,10 @@ const DEFAULT_TTL_HOURS = 24;
 export function IntroPage({ settings, version = buildVersion() }: IntroPageProps) {
   const t = useT();
   const root = useRef<HTMLDivElement>(null);
+  const main = useRef<HTMLElement>(null);
   const reduced = usePrefersReducedMotion();
   useScrollReveal(root, reduced);
+  useFocusOnArrival(main);
 
   useEffect(() => {
     document.title = `${t("app.name")} – ${t("app.tagline")}`;
@@ -40,11 +43,9 @@ export function IntroPage({ settings, version = buildVersion() }: IntroPageProps
 
   return (
     <div className="ix" ref={root} style={editorVars}>
-      <a className="ix-skip" href="#main">
-        {t("a11y.skipToContent")}
-      </a>
+      {/* The skip link is the app shell's (routes/__root.tsx); it points at #main. */}
       <Header />
-      <main id="main">
+      <main id="main" ref={main} tabIndex={-1}>
         <Hero />
         <HowSection />
         <FastSection />

@@ -28,7 +28,7 @@ export const guideEn = {
 
   "guide.how.create.title": "Create a share",
   "guide.how.create.body1":
-    "Select Create a share on the home page, or start from a template. You don't sign up or sign in, and you become the owner of the share.",
+    "Select Create a share on the home page, or start from a template. With the default settings you don't sign up or sign in, and you become the owner of the share. If the administrator turned guests off, you sign in first.",
   "guide.how.create.body2":
     "Every share has an address of 8 letters and digits and a join code of 6 digits. Both open the same share.",
   "guide.how.create.templatesLink": "About templates",
@@ -99,7 +99,7 @@ export const guideEn = {
   "guide.how.control.mock": "The access settings in the Share window",
   "guide.how.control.view.title": "View-only link and edit link",
   "guide.how.control.view.body":
-    "Set the default to View only and people who join can read but not edit. Copy the separate edit link for the people who should edit. It ends in #key= followed by the key, and browsers don't send that part to the server. After the link opens, the key is removed from the address bar and the server remembers the edit right for that browser.",
+    "Set the default to View only and people who join can read but not edit. Copy the separate edit link for the people who should edit. It ends in #key= followed by the key. Browsers don't send that part with the page request, so it stays out of server logs and addresses; codesh sends it once, in the join request, so the server can check it. After the link opens, the key is removed from the address bar and the server remembers the edit right for that browser.",
   "guide.how.control.pin.title": "PIN lock",
   "guide.how.control.pin.body":
     "Lock a share with a PIN of {min} to {max} characters, and give the PIN to people separately from the link. After {attempts} wrong tries a person has to wait {minutes} minutes. Setting a new PIN asks everyone to enter it again.",
@@ -322,7 +322,7 @@ export const guideEn = {
   "guide.network.offline.body1":
     "Scripts, fonts and icons all come from the same server. Devices only need a connection to it, so codesh works on a network that is cut off from the internet.",
   "guide.network.offline.body2":
-    "The one thing a server may do by itself is look for new releases. It is explained under Privacy.",
+    "Unless the administrator turns it off, the server looks for new releases by itself, and a sign-in provider (OIDC or LDAP) may be involved if one is set up. Both are explained under Privacy.",
   "guide.network.offline.link": "What the server may contact",
 
   // ── Privacy and safety ──
@@ -390,11 +390,11 @@ export const guideEn = {
 
   "guide.security.external.title": "No outside requests",
   "guide.security.external.body1":
-    "Pages, scripts, fonts, icons and images all come from your codesh server. There are no analytics, ads, trackers or content delivery networks, and your browser contacts nothing but the codesh server.",
+    "Pages, scripts, fonts, icons and images all come from your codesh server. There are no analytics, ads, trackers or content delivery networks. With the default settings your browser contacts nothing but the codesh server.",
   "guide.security.external.body2":
-    "One exception happens on the server, not in your browser. Unless the administrator turns it off, the server sends a plain request to GitHub about every 12 hours to see whether a new version exists. It carries no share content and fails quietly without internet.",
+    "Two things depend on what the administrator sets up. If sign-in uses an identity provider (OIDC), your browser is sent to that provider to sign in; with LDAP, the server checks the sign-in against the directory server. The other exception happens on the server: unless the administrator turns it off, it sends a plain request to GitHub about every 12 hours to see whether a new version exists. It carries no share content and fails quietly without internet.",
   "guide.security.external.body3":
-    "Edit links keep their key after the # sign, which browsers never send to a server. PINs are stored only as hashes.",
+    "Edit links keep their key after the # sign, which browsers don't send with page requests, so it stays out of server logs and addresses. codesh sends it once, in the join request, to check it. PINs are stored only as hashes.",
 
   "guide.security.controls.title": "What administrators control",
   "guide.security.controls.lead": "These are set by the administrator of this server.",
@@ -456,7 +456,7 @@ export const guideEn = {
     "No. Everything comes from the server on your network. The server itself may check for new releases unless the administrator turns that off.",
   "guide.faq.tracking.q": "Does it track me?",
   "guide.faq.tracking.a":
-    "There are no analytics, ads or trackers, and the browser contacts only the codesh server. If the administrator turned on the audit log, it records who creates, opens, downloads and deletes shares.",
+    "There are no analytics, ads or trackers, and with the default settings the browser contacts only the codesh server (a sign-in provider, if the administrator set one up, is the exception). If the administrator turned on the audit log, it records who creates, opens, downloads and deletes shares.",
   "guide.faq.shared.q": "How do I leave nothing behind on a shared computer?",
   "guide.faq.shared.a":
     "Answer Not on this device when codesh asks about offline copies, or use Forget on this device in the editor settings when you are done.",

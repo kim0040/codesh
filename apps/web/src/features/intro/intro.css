@@ -99,6 +99,11 @@
   outline: 2px solid var(--focus);
   outline-offset: 3px;
 }
+/* Pages take focus when they open (the skip link's target and the guide titles): no ring around a whole page. */
+.ix main:focus,
+.ix .ix-gh1:focus {
+  outline: none;
+}
 
 .ix-sr {
   position: absolute;
@@ -109,23 +114,6 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-.ix-skip {
-  position: absolute;
-  inset-block-start: 8px;
-  inset-inline-start: 8px;
-  z-index: 100;
-  padding: 10px 16px;
-  border-radius: var(--rad-md);
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-weight: 600;
-  text-decoration: none;
-  transform: translateY(-200%);
-}
-.ix-skip:focus-visible {
-  transform: none;
 }
 
 .ix-wrap {

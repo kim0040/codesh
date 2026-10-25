@@ -2,6 +2,7 @@ import { type ComponentType, useCallback, useEffect, useRef, useState } from "re
 import { useOverlays } from "../../lib/overlays";
 import { usePrefs } from "../../lib/prefs";
 import { useEditor } from "../editor/context";
+import { modalIsOpen, useModalOpen } from "./modal-open";
 import { tourSeen, useTourRequests } from "./seen";
 import { availableSteps } from "./steps";
 import type { TourProps } from "./Tour";
@@ -14,7 +15,7 @@ const REPLAY_DELAY_MS = 320;
 /**
  * Decides when the tour runs and loads its code only then: the first editor visit of a browser
  * (once the device question is answered and no dialog is open), or Settings > Replay tutorial.
- * A returning visitor never downloads it.
+ * Its code loads only then; the service worker still precaches the chunk so it works offline.
  */
 export function TourMount() {
   const ctx = useEditor();
@@ -30,8 +31,15 @@ export function TourMount() {
   const [Tour, setTour] = useState<ComponentType<TourProps> | null>(null);
   const handled = useRef(requests);
 
+  // Any modal dialog counts, including the ones a feature owns (file naming, delete), not only the
+  // panels and overlays the app keeps in its stores. Followed only while the tour could start.
+  const modal = useModalOpen(running || replay || !seen);
   const blocked =
-    ctx.panel.name !== null || overlays.palette || overlays.shortcuts || overlays.templates;
+    ctx.panel.name !== null ||
+    overlays.palette ||
+    overlays.shortcuts ||
+    overlays.templates ||
+    modal;
   const asking = prefs.offlineCopy === "undecided";
   const readOnly = ctx.readOnly;
 
@@ -52,6 +60,8 @@ export function TourMount() {
     if (running || failed || blocked || !(replay || (!seen && !asking))) return;
     const timer = window.setTimeout(
       () => {
+        // A dialog opened inside the delay and the state has not caught up yet.
+        if (modalIsOpen()) return;
         setReplay(false);
         begin();
       },

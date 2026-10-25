@@ -52,7 +52,10 @@ export default defineConfig({
       },
       workbox: {
         // App shell, every route chunk and every lazily loaded language pack. Fonts are cached on
-        // first use instead: the Hangul subsets alone are several hundred small files.
+        // first use instead: the Hangul subsets alone are several hundred small files. Chunks that
+        // are only imported on demand (the first-run tour, the guide texts in both languages)
+        // are precached too, so the app and its guide work offline; a returning visitor
+        // downloads them once per build when the service worker updates, even if never used.
         globPatterns: ["**/*.{js,css,html,svg,png,ico,webmanifest}"],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: "/index.html",

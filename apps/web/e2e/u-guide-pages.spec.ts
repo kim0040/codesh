@@ -215,9 +215,9 @@ test("previous and next walk the pages in the header order", async ({ browser })
       await page.locator('nav.ix-pn a[data-dir="next"]').click();
       await expect(page).toHaveURL(new RegExp(`/guide/${PAGES[index]?.slug}$`));
       await expect(page.locator("main h1")).toHaveText(current?.title.en ?? "");
-      // A new page starts at the top, with the focus in the content.
+      // A new page starts at the top, with the focus on its title.
       await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-      await expect(page.locator("main")).toBeFocused();
+      await expect(page.locator("main h1")).toBeFocused();
       await expect(page.locator('nav.ix-pn a[data-dir="prev"]')).toHaveAttribute(
         "href",
         `/guide/${PAGES[index - 1]?.slug}`,
@@ -266,6 +266,112 @@ test("the skip link moves the focus into the content", async ({ browser }) => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/#main$/);
     await expect(page.locator("main")).toBeFocused();
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("the first move from the home page into the guide, and back, keeps the focus in the content", async ({
+  browser,
+}) => {
+  const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
+  const { page } = user;
+  try {
+    await page.goto("/");
+    await expect(page.getByTestId("start-panel")).toBeVisible();
+    // By keyboard: the link that was followed is gone with the home page.
+    const link = page.locator('header.ix-header nav a[href="/guide/how"]');
+    await link.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/guide\/how$/);
+    await expect(page.locator("main h1")).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+
+    // Back to the home page through the brand link: focus lands on its content.
+    await page.locator("header.ix-header a.ix-brand").click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByTestId("start-panel")).toBeVisible();
+    await expect(page.locator("main")).toBeFocused();
+
+    // Browser Back returns to the guide page with the focus on its title.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/guide\/how$/);
+    await expect(page.locator("main h1")).toBeFocused();
+
+    // Loading a page is not a move: the skip link stays the first stop.
+    await page.reload();
+    await expect(page.locator("main h1")).toBeVisible();
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("the home page has one skip link and it leads into the content", async ({ browser }) => {
+  const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
+  const { page } = user;
+  try {
+    await page.goto("/");
+    await expect(page.getByTestId("start-panel")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Skip to content" })).toHaveCount(1);
+    await page.keyboard.press("Tab");
+    const skip = page.getByRole("link", { name: "Skip to content" });
+    await expect(skip).toBeFocused();
+    await expect(skip).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("main#main")).toBeFocused();
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("a malformed fragment is ignored instead of breaking the page", async ({ browser }) => {
+  const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
+  const { page } = user;
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    for (const path of ["/guide/how#%E0%A4%A", "/guide/faq#%", "/guide/security#100%"]) {
+      await page.goto(path);
+      await expect(page.locator("main h1"), path).toBeVisible();
+      await expect(page.getByText("This screen could not be displayed"), path).toHaveCount(0);
+    }
+    // And one that is valid but names nothing.
+    await page.goto("/guide/how#nothing-here");
+    await expect(page.locator("main h1")).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally {
+    await closeAll(user);
+  }
+});
+
+test("faq: a new fragment on the open page opens that answer", async ({ browser }) => {
+  const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
+  const { page } = user;
+  try {
+    await openGuide(page, "faq", "en");
+    const pin = page.locator("#pin button[aria-expanded]");
+    const save = page.locator("#save button[aria-expanded]");
+    await expect(pin).toHaveAttribute("aria-expanded", "false");
+
+    await page.evaluate(() => {
+      window.location.hash = "#pin";
+    });
+    await expect(pin).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#pin")).toBeInViewport();
+
+    // Closed by hand, then reached again by Back and Forward.
+    await pin.click();
+    await expect(pin).toHaveAttribute("aria-expanded", "false");
+    await page.evaluate(() => {
+      window.location.hash = "#save";
+    });
+    await expect(save).toHaveAttribute("aria-expanded", "true");
+    await page.goBack();
+    await expect(page).toHaveURL(/\/guide\/faq#pin$/);
+    await expect(pin).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#pin")).toBeInViewport();
   } finally {
     await closeAll(user);
   }
