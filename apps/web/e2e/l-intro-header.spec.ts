@@ -66,16 +66,23 @@ test("the intro header hides on scroll down, returns on scroll up and when focus
   }
 });
 
-test("anchor targets clear the sticky header", async ({ browser }) => {
+test("anchor targets on the guide pages clear the sticky header", async ({ browser }) => {
   const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
   try {
     await openIntro(user.page);
     const header = (await headerTop(user.page)).bottom;
-    for (const id of ["how", "features", "faq"]) {
-      const margin = await user.page
-        .locator(`section#${id}`)
-        .evaluate((el) => Number.parseFloat(getComputedStyle(el).scrollMarginTop));
-      expect(margin, id).toBeGreaterThanOrEqual(header);
+    for (const [path, ids] of [
+      ["/guide/how", ["create", "tell", "roles"]],
+      ["/guide/features", ["languages", "shortcuts", "templates"]],
+      ["/guide/faq", ["start", "network"]],
+    ] as const) {
+      await user.page.goto(path);
+      for (const id of ids) {
+        const margin = await user.page
+          .locator(`#${id}`)
+          .evaluate((el) => Number.parseFloat(getComputedStyle(el).scrollMarginTop));
+        expect(margin, `${path}#${id}`).toBeGreaterThanOrEqual(header);
+      }
     }
   } finally {
     await closeAll(user);
@@ -90,7 +97,7 @@ test("reduced motion: the header changes without sliding", async ({ browser }) =
     // No slide: the duration is zero (or the 0.01ms the reduced-motion reset leaves).
     await expect(user.page.locator("header.ix-header")).toHaveCSS(
       "transition-duration",
-      /^(0s|1e-05s)$/,
+      /^(0s|1e-05s|0\.00001s)$/,
     );
     await user.page.evaluate(() => window.scrollTo(0, 1500));
     await expectHidden(user.page);
@@ -162,7 +169,9 @@ test("header and footer theme controls switch the page and stay in sync", async 
 });
 
 for (const locale of ["en", "ko"] as const) {
-  test(`320px (${locale}): the header fits without horizontal overflow`, async ({ browser }) => {
+  test(`320px (${locale}): the header fits, its menu opens and holds every control`, async ({
+    browser,
+  }) => {
     const user = await newUser(browser, "Maya", { viewport: { width: 320, height: 700 } });
     const { page } = user;
     try {
@@ -170,28 +179,50 @@ for (const locale of ["en", "ko"] as const) {
         localStorage.setItem("codesh.locale", value);
       }, locale);
       await openIntro(page);
-      expect(
-        await page.evaluate(
+      const overflow = () =>
+        page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        ),
-      ).toBeLessThanOrEqual(0);
-      const row = await page.locator(".ix-header-row").boundingBox();
-      const last = await page.locator("header.ix-header button").last().boundingBox();
-      expect((last?.x ?? 0) + (last?.width ?? 0)).toBeLessThanOrEqual(320);
-      expect(row?.width ?? 0).toBeLessThanOrEqual(320);
-      // Every header control is on one row and inside the viewport.
-      for (const button of await page.locator("header.ix-header button").all()) {
-        const box = await button.boundingBox();
+        );
+      expect(await overflow()).toBeLessThanOrEqual(0);
+
+      const header = page.locator("header.ix-header");
+      const menu = header.locator("button.ix-menu-btn");
+      await expect(menu).toBeVisible();
+      await expect(menu).toHaveAttribute("aria-expanded", "false");
+      // Closed: only the brand and the menu button are on the row, both inside the viewport.
+      for (const control of [header.locator(".ix-brand"), menu]) {
+        const box = await control.boundingBox();
         expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
         expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
-        expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
         expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
       }
-      await page
-        .locator("header.ix-header")
-        .getByRole("button", { name: /Dark|다크/ })
-        .click();
+      await expect(header.getByRole("navigation")).toBeHidden();
+
+      await menu.click();
+      await expect(menu).toHaveAttribute("aria-expanded", "true");
+      await expect(header.getByRole("navigation")).toBeVisible();
+      expect(await overflow()).toBeLessThanOrEqual(0);
+      // Five pages, the language switch and the theme switch: all reachable and inside the viewport.
+      await expect(header.getByRole("navigation").getByRole("link")).toHaveCount(5);
+      for (const control of await header.locator(".ix-menu a, .ix-menu button").all()) {
+        const box = await control.boundingBox();
+        expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+      }
+      await header.getByRole("button", { name: /Dark|다크/ }).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+      // Escape closes it and gives the focus back to the button.
+      await page.keyboard.press("Escape");
+      await expect(menu).toHaveAttribute("aria-expanded", "false");
+      await expect(menu).toBeFocused();
+
+      // Choosing a page closes it as well.
+      await menu.click();
+      await header.getByRole("navigation").getByRole("link").nth(1).click();
+      await expect(page).toHaveURL(/\/guide\/features$/);
+      await expect(menu).toHaveAttribute("aria-expanded", "false");
     } finally {
       await closeAll(user);
     }

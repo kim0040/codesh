@@ -42,16 +42,21 @@ test("scroll reveal never leaves content invisible", async ({ browser }) => {
   const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
   const { page } = user;
   try {
-    // Jumping straight to an anchor skips everything above it; none of it may stay blank.
-    await openIntro(page, "/#faq");
+    // Landing far down the page skips everything above it; none of it may stay blank.
+    await openIntro(page, "/#ix-faq-title");
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect
       .poll(() =>
         page.evaluate(
           () =>
-            [
-              ...document.querySelectorAll<HTMLElement>("#how [data-reveal], #fast [data-reveal]"),
-            ].filter((node) => getComputedStyle(node).opacity !== "1").length,
+            ["#ix-how-title", "#ix-fast-title"]
+              .flatMap((id) => [
+                ...(document
+                  .querySelector(id)
+                  ?.closest("section")
+                  ?.querySelectorAll("[data-reveal]") ?? []),
+              ])
+              .filter((node) => getComputedStyle(node).opacity !== "1").length,
         ),
       )
       .toBe(0);
@@ -76,7 +81,7 @@ test("reduced motion: every section is visible at once", async ({ browser }) => 
     expect(await hiddenReveals(user.page)).toBe(0);
     await expect(user.page.locator(".ix-stage-art")).toHaveCSS(
       "animation-duration",
-      /^(0s|1e-05s)$/,
+      /^(0s|1e-05s|0\.00001s)$/,
     );
   } finally {
     await closeAll(user);
@@ -136,9 +141,11 @@ for (const locale of ["ko", "en"] as const) {
         localStorage.setItem("codesh.locale", value);
       }, locale);
       await openIntro(page);
+      // Closed, the header is the brand and the menu button.
       const tops = await page
-        .locator("header.ix-header button, header.ix-header .ix-brand")
+        .locator("header.ix-header .ix-menu-btn, header.ix-header .ix-brand")
         .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().top));
+      expect(tops).toHaveLength(2);
       expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(12);
 
       // The page does not scroll sideways, and no part of a section pokes out of the viewport
@@ -161,3 +168,27 @@ for (const locale of ["ko", "en"] as const) {
     }
   });
 }
+
+test("the home page sums up each topic and links to its page", async ({ browser }) => {
+  const user = await newUser(browser, "Maya", { viewport: { width: 1280, height: 800 } });
+  const { page } = user;
+  try {
+    await openIntro(page);
+    const main = page.locator("main");
+    for (const [slug, name] of [
+      ["how", "How it works"],
+      ["features", "Features"],
+      ["network", "Network"],
+      ["security", "Privacy"],
+      ["faq", "All questions"],
+    ] as const) {
+      const link = main.locator(`a.ix-more[href="/guide/${slug}"]`);
+      await expect(link, slug).toHaveCount(1);
+      await expect(link, slug).toContainText(name === "All questions" ? name : "Read more");
+    }
+    // Only a few questions are on the home page; the rest are on the FAQ page.
+    expect(await main.locator(".ix-faq-item").count()).toBe(3);
+  } finally {
+    await closeAll(user);
+  }
+});
