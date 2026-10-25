@@ -1,4 +1,7 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   type DiagnosticDetails,
   type DiagnosticEvent,
@@ -7,6 +10,8 @@ import {
   DiagnosticRing,
   type DiagnosticSnapshot,
   type DiagnosticSource,
+  diagnosticError,
+  scrubDiagnosticDetails,
 } from "@codesh/shared";
 import type { DiagnosticsStore } from "./types.js";
 
@@ -16,10 +21,15 @@ import type { DiagnosticsStore } from "./types.js";
  */
 export class ServerDiagnostics {
   readonly ring = new DiagnosticRing();
+  readonly bootId = randomUUID();
   private dirty = false;
   private writing = false;
   private writeDone: Promise<void> | undefined;
   private starting: Promise<void> | undefined;
+  private recentCache:
+    | { at: number; value: { events: DiagnosticEvent[]; snapshots: DiagnosticSnapshot[] } }
+    | undefined;
+  private recentCacheDirty = false;
   private readonly errorMinutes = new Map<number, number>();
   private readonly startedAt = Date.now();
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -40,15 +50,16 @@ export class ServerDiagnostics {
     kind: DiagnosticKind,
     details: DiagnosticDetails = {},
     level: DiagnosticLevel = "warn",
+    at = Date.now(),
   ): void {
-    this.ring.record(this.source, kind, details, level);
+    this.ring.record(this.source, kind, details, level, at);
+    if (this.recentCache) this.recentCacheDirty = true;
     if (level === "error") {
-      const minute = Math.floor(Date.now() / 60_000);
+      const minute = Math.floor(at / 60_000);
       this.errorMinutes.set(
         minute,
         Math.min(Number.MAX_SAFE_INTEGER, (this.errorMinutes.get(minute) ?? 0) + 1),
       );
-      this.pruneErrors();
     }
     this.dirty = true;
   }
@@ -57,7 +68,10 @@ export class ServerDiagnostics {
       try {
         const previous = (await this.store.list()).find((s) => s.slot === this.slot);
         if (previous) {
-          this.ring.load([...previous.events, ...this.ring.list()]);
+          this.ring.load({
+            events: [...previous.events, ...this.ring.list()],
+            breadcrumbs: [...(previous.breadcrumbs ?? []), ...this.ring.listBreadcrumbs()],
+          });
           for (const [minute, count] of previous.errorMinutes ?? [])
             this.errorMinutes.set(
               minute,
@@ -85,11 +99,13 @@ export class ServerDiagnostics {
     return {
       slot: this.slot,
       source: this.source,
+      bootId: this.bootId,
       at: new Date().toISOString(),
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       ...this.counts(),
       errorMinutes: [...this.errorMinutes.entries()],
       events: this.ring.list(),
+      breadcrumbs: this.ring.listBreadcrumbs(),
     };
   }
   async flush(heartbeat = false): Promise<void> {
@@ -114,23 +130,102 @@ export class ServerDiagnostics {
   }
   /** Merge in-memory events with persisted snapshots, avoiding this process's stale mirror. */
   async recent(): Promise<{ events: DiagnosticEvent[]; snapshots: DiagnosticSnapshot[] }> {
-    const stored = await this.store.list().catch(() => {
-      this.record("mongo_error", {}, "error");
+    if (this.recentCache && Date.now() - this.recentCache.at < 5000) {
+      if (this.recentCacheDirty) {
+        const snapshots = this.recentCache.value.snapshots.filter((s) => s.slot !== this.slot);
+        snapshots.push(this.snapshot());
+        this.recentCache.value = {
+          snapshots,
+          events: snapshots
+            .flatMap((snapshot) => snapshot.events)
+            .sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
+        };
+        this.recentCacheDirty = false;
+      }
+      return this.recentCache.value;
+    }
+    const stored = await this.store.list().catch((error: unknown) => {
+      this.record("mongo_error", diagnosticError(error), "error");
       return [];
     });
     const snapshots = stored.filter(
       (s) => Date.parse(s.at) >= Date.now() - 14 * 86400_000 && s.slot !== this.slot,
     );
     snapshots.push(this.snapshot());
-    for (const snapshot of snapshots) {
+    const cleanSnapshots = snapshots.map((snapshot) => {
       const ring = new DiagnosticRing();
-      ring.load(snapshot.events);
-      snapshot.events = ring.list();
-    }
-    return {
-      snapshots,
-      events: snapshots.flatMap((s) => s.events).sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
+      ring.load({ events: snapshot.events, breadcrumbs: snapshot.breadcrumbs });
+      return {
+        ...snapshot,
+        events: ring.list(),
+        breadcrumbs: ring.listBreadcrumbs(),
+      };
+    });
+    const value = {
+      snapshots: cleanSnapshots,
+      events: cleanSnapshots
+        .flatMap((snapshot) => snapshot.events)
+        .sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
     };
+    this.recentCache = { at: Date.now(), value };
+    this.recentCacheDirty = false;
+    return value;
+  }
+}
+
+export type CrashDiagnosticKind = Extract<DiagnosticKind, "uncaught" | "rejection">;
+
+/** Small, scrubbed crash records survive a Node process restart within its writable temp area. */
+export function crashDiagnosticPath(source: "api" | "collab"): string {
+  const dataDir = process.env.CODESH_DATA_DIR ?? process.env.DATA_DIR;
+  return dataDir
+    ? join(dataDir, "tmp", `${source}-crash.json`)
+    : join(tmpdir(), "codesh", "tmp", `${source}-crash.json`);
+}
+
+export function writeCrashDiagnostic(
+  path: string,
+  kind: CrashDiagnosticKind,
+  details: unknown,
+  at = Date.now(),
+): void {
+  try {
+    const payload = JSON.stringify({ kind, details: scrubDiagnosticDetails(details), at });
+    if (Buffer.byteLength(payload) > 8192) return;
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(path, payload, { encoding: "utf8", mode: 0o600 });
+  } catch {
+    /* A crash reporter must never delay or replace the original process failure. */
+  }
+}
+
+export function ingestCrashDiagnostic(path: string, diagnostics: ServerDiagnostics): boolean {
+  let value: unknown;
+  try {
+    const text = readFileSync(path, "utf8");
+    if (Buffer.byteLength(text) > 8192) throw new Error("crash record too large");
+    value = JSON.parse(text);
+  } catch {
+    try {
+      unlinkSync(path);
+    } catch {
+      /* Missing or inaccessible temp files do not prevent startup. */
+    }
+    return false;
+  }
+  try {
+    if (!value || typeof value !== "object") return false;
+    const record = value as { kind?: unknown; details?: unknown; at?: unknown };
+    if (record.kind !== "uncaught" && record.kind !== "rejection") return false;
+    const at = typeof record.at === "number" && Number.isFinite(record.at) ? record.at : Date.now();
+    diagnostics.record(record.kind, scrubDiagnosticDetails(record.details), "error", at);
+    return true;
+  } finally {
+    try {
+      unlinkSync(path);
+    } catch {
+      /* It is safe to leave a failed cleanup for startup's next attempt. */
+    }
   }
 }
 

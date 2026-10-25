@@ -41,11 +41,27 @@ export function diagnosticExportEvents(events: DiagnosticEvent[]): DiagnosticEve
     },
   }));
 }
+export function shouldRecordApiFailure(status: number): boolean {
+  return (
+    status === 0 ||
+    status >= 500 ||
+    (status >= 400 && status < 500 && ![401, 403, 404, 409, 429].includes(status))
+  );
+}
+export const isBenignResizeObserverError = (message: string): boolean =>
+  /^ResizeObserver loop(?: limit exceeded| completed with undelivered notifications\.)?$/i.test(
+    message,
+  );
 
 const STORAGE_KEY = "codesh.diagnostics.v1";
 const ENABLED_KEY = "codesh.diagnostics.enabled";
 const ring = new DiagnosticRing();
+const bootId = newDiagnosticReference();
 const listeners = new Set<() => void>();
+const activeContexts = new Map<
+  string,
+  Pick<DiagnosticDetails, "documentSize" | "fileCount" | "connectionCount">
+>();
 let loaded = false;
 let enabled = true;
 let revision = 0;
@@ -70,7 +86,10 @@ function load() {
 function persist() {
   timer = undefined;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ring.list()));
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored && stored.length <= DIAGNOSTIC_CAPS.bytes * 2) ring.merge(JSON.parse(stored));
+    const value = JSON.stringify(ring.snapshot());
+    if (value !== stored) localStorage.setItem(STORAGE_KEY, value);
   } catch {
     /* Memory only. */
   }
@@ -104,7 +123,51 @@ export const subscribeDiagnostics = (listener: () => void) => {
 export const diagnosticsRevision = () => revision;
 export function diagnosticsState() {
   load();
-  return { enabled, count: ring.list().length };
+  return { enabled, count: ring.count };
+}
+export function updateDiagnosticContext(
+  reference: string,
+  values: Pick<DiagnosticDetails, "documentSize" | "fileCount" | "connectionCount">,
+): void {
+  if (!/^[a-f0-9]{16}$/.test(reference)) return;
+  if (!activeContexts.has(reference) && activeContexts.size >= 50) {
+    const oldest = activeContexts.keys().next().value;
+    if (oldest) activeContexts.delete(oldest);
+  }
+  activeContexts.delete(reference);
+  activeContexts.set(reference, values);
+}
+export function clearDiagnosticContext(reference: string): void {
+  activeContexts.delete(reference);
+}
+export function diagnosticContextDetails(): Pick<
+  DiagnosticDetails,
+  "documentSize" | "fileCount" | "connectionCount"
+> {
+  const values = [...activeContexts.values()];
+  const sizeRank = ["lt_64k", "64k_1m", "1m_10m", "gte_10m"] as const;
+  const countRank = ["0", "1", "2_5", "6_20", "gte_21"] as const;
+  const max = <T extends string>(rows: Array<T | undefined>, rank: readonly T[]): T | undefined => {
+    const index = Math.max(-1, ...rows.map((row) => rank.indexOf(row as T)));
+    return rank[index];
+  };
+  const documentSize = max(
+    values.map((row) => row.documentSize),
+    sizeRank,
+  );
+  const fileCount = max(
+    values.map((row) => row.fileCount),
+    countRank,
+  );
+  const connectionCount = max(
+    values.map((row) => row.connectionCount),
+    countRank,
+  );
+  return {
+    ...(documentSize ? { documentSize } : {}),
+    ...(fileCount ? { fileCount } : {}),
+    ...(connectionCount ? { connectionCount } : {}),
+  };
 }
 export function setDiagnosticsEnabled(value: boolean): void {
   load();
@@ -144,7 +207,7 @@ export function installDiagnostics(): void {
   load();
   persist();
   window.addEventListener("error", (event) => {
-    if (event instanceof ErrorEvent)
+    if (event instanceof ErrorEvent && !isBenignResizeObserverError(event.message))
       captureDiagnosticError("uncaught", event.error, {
         location: diagnosticLocation(event.filename),
         line: event.lineno,
@@ -161,10 +224,19 @@ export function installDiagnostics(): void {
       revision++;
       for (const listener of listeners) listener();
     }
-    if (event.key === STORAGE_KEY && event.newValue === null) {
-      ring.clear();
-      if (timer) clearTimeout(timer);
-      timer = undefined;
+    if (event.key === STORAGE_KEY) {
+      if (event.newValue === null) {
+        ring.clear();
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+      } else if (event.newValue.length <= DIAGNOSTIC_CAPS.bytes * 2) {
+        try {
+          if (!ring.merge(JSON.parse(event.newValue))) return;
+          timer ??= setTimeout(persist, 1000);
+        } catch {
+          return;
+        }
+      }
       revision++;
       for (const listener of listeners) listener();
     }
@@ -173,7 +245,11 @@ export function installDiagnostics(): void {
     if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries())
-          if (entry.duration >= 200) recordDiagnostic("long_task", { durationMs: entry.duration });
+          if (entry.duration >= 200)
+            recordDiagnostic("long_task", {
+              durationMs: entry.duration,
+              ...diagnosticContextDetails(),
+            });
       });
       observer.observe({ type: "longtask", buffered: true });
     }
@@ -277,13 +353,14 @@ export function clientDiagnosticExport(): string {
   return JSON.stringify(
     {
       format: 1,
-      header:
-        "codesh client diagnostics: local operational events, counts, redacted error categories/source frames and environment. Document text, file names, user values, URLs, credentials and share IDs are omitted; random session references are hashed anew per export. Nothing is sent automatically.",
+      header: `codesh client diagnostics v${version()}: local operational events, a short breadcrumb timeline, counts, redacted error categories/source frames and environment. Document text, file names, user values, URLs, credentials and share IDs are omitted; random session references are hashed anew per export. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${version()}.tar.gz. Nothing is sent automatically.`,
       exportedAt: new Date().toISOString(),
+      bootId,
       caps: DIAGNOSTIC_CAPS,
       enabled,
       environment: environment(),
       events: diagnosticExportEvents(ring.list()),
+      breadcrumbs: ring.listBreadcrumbs(),
     },
     null,
     2,

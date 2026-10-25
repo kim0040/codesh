@@ -1,4 +1,10 @@
-export { diagnosticShareRef, ServerDiagnostics } from "./diagnostics.js";
+export {
+  crashDiagnosticPath,
+  diagnosticShareRef,
+  ingestCrashDiagnostic,
+  ServerDiagnostics,
+  writeCrashDiagnostic,
+} from "./diagnostics.js";
 export { createMemoryStores } from "./memory.js";
 export {
   COLLECTIONS,

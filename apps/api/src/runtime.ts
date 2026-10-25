@@ -1,3 +1,4 @@
+import { diagnosticError } from "@codesh/shared";
 import {
   connectMongo,
   createMemoryStores,
@@ -28,12 +29,14 @@ export async function createRuntime(config: Config): Promise<Runtime> {
   const diagnostics = new ServerDiagnostics(
     "api",
     stores.diagnostics,
-    process.env.HOSTNAME ?? "default",
+    process.env.INSTANCE_ID ?? "api",
   );
   let mongoFailed = false;
-  mongo?.client.on("serverHeartbeatFailed", () => {
+  mongo?.client.on("serverHeartbeatFailed", (event) => {
     mongoFailed = true;
-    diagnostics.record("mongo_error", {}, "error");
+    const failure =
+      event && typeof event === "object" && "failure" in event ? event.failure : event;
+    diagnostics.record("mongo_error", diagnosticError(failure), "error");
   });
   mongo?.client.on("serverHeartbeatSucceeded", () => {
     if (mongoFailed) {

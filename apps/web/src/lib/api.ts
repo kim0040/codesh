@@ -27,7 +27,7 @@ import type {
   Template,
   UploadResult,
 } from "@codesh/shared";
-import { recordDiagnostic } from "./diagnostics";
+import { recordDiagnostic, shouldRecordApiFailure } from "./diagnostics";
 
 /** Thin fetch client for the HTTP API (docs/ARCHITECTURE.md §9). Same origin, cookie session. */
 
@@ -139,17 +139,18 @@ export async function rawRequest(
   }
   if (!response.ok) {
     const error = await errorFrom(response);
-    recordDiagnostic(
-      "api_failure",
-      {
-        method,
-        route: path,
-        status: response.status,
-        code: error.code,
-        durationMs: performance.now() - started,
-      },
-      response.status >= 500 ? "error" : "warn",
-    );
+    if (shouldRecordApiFailure(response.status))
+      recordDiagnostic(
+        "api_failure",
+        {
+          method,
+          route: path,
+          status: response.status,
+          code: error.code,
+          durationMs: performance.now() - started,
+        },
+        response.status >= 500 ? "error" : "warn",
+      );
     throw error;
   }
   return response;

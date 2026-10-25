@@ -1,4 +1,9 @@
-import { COLLAB_MAX_PAYLOAD_BYTES, namespace, SWEEPER_INTERVAL_MS } from "@codesh/shared";
+import {
+  COLLAB_MAX_PAYLOAD_BYTES,
+  diagnosticError,
+  namespace,
+  SWEEPER_INTERVAL_MS,
+} from "@codesh/shared";
 import { diagnosticShareRef, ServerDiagnostics, type Stores } from "@codesh/storage";
 import { Redis as RedisExtension } from "@hocuspocus/extension-redis";
 import { type Extension, Server } from "@hocuspocus/server";
@@ -80,7 +85,7 @@ export function createCollabServer(options: CollabOptions): CollabServer {
   const diagnostics = new ServerDiagnostics(
     "collab",
     options.stores.diagnostics,
-    options.instanceId,
+    process.env.INSTANCE_ID ?? "collab",
     () => ({
       connections: server?.hocuspocus.getConnectionsCount() ?? 0,
       documents: server?.hocuspocus.getDocumentsCount() ?? 0,
@@ -99,10 +104,10 @@ export function createCollabServer(options: CollabOptions): CollabServer {
   // ioredis reconnects by itself; without listeners it reports every failed attempt as unhandled.
   let valkeyErrorAt = 0;
   const onValkeyError = (error: unknown) => {
-    diagnostics.record("valkey_error", {}, "error");
+    diagnostics.record("valkey_error", diagnosticError(error), "error");
     if (Date.now() - valkeyErrorAt < 10_000) return;
     valkeyErrorAt = Date.now();
-    console.error("collab: Valkey connection error", error);
+    console.error("collab: Valkey connection error", diagnosticError(error));
   };
   redis.on("error", onValkeyError);
   subscriber.on("error", onValkeyError);
@@ -174,8 +179,8 @@ export function createCollabServer(options: CollabOptions): CollabServer {
           sweeping = true;
           sweep(options.stores, sweeperLock)
             .catch((error) => {
-              diagnostics.record("background_error", {}, "error");
-              console.error("collab: sweep failed", error);
+              diagnostics.record("background_error", diagnosticError(error), "error");
+              console.error("collab: sweep failed", diagnosticError(error));
             })
             .finally(() => {
               sweeping = false;

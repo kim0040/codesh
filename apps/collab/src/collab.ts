@@ -16,7 +16,9 @@ import {
   collabCommandSchema,
   DEFAULT_FILE_ID,
   defaultSettings,
+  diagnosticCountBucket,
   diagnosticError,
+  diagnosticSizeBucket,
   FLUSH_INTERVAL_MS,
   HISTORY_SNAPSHOT_INTERVAL_MS,
   keys,
@@ -40,6 +42,7 @@ import {
   YDOC,
 } from "@codesh/shared";
 import type { ServerDiagnostics, ShareUpdate, Stores } from "@codesh/storage";
+import { diagnosticShareRef } from "@codesh/storage";
 import type {
   afterHandleMessagePayload,
   afterUnloadDocumentPayload,
@@ -289,7 +292,9 @@ export class Collab implements Extension<CollabContext> {
     const cmdPattern = channels.cmdPattern();
     this.deps.subscriber.on("pmessage", (pattern: string, channel: string, message: string) => {
       // A rejection here would end the process; both handlers log their own errors.
-      const log = (error: unknown) => console.error(`collab: message on ${channel} failed`, error);
+      const shareId = channel.slice(channel.indexOf(":") + 1);
+      const log = (error: unknown) =>
+        this.logFailure("collab: message handler failed", error, shareId);
       if (pattern === permPattern)
         this.applyPermission(channel.slice(permPattern.length - 1), message).catch(log);
       else if (pattern === cmdPattern)
@@ -391,7 +396,13 @@ export class Collab implements Extension<CollabContext> {
       stillOwner: () => this.lock.renew(lockKey).catch(() => false),
       onFlush: (ms) => {
         this.deps.metrics.flushSeconds.observe(ms / 1000);
-        if (ms > 200) this.deps.diagnostics?.record("slow_flush", { durationMs: ms });
+        if (ms > 200)
+          this.deps.diagnostics?.record("slow_flush", {
+            durationMs: ms,
+            documentSize: diagnosticSizeBucket(core.sizeEstimate),
+            fileCount: diagnosticCountBucket(document.getMap(YDOC.files).size),
+            connectionCount: diagnosticCountBucket(document.getConnectionsCount()),
+          });
       },
     });
     core.owner = await this.lock.acquire(lockKey).catch(() => false);
@@ -466,7 +477,7 @@ export class Collab implements Extension<CollabContext> {
           await this.enforce(state, message, [connection]);
       }
     } catch (error) {
-      console.error(`collab: catching up a connection to ${state.name} failed`, error);
+      this.logFailure("collab: catching up a connection failed", error, state.name);
       state.reconciledAt = 0;
     }
   }
@@ -510,7 +521,7 @@ export class Collab implements Extension<CollabContext> {
       await state.core.history(true);
       await state.core.compact();
     } catch (error) {
-      console.error(`collab: saving ${documentName} before unload failed`, error);
+      this.logFailure("collab: saving a document before unload failed", error, documentName);
       // Shutting down: unload anyway so the process can exit. Connected clients still hold these
       // updates and send them to the instance they reconnect to.
       if (this.shuttingDown) return;
@@ -529,7 +540,7 @@ export class Collab implements Extension<CollabContext> {
         // Updates that arrived from other instances while extension-redis delayed the unload.
         if (!state.deleted) await state.core.flush();
       } catch (error) {
-        console.error(`collab: final flush of ${documentName} failed`, error);
+        this.logFailure("collab: final document flush failed", error, documentName);
       }
       await this.release(state);
     })();
@@ -701,13 +712,29 @@ export class Collab implements Extension<CollabContext> {
     return Math.min(this.settings.maxDocBytes, MAX_DOC_BYTES_LIMIT);
   }
 
-  /** Logs `error` unless the same `key` was logged within `ERROR_LOG_INTERVAL_MS`. */
-  private logThrottled(key: string, message: string, error: unknown) {
+  private shareRef(id: string): string {
+    return diagnosticShareRef(this.deps.secret, id);
+  }
+
+  private logFailure(message: string, error: unknown, shareId?: string): void {
+    console.error(
+      message,
+      ...(shareId ? [{ shareRef: this.shareRef(shareId) }] : []),
+      diagnosticError(error),
+    );
+  }
+
+  /** Logs a scrubbed error unless the same `key` was logged within `ERROR_LOG_INTERVAL_MS`. */
+  private logThrottled(key: string, message: string, error: unknown, shareId?: string) {
     this.deps.diagnostics?.record("background_error", diagnosticError(error), "error");
     const now = Date.now();
     if (now - (this.loggedAt.get(key) ?? 0) < ERROR_LOG_INTERVAL_MS) return;
     this.loggedAt.set(key, now);
-    console.error(message, error);
+    console.error(
+      message,
+      ...(shareId ? [{ shareRef: this.shareRef(shareId) }] : []),
+      diagnosticError(error),
+    );
   }
 
   /** Runs a database read for a client; a failure is reported as `unavailable`, not a refusal. */
@@ -717,7 +744,9 @@ export class Collab implements Extension<CollabContext> {
     } catch (error) {
       if (isDenied(error, COLLAB_DENY_REASONS.notFound)) throw error;
       this.deps.diagnostics?.record("mongo_error", diagnosticError(error), "error");
-      console.error(`collab: ${label} failed`, error);
+      const operation = label.split(" ")[0] ?? "database operation";
+      const shareId = label.split(" ").at(-1);
+      this.logFailure(`collab: ${operation} failed`, error, shareId);
       throw deny(COLLAB_DENY_REASONS.unavailable);
     }
   }
@@ -754,7 +783,7 @@ export class Collab implements Extension<CollabContext> {
           });
           this.logThrottled(
             `flush:${state.name}`,
-            `collab: flush of ${state.name} failed (${state.flushFailures} in a row), retrying`,
+            `collab: flush failed (${state.flushFailures} in a row), retrying`,
             error,
           );
         })
@@ -784,7 +813,9 @@ export class Collab implements Extension<CollabContext> {
       if (this.orphaned(state)) {
         // A load that failed after onLoadDocument (an `afterLoadDocument` hook threw): Hocuspocus
         // dropped the document, so nothing would ever unload this copy or give up its lock.
-        console.error(`collab: dropping ${state.name}, its load did not complete`);
+        console.error("collab: dropping an unloaded document", {
+          shareRef: this.shareRef(state.name),
+        });
         await this.release(state);
         continue;
       }
@@ -827,7 +858,7 @@ export class Collab implements Extension<CollabContext> {
           if (got === null || got === undefined) return;
           if (state.core.owner) {
             if (!got) {
-              this.deps.diagnostics?.record("lock_lost", {}, "error");
+              this.deps.diagnostics?.record("lock_lost", { code: "lock_lost" }, "error");
               state.core.disown();
             }
             return;
@@ -838,7 +869,7 @@ export class Collab implements Extension<CollabContext> {
               await this.lock.release(lockKey(state));
             else await state.core.adopt();
           } catch (error) {
-            this.logThrottled("lock", `collab: taking over ${state.name} failed`, error);
+            this.logThrottled("lock", "collab: lock takeover failed", error);
           }
         }),
       );
@@ -860,12 +891,14 @@ export class Collab implements Extension<CollabContext> {
       const share = await this.currentShare(state.name);
       if (state.deleted || state.document.isDestroyed) return;
       if (!share) {
-        console.warn(`collab: share ${state.name} no longer exists, closing it`);
+        console.warn("collab: share no longer exists, closing it", {
+          shareRef: this.shareRef(state.name),
+        });
         return this.applyDelete(state);
       }
       this.applyShare(state, share, false);
     } catch (error) {
-      this.logThrottled("reconcile", `collab: re-reading share ${state.name} failed`, error);
+      this.logThrottled("reconcile", "collab: re-reading share failed", error, state.name);
       state.reconciledAt = 0;
     } finally {
       state.reconciling = false;
@@ -916,7 +949,7 @@ export class Collab implements Extension<CollabContext> {
     try {
       this.settings = await this.deps.stores.settings.get();
     } catch (error) {
-      console.error("collab: reading settings failed", error);
+      this.logFailure("collab: reading settings failed", error);
     }
   }
 
@@ -932,11 +965,13 @@ export class Collab implements Extension<CollabContext> {
       );
       // Expired by the TTL index while loaded: nobody publishes a delete for that.
       if (!found && !state.deleted) {
-        console.warn(`collab: share ${state.name} no longer exists, closing it`);
+        console.warn("collab: share no longer exists, closing it", {
+          shareRef: this.shareRef(state.name),
+        });
         this.applyDelete(state);
       }
     } catch (error) {
-      console.error(`collab: activity write for ${state.name} failed`, error);
+      this.logFailure("collab: activity write failed", error, state.name);
     }
   }
 
@@ -967,7 +1002,7 @@ export class Collab implements Extension<CollabContext> {
         .expire(key, NEARBY_ITEM_TTL_SECONDS)
         .exec();
     } catch (error) {
-      console.error(`collab: nearby publish for ${state.name} failed`, error);
+      this.logFailure("collab: nearby publish failed", error, state.name);
     }
   }
 
@@ -999,7 +1034,7 @@ export class Collab implements Extension<CollabContext> {
       if (share) state.share = share;
       else if (!state.deleted) this.applyDelete(state);
     } catch (error) {
-      console.error(`collab: mirroring meta of ${state.name} failed`, error);
+      this.logFailure("collab: mirroring document metadata failed", error, state.name);
     }
   }
 
@@ -1025,7 +1060,9 @@ export class Collab implements Extension<CollabContext> {
             : undefined,
         ).data;
     if (requestId === undefined) {
-      console.error(`collab: ignoring command without a request id for ${shareId}`);
+      console.error("collab: ignoring command without a request id", {
+        shareRef: this.shareRef(shareId),
+      });
       return;
     }
     if (!(await this.claim(shareId).catch(() => false))) return;
@@ -1046,7 +1083,7 @@ export class Collab implements Extension<CollabContext> {
         ? await this.runCommand(shareId, parsed.data)
         : COLLAB_COMMAND_ERRORS.invalid;
     } catch (cause) {
-      console.error(`collab: command ${requestId} for ${shareId} failed`, cause);
+      this.logFailure("collab: command failed", cause, shareId);
       error = COLLAB_COMMAND_ERRORS.failed;
     } finally {
       // The lock was taken for a doc that did not stay loaded here.
@@ -1057,7 +1094,7 @@ export class Collab implements Extension<CollabContext> {
     const reply: CollabCommandReply = error === undefined ? { ok: true } : { ok: false, error };
     await this.deps.redis
       .publish(channels.cmdReply(requestId), JSON.stringify(reply))
-      .catch((cause) => console.error(`collab: reply to command ${requestId} failed`, cause));
+      .catch((cause) => this.logFailure("collab: command reply failed", cause));
   }
 
   /** True when this instance holds the doc lock (now), so it is the one to run a command. */
@@ -1131,7 +1168,7 @@ export class Collab implements Extension<CollabContext> {
       // a second, which the reply must not wait for.
       connection
         .disconnect()
-        .catch((cause) => console.error(`collab: closing the command connection failed`, cause));
+        .catch((cause) => this.logFailure("collab: closing a command connection failed", cause));
     }
   }
 
@@ -1143,7 +1180,9 @@ export class Collab implements Extension<CollabContext> {
     try {
       message = permMessageSchema.parse(JSON.parse(raw));
     } catch {
-      console.error(`collab: ignoring malformed perm message for ${shareId}`);
+      console.error("collab: ignoring malformed permission message", {
+        shareRef: this.shareRef(shareId),
+      });
       return;
     }
     // Kept for connections that are authenticating now and are not on the doc yet.
@@ -1158,7 +1197,7 @@ export class Collab implements Extension<CollabContext> {
       await this.enforce(state, message, state.document.getConnections());
       if (message.kind === "role" || message.kind === "kick") await this.reconcile(state);
     } catch (error) {
-      console.error(`collab: applying a ${message.kind} message to ${shareId} failed`, error);
+      this.logFailure("collab: applying a permission message failed", error, shareId);
       // Read the share again on the next lock tick.
       state.reconciledAt = 0;
     }
@@ -1186,9 +1225,9 @@ export class Collab implements Extension<CollabContext> {
         if (role !== undefined && clientId !== undefined) {
           const newest = state.roleVersions.get(clientId) ?? -1;
           if (message.version < newest) {
-            console.warn(
-              `collab: ignoring role message ${message.version} for ${state.name}, ${newest} was applied`,
-            );
+            console.warn("collab: ignoring stale role message", {
+              shareRef: this.shareRef(state.name),
+            });
             return;
           }
           state.roleVersions.set(clientId, message.version);

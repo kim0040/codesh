@@ -104,7 +104,7 @@ export class Ctx {
     this.version = deps.version ?? VERSION;
     this.diagnostics =
       deps.diagnostics ??
-      new ServerDiagnostics("api", deps.stores.diagnostics, process.env.HOSTNAME ?? "default");
+      new ServerDiagnostics("api", deps.stores.diagnostics, process.env.INSTANCE_ID ?? "api");
     this.updates = new UpdateChecker(
       deps.config.update,
       deps.valkey,

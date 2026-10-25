@@ -53,7 +53,8 @@ in the admin console within about 12 hours and install it with `./update.sh` (do
    release asset limit. The archives get provenance attestations too.
 4. **release**: `SHA256SUMS` over all archives, then `gh release create vX.Y.Z` with the CHANGELOG
    section plus update instructions as notes, and the archives, their `.sha256` files and
-   `SHA256SUMS` as assets. Marked `--latest`, or `--prerelease` for a suffix version.
+   `SHA256SUMS` as assets; hidden web maps are attached as `codesh-web-sourcemaps-X.Y.Z.tar.gz` for
+   symbolication and are removed from the served web image. Marked `--latest`, or `--prerelease` for a suffix version.
 
 A failed run publishes no release. Fix the cause and re-run the failed jobs; to rebuild from a
 different commit, delete the tag (`git push --delete origin vX.Y.Z`) and the images' new versions in

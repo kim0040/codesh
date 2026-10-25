@@ -86,8 +86,7 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
       );
       return {
         format: 1,
-        header:
-          "codesh server diagnostics: operational categories, redacted source frames and counts. No document content, credentials, URLs or client addresses.",
+        header: `codesh server diagnostics v${ctx.version}: operational categories, short per-process breadcrumb timelines, redacted source frames and counts. No document content, credentials, URLs or client addresses. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${ctx.version}.tar.gz.`,
         exportedAt: new Date().toISOString(),
         version: ctx.version,
         uptimeSeconds: Math.floor((Date.now() - ctx.startedAt) / 1000),
@@ -123,6 +122,12 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
           apiPerMinute: ctx.config.rateLimit.apiPerMinute,
         },
         counters: { errors24h: errors24h(snapshots) },
+        processes: snapshots.map(({ slot, source, bootId, breadcrumbs }) => ({
+          slot,
+          source,
+          bootId,
+          breadcrumbs,
+        })),
         events: events.slice(0, DIAGNOSTIC_SERVER_CAPS.exportEvents),
       };
     },
