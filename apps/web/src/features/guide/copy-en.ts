@@ -64,7 +64,7 @@ export const guideEn = {
     "Select a person in the top bar and choose Follow. Your view scrolls along with theirs until you stop.",
   "guide.how.edit.files.title": "Several files",
   "guide.how.edit.files.body":
-    "A share can hold several files and folders. Each file's language follows its name, and anyone can change it.",
+    "A share can hold several files and folders. Each file’s language follows its name, and the owner can let participants change it.",
   "guide.how.edit.comments.title": "Comments",
   "guide.how.edit.comments.body":
     "Attach a comment to a line or a selection. It stays with that code while the text around it changes, and can be marked as resolved.",
@@ -138,7 +138,7 @@ export const guideEn = {
 
   "guide.features.languages.title": "Syntax highlighting",
   "guide.features.languages.body1":
-    "More than 200 languages, each with its own grammar and colors. The language comes from the file name or is detected from the text, and anyone can change it from the status bar. The change applies to everyone in the share.",
+    "More than 200 languages, each with its own grammar and colors. The language comes from the file name or is detected from the text, and can be changed from the status bar. The change applies to everyone in the share.",
   "guide.features.languages.body2":
     "Every token color meets a contrast ratio of 4.5:1 against the editor theme's background, in the dark and the light themes.",
   "guide.features.languages.searchLabel": "Search languages",

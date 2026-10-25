@@ -60,7 +60,7 @@ export const guideKo: Record<GuideKey, string> = {
     "상단 바에서 사람을 고르고 따라가기를 누르세요. 멈출 때까지 그 사람의 화면 위치를 따라가요.",
   "guide.how.edit.files.title": "여러 파일",
   "guide.how.edit.files.body":
-    "공유 하나에 파일과 폴더를 여러 개 둘 수 있어요. 파일 이름에 따라 언어가 정해지고, 누구든 바꿀 수 있어요.",
+    "공유 하나에 파일과 폴더를 여러 개 둘 수 있어요. 파일 이름에 따라 언어가 정해지고, 소유자가 허용하면 참여자도 바꿀 수 있어요.",
   "guide.how.edit.comments.title": "코멘트",
   "guide.how.edit.comments.body":
     "줄이나 선택 영역에 코멘트를 달 수 있어요. 주변 글이 바뀌어도 그 코드에 붙어 있고, 해결됨으로 표시할 수 있어요.",
@@ -133,7 +133,7 @@ export const guideKo: Record<GuideKey, string> = {
 
   "guide.features.languages.title": "문법 강조",
   "guide.features.languages.body1":
-    "200개가 넘는 언어를 각자의 문법과 색으로 보여줘요. 언어는 파일 이름으로 정하거나 글에서 알아내고, 누구든 상태 표시줄에서 바꿀 수 있어요. 바꾸면 공유한 모두에게 적용돼요.",
+    "200개가 넘는 언어를 각자의 문법과 색으로 보여줘요. 언어는 파일 이름으로 정하거나 글에서 알아내고, 상태 표시줄에서 바꿀 수 있어요. 바꾸면 공유한 모두에게 적용돼요.",
   "guide.features.languages.body2":
     "모든 토큰 색은 어두운 테마와 밝은 테마 모두에서 편집기 배경과의 대비가 4.5:1 이상이에요.",
   "guide.features.languages.searchLabel": "언어 검색",
@@ -342,7 +342,7 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.security.stored.access.title": "코드와 접근 정보",
   "guide.security.stored.access.body":
     "참여 코드, 소유자가 차단한 사람, PIN의 해시값이에요. PIN 자체는 저장하지 않아요.",
-  "guide.security.stored.audit.title": "감사 기록",
+  "guide.security.stored.audit.title": "감사 로그",
   "guide.security.stored.audit.body":
     "기본값은 꺼짐이에요. 관리자가 켜면 누가 공유를 만들고, 열고, 내려받고, 지웠는지 기록하고, 보관 기간(기본값 90일)이 지난 기록은 지워요.",
   "guide.security.stored.how": "얼마나 보관되나요",
@@ -397,7 +397,7 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.security.controls.sizes": "공유와 업로드의 크기 제한",
   "guide.security.controls.guests": "게스트 허용 여부와 OIDC, LDAP 로그인",
   "guide.security.controls.rooms": "방, 그리고 새 공유를 근처 공유에 올릴지",
-  "guide.security.controls.audit": "감사 기록과 보관 기간",
+  "guide.security.controls.audit": "감사 로그와 보관 기간",
   "guide.security.controls.secrets": "붙여넣은 키와 비밀번호에 대한 경고",
   "guide.security.controls.templates": "템플릿과 하단에 보이는 문의처",
   "guide.security.controls.note":
@@ -451,7 +451,7 @@ export const guideKo: Record<GuideKey, string> = {
     "아니요. 모든 것이 네트워크 안의 서버에서 와요. 서버는 새 버전을 확인할 수 있고, 관리자가 이 기능을 끌 수 있어요.",
   "guide.faq.tracking.q": "추적하나요?",
   "guide.faq.tracking.a":
-    "분석 도구, 광고, 추적기가 없고 기본 설정에서 브라우저는 codesh 서버에만 연결해요(관리자가 설정한 로그인 제공자는 예외예요). 관리자가 감사 기록을 켰다면 누가 공유를 만들고, 열고, 내려받고, 지웠는지는 기록돼요.",
+    "분석 도구, 광고, 추적기가 없고 기본 설정에서 브라우저는 codesh 서버에만 연결해요(관리자가 설정한 로그인 제공자는 예외예요). 관리자가 감사 로그를 켰다면 누가 공유를 만들고, 열고, 내려받고, 지웠는지는 기록돼요.",
   "guide.faq.shared.q": "여럿이 쓰는 컴퓨터에 흔적을 남기지 않으려면요?",
   "guide.faq.shared.a":
     "오프라인 사본을 물을 때 이 기기에는 저장 안 함을 고르거나, 다 쓴 뒤 편집기 설정의 이 기기에서 지우기를 누르세요.",

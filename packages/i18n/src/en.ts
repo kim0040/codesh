@@ -65,7 +65,7 @@ export const en = {
   "intro.more.action": "Read more",
   "intro.more.faqAction": "All questions",
   "intro.hero.title": "Share code and edit it together",
-  "intro.hero.sub": "No sign-up. Enter the 6-digit code you were given, or start a new share.",
+  "intro.hero.sub": "No sign-up by default. Enter the 6-digit code you were given, or start a new share.",
   "intro.hero.startAction": "Create a share",
   "intro.join.hint": "Enter the 6 digits you were given",
   "intro.join.submitAction": "Join",
@@ -84,7 +84,7 @@ export const en = {
   "intro.how.title": "How it works",
   "intro.how.step1.title": "Create",
   "intro.how.step1.time": "One click",
-  "intro.how.step1.body": "Start a share. No account needed.",
+  "intro.how.step1.body": "Start a share. No account needed by default.",
   "intro.how.step2.title": "Invite",
   "intro.how.step2.time": "Six digits",
   "intro.how.step2.body": "Show the 6-digit code or QR code, or send the share to a person.",
@@ -957,7 +957,7 @@ export const en = {
   "admin.ops.activity": "Live shares created in the last 24 h · hourly",
   "admin.ops.noEvents": "No diagnostic events",
   "admin.ops.clientHelp":
-    "Collect a client file from the document settings → Diagnostics → Export. Ask the user to share that file. The server does not collect browser diagnostics.",
+    "Collect a client file from Settings → Diagnostics → Export. Ask the user to share that file. The server does not collect browser diagnostics.",
   "admin.ops.level": "Level",
   "admin.ops.source": "Source",
   "admin.ops.period": "Period",
@@ -998,7 +998,6 @@ export const en = {
   "admin.ops.confirm": "Confirm action",
   "admin.ops.confirmBody":
     "Apply this action to the selected share. Deleted shares cannot be recovered.",
-
   // ── Identity ──
   "identity.title": "Choose a name",
   "identity.body": "Others see it next to your cursor. It's remembered on this device.",
