@@ -27,7 +27,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Expand, Radio, Send, UserMinus, Users, X } from "lucide-react";
 import QRCode from "qrcode";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { removeAwarenessStates } from "y-protocols/awareness";
 import { api } from "../../lib/api";
 import { usePresence } from "../../lib/events";
@@ -53,6 +53,7 @@ export function ShareDialog() {
   const tab = (ctx.panel.arg as Tab | undefined) ?? "join";
   const [current, setCurrent] = useState<Tab>(tab);
   const [projector, setProjector] = useState(false);
+  const exitProjector = useCallback(() => setProjector(false), []);
 
   useEffect(() => {
     if (open) setCurrent(tab);
@@ -89,7 +90,7 @@ export function ShareDialog() {
           </Tabs>
         </DialogContent>
       </Dialog>
-      {open && projector ? <Projector onExit={() => setProjector(false)} /> : null}
+      {open && projector ? <Projector onExit={exitProjector} /> : null}
     </>
   );
 }
@@ -266,13 +267,22 @@ function Projector({ onExit }: { onExit: () => void }) {
   const t = useT();
   const ctx = useEditor();
   const root = useRef<HTMLDivElement>(null);
+  const requested = useRef(false);
+  const active = useRef(false);
   const url = shareUrl(ctx.share.id);
   const qr = useQr(url, 720);
 
   useEffect(() => {
     const element = root.current;
+    active.current = true;
     element?.focus();
-    if (element) void requestFullscreen(element);
+    // One request per opening, including React StrictMode's setup/cleanup/setup replay.
+    if (element && !requested.current) {
+      requested.current = true;
+      void requestFullscreen(element).then((entered) => {
+        if (entered && !active.current && fullscreenElement() === element) void exitFullscreen();
+      });
+    }
     // Esc leaves element fullscreen on its own (browsers do not pass that key to the page there),
     // and ⌘⌃F or F11 only changes the window, which the overlay already fills.
     const onChange = () => {
@@ -285,9 +295,13 @@ function Projector({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener("keydown", onKey);
     return () => {
+      active.current = false;
       for (const name of FULLSCREEN_CHANGE_EVENTS) document.removeEventListener(name, onChange);
       window.removeEventListener("keydown", onKey);
-      if (fullscreenElement()) void exitFullscreen();
+      // The replay remounts synchronously; a real close releases only our fullscreen element.
+      queueMicrotask(() => {
+        if (!active.current && fullscreenElement() === element) void exitFullscreen();
+      });
     };
   }, [onExit]);
 

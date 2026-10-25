@@ -1,4 +1,4 @@
-import { EditorSelection, type Extension, type Transaction } from "@codemirror/state";
+import { EditorSelection, type Extension, Transaction } from "@codemirror/state";
 import {
   EditorView,
   type LayerMarker,
@@ -6,6 +6,7 @@ import {
   RectangleMarker,
   type ViewUpdate,
 } from "@codemirror/view";
+import { ySyncAnnotation } from "y-codemirror.next";
 
 /**
  * Smooth typing: the main cursor glides to its next place, the way Word's caret follows typing.
@@ -21,8 +22,18 @@ import {
 /** Vertical distance, in lines, up to which the cursor glides; a longer move jumps. */
 const GLIDE_MAX_LINES = 3;
 
+/** Yjs maps our selection through remote edits without an explicit local selection move. */
+export function localCaretActivity(tr: Transaction): boolean {
+  if (tr.annotation(ySyncAnnotation) || tr.annotation(Transaction.remote)) return false;
+  return (
+    Boolean(tr.selection) ||
+    (tr.docChanged && (tr.isUserEvent("input") || tr.isUserEvent("delete")))
+  );
+}
+
 /** Moves that read as typing or stepping through the text, never jumps the user did not make. */
-function glides(tr: Transaction): boolean {
+export function glides(tr: Transaction): boolean {
+  if (!localCaretActivity(tr)) return false;
   if (tr.isUserEvent("input.paste") || tr.isUserEvent("input.drop")) return false;
   if (tr.isUserEvent("select.pointer")) return false;
   if (tr.isUserEvent("input.type.compose")) return false;
@@ -92,10 +103,15 @@ export function smoothCaret(): Extension {
           update.transactions.every(glides) &&
           !(update.geometryChanged && !update.docChanged);
       }
-      // Like CodeMirror's own cursor: a move restarts the blink, visible, by switching animations.
-      if (update.transactions.some((tr) => tr.selection || tr.docChanged)) {
-        dom.style.animationName =
-          dom.style.animationName === "cm-smooth-blink" ? "cm-smooth-blink2" : "cm-smooth-blink";
+      // Restart fully visible only for our input/moves. Remote Yjs changes must keep the rhythm.
+      // Rapid typing keeps restarting the opaque part of the cycle, so the caret stays solid.
+      if (update.transactions.some(localCaretActivity)) {
+        dom.style.setProperty(
+          "--caret-blink",
+          dom.style.getPropertyValue("--caret-blink") === "cm-smooth-blink2"
+            ? "cm-smooth-blink"
+            : "cm-smooth-blink2",
+        );
       }
       return update.docChanged || update.selectionSet;
     },
