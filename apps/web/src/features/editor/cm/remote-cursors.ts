@@ -29,8 +29,8 @@ export function labelColorFor(hex: string): string {
   return color;
 }
 
-/** Until the fade starts (78% of the 3 s animation in editor.css), the flag is fully shown. */
-const FLAG_SHOWN_MS = 2300;
+/** Match the full flag animation, including its fade; moving during the fade must not hide it. */
+const FLAG_VISIBLE_MS = 3000;
 
 interface Remote {
   awarenessId: number;
@@ -143,7 +143,8 @@ class CaretMarker implements LayerMarker {
    */
   private flash(root: HTMLElement) {
     const now = performance.now();
-    const showing = now - Number(root.dataset.flashed ?? Number.NEGATIVE_INFINITY) < FLAG_SHOWN_MS;
+    const showing =
+      now - Number(root.dataset.flashed ?? Number.NEGATIVE_INFINITY) < FLAG_VISIBLE_MS;
     root.dataset.flashed = String(now);
     const next = root.dataset.flag === "a" ? "b" : "a";
     root.dataset.flag = next;
@@ -191,6 +192,70 @@ class TintMarker implements LayerMarker {
   }
 }
 
+interface KeyedMarker {
+  key: string;
+  marker: LayerMarker;
+}
+
+/**
+ * CodeMirror matches layer markers by array index, not identity. Keep one group in each layer
+ * and match its children by participant (and selection rectangle) so a join/leave never gives
+ * another person's DOM, transition or flag animation to a surviving cursor.
+ */
+class MarkerGroup implements LayerMarker {
+  private nodes = new Map<string, { marker: LayerMarker; dom: HTMLElement }>();
+
+  constructor(readonly entries: KeyedMarker[]) {}
+
+  eq(other: MarkerGroup): boolean {
+    return (
+      this.entries.length === other.entries.length &&
+      this.entries.every((entry, i) => {
+        const previous = other.entries[i];
+        return previous?.key === entry.key && entry.marker.eq(previous.marker);
+      })
+    );
+  }
+
+  draw(): HTMLElement {
+    const root = document.createElement("div");
+    root.className = "cm-remote-markers";
+    this.reconcile(root);
+    return root;
+  }
+
+  update(root: HTMLElement, old: LayerMarker): boolean {
+    this.nodes = (old as MarkerGroup).nodes;
+    this.reconcile(root);
+    return true;
+  }
+
+  private reconcile(root: HTMLElement) {
+    const present = new Set<string>();
+    for (const { key, marker } of this.entries) {
+      present.add(key);
+      const previous = this.nodes.get(key);
+      if (previous) {
+        if (!marker.eq(previous.marker) && !marker.update?.(previous.dom, previous.marker)) {
+          const dom = marker.draw();
+          previous.dom.replaceWith(dom);
+          previous.dom = dom;
+        }
+        previous.marker = marker;
+      } else {
+        const dom = marker.draw();
+        this.nodes.set(key, { marker, dom });
+        root.appendChild(dom);
+      }
+    }
+    for (const [key, node] of this.nodes) {
+      if (present.has(key)) continue;
+      node.dom.remove();
+      this.nodes.delete(key);
+    }
+  }
+}
+
 function layerBase(view: EditorView): { left: number; top: number } {
   const rect = view.scrollDOM.getBoundingClientRect();
   const left =
@@ -231,17 +296,19 @@ export function remoteCursors(session: DocSession, ytext: Y.Text, fileId: string
     class: "cm-remote-selections",
     update: needsRedraw,
     markers(view) {
-      const markers: LayerMarker[] = [];
+      const markers: KeyedMarker[] = [];
       for (const remote of remotesOf(view)) {
         if (remote.anchor === remote.head) continue;
         const range = EditorSelection.range(remote.anchor, remote.head);
-        for (const rect of RectangleMarker.forRange(view, "", range)) {
-          markers.push(
-            new TintMarker(rect.left, rect.top, rect.width ?? 0, rect.height, remote.color),
-          );
+        const rectangles = RectangleMarker.forRange(view, "", range);
+        for (const [i, rect] of rectangles.entries()) {
+          markers.push({
+            key: `${remote.awarenessId}:${i}`,
+            marker: new TintMarker(rect.left, rect.top, rect.width ?? 0, rect.height, remote.color),
+          });
         }
       }
-      return markers;
+      return [new MarkerGroup(markers)];
     },
   });
 
@@ -251,12 +318,13 @@ export function remoteCursors(session: DocSession, ytext: Y.Text, fileId: string
     update: needsRedraw,
     markers(view) {
       const base = layerBase(view);
-      const markers: LayerMarker[] = [];
+      const markers: KeyedMarker[] = [];
       for (const remote of remotesOf(view)) {
         const coords = view.coordsAtPos(remote.head, remote.head > remote.anchor ? -1 : 1);
         if (!coords) continue;
-        markers.push(
-          new CaretMarker(
+        markers.push({
+          key: String(remote.awarenessId),
+          marker: new CaretMarker(
             remote.awarenessId,
             Math.round(((coords.left - base.left) / view.scaleX) * 10) / 10,
             Math.round(((coords.top - base.top) / view.scaleY) * 10) / 10,
@@ -264,9 +332,9 @@ export function remoteCursors(session: DocSession, ytext: Y.Text, fileId: string
             remote.color,
             remote.name,
           ),
-        );
+        });
       }
-      return markers;
+      return [new MarkerGroup(markers)];
     },
   });
 

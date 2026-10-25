@@ -59,7 +59,7 @@
   left: 0;
   will-change: transform;
   /* Only transform animates, on the compositor: no layout, no paint of the text. */
-  transition: transform 90ms cubic-bezier(0.25, 0.8, 0.3, 1);
+  transition: transform 100ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /* Vim draws its own block cursor and hides the other cursor layers. */
@@ -69,7 +69,7 @@
 
 /* As CodeMirror's `.cm-cursorLayer`: shown and blinking only while the editor has focus. */
 .cm-editor.cm-focused > .cm-scroller > .cm-smooth-caret-layer {
-  animation: steps(1) cm-smooth-blink 1.2s infinite;
+  animation: var(--caret-blink, cm-smooth-blink) 1.2s ease-in-out infinite;
 }
 
 .cm-editor.cm-focused > .cm-scroller > .cm-smooth-caret-layer .cm-smooth-caret {
@@ -77,13 +77,25 @@
 }
 
 @keyframes cm-smooth-blink {
-  50% {
+  0%,
+  55%,
+  100% {
+    opacity: 1;
+  }
+  75%,
+  85% {
     opacity: 0;
   }
 }
 
 @keyframes cm-smooth-blink2 {
-  50% {
+  0%,
+  55%,
+  100% {
+    opacity: 1;
+  }
+  75%,
+  85% {
     opacity: 0;
   }
 }
@@ -91,6 +103,12 @@
 @media (prefers-reduced-motion: reduce) {
   .cm-smooth-caret {
     transition: none;
+  }
+
+  /* A solid caret avoids both glide and fading for reduced motion, including inline restarts. */
+  .cm-editor.cm-focused > .cm-scroller > .cm-smooth-caret-layer {
+    animation: none;
+    opacity: 1;
   }
 }
 
@@ -105,6 +123,11 @@
   position: absolute;
   border-radius: 2px;
   background: color-mix(in srgb, var(--rc) 30%, transparent);
+}
+
+.cm-remote-markers {
+  position: absolute;
+  inset: 0;
 }
 
 .cm-remote-caret {
