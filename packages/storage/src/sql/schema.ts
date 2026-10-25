@@ -1,4 +1,5 @@
 import type { SqlDriver, SqlExecutor } from "./driver.js";
+import { retrySqliteBusy } from "./driver.js";
 
 const migrations: Array<{
   version: number;
@@ -186,10 +187,13 @@ export async function ensureSqlSchema(driver: SqlDriver): Promise<void> {
     });
     return;
   }
-  await driver.transaction(async (tx) => {
-    if (driver.dialect === "postgres") await tx.run("SELECT pg_advisory_xact_lock(731941102)");
-    await applyAvailable(tx, driver);
-  });
+  const migrate = () =>
+    driver.transaction(async (tx) => {
+      if (driver.dialect === "postgres") await tx.run("SELECT pg_advisory_xact_lock(731941102)");
+      await applyAvailable(tx, driver);
+    });
+  if (driver.dialect === "sqlite") await retrySqliteBusy(migrate);
+  else await migrate();
 }
 
 /** Test helper: clear domain rows without dropping the versioned schema. */

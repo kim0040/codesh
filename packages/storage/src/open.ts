@@ -1,6 +1,6 @@
 import type { MongoClient } from "mongodb";
 import { createMemoryStores } from "./memory.js";
-import { openSqlDriver } from "./sql/driver.js";
+import { openSqlDriver, sqlErrorCode } from "./sql/driver.js";
 import { ensureSqlSchema } from "./sql/schema.js";
 import { createSqlStores } from "./sql/stores.js";
 import type { Stores } from "./types.js";
@@ -61,16 +61,20 @@ export async function openStores(
   }
 
   let driver: Awaited<ReturnType<typeof openSqlDriver>> | undefined;
+  let step = "connection";
   try {
     driver = await openSqlDriver(url);
+    await driver.all("SELECT 1");
+    step = "migration";
     await ensureSqlSchema(driver);
     return {
       stores: createSqlStores(driver),
       close: () => driver?.close() ?? Promise.resolve(),
       kind,
     };
-  } catch {
+  } catch (error) {
     await driver?.close().catch(() => undefined);
-    throw new Error("SQL storage could not be opened");
+    const code = sqlErrorCode(error);
+    throw new Error(`${kind} storage ${step} failed${code ? ` (${code})` : ""}`);
   }
 }
