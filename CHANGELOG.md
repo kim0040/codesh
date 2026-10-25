@@ -14,6 +14,9 @@ text of its GitHub release (RELEASING.md).
 - When someone opened a share read-only and then pasted an edit link (`#key=...`) into that same
   open tab, the editor could stay read-only with the read-only banner showing, mostly in Safari;
   reloading fixed it. Now the editor switches to editing as soon as the key is accepted.
+- With smooth typing on, the cursor sometimes jumped to its new place instead of gliding
+  while typing, when something unrelated on the page updated at the same moment. It now glides
+  for every keystroke.
 
 ## [1.0.0] - 2026-10-25
 
