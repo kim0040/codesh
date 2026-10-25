@@ -13,11 +13,14 @@ body {
   overflow-x: hidden;
 }
 
-/* Route changes: a short cross-fade. Nothing moves, so there is no layout shift to animate. */
+/*
+ * Route changes (start, editor, admin): a short cross-fade on the motion tokens. Nothing moves, so
+ * there is no layout shift to animate, and the tokens collapse under prefers-reduced-motion.
+ */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: 140ms;
-  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation-duration: var(--duration-fast);
+  animation-timing-function: var(--easing-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

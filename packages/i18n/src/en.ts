@@ -1165,6 +1165,27 @@ export const en = {
   "error.validation.hint": "Check the highlighted fields and try again.",
   "error.unavailable": "Live editing isn't responding",
   "error.unavailable.hint": "Nothing was changed. Wait a moment, then try again.",
+  "tour.share.title": "Invite others",
+  "tour.share.body":
+    "Share opens the join code, the link and a QR code. Anyone on your network can join with them.",
+  "tour.people.title": "Who is here",
+  "tour.people.body": "Everyone in the share appears here. Select a person to follow their cursor.",
+  "tour.files.title": "Files",
+  "tour.files.body": "Each tab is a file. Add files, or drag them in from your computer.",
+  "tour.language.title": "Language",
+  "tour.language.body":
+    "Highlighting follows the language. It is detected for you, and you can change it here.",
+  "tour.menu.title": "More actions",
+  "tour.menu.body":
+    "Download, save, present and settings are in this menu. You can replay this tour from Settings.",
+  "tour.step": "{current} / {total}",
+  "tour.announce": "Step {current} of {total}: {title}. {body}",
+  "tour.nextAction": "Next",
+  "tour.backAction": "Back",
+  "tour.skipAction": "Skip tour",
+  "tour.doneAction": "Done",
+  "tour.replay.action": "Replay tutorial",
+  "tour.replay.hint": "A short tour of the main controls.",
 } as const;
 
 export type DictionaryKey = keyof typeof en;

@@ -47,5 +47,10 @@ export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsP
 }
 
 export function TabsContent({ className, ...props }: ComponentProps<typeof TabsPrimitive.Content>) {
-  return <TabsPrimitive.Content className={cx("pt-4 outline-offset-4", className)} {...props} />;
+  return (
+    <TabsPrimitive.Content
+      className={cx("ui-appear-fade pt-4 outline-offset-4", className)}
+      {...props}
+    />
+  );
 }

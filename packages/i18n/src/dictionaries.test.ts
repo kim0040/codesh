@@ -40,6 +40,7 @@ const NAMESPACES = new Set([
   "empty",
   "a11y",
   "error",
+  "tour",
 ]);
 
 /** Korean values that are brand names, product names or units and legitimately have no Hangul. */
@@ -48,6 +49,7 @@ const LATIN_ONLY_KO = new Set([
   "locale.en",
   "pin.label",
   "status.latency",
+  "tour.step",
   "history.position",
   "invite.received.detail",
   "editor.files.namePlaceholder",

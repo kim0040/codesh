@@ -1166,4 +1166,27 @@ export const ko: KoDictionary = {
   "error.validation.hint": "표시된 항목을 고친 뒤 다시 시도해 주세요.",
   "error.unavailable": "실시간 편집 서버가 응답하지 않아요",
   "error.unavailable.hint": "아무것도 바뀌지 않았어요. 잠시 후 다시 시도해 주세요.",
+  "tour.share.title": "함께 편집하기",
+  "tour.share.body":
+    "공유를 누르면 참가 코드, 링크, QR 코드가 나와요. 같은 네트워크의 누구나 이걸로 참가할 수 있어요.",
+  "tour.people.title": "함께 있는 사람",
+  "tour.people.body":
+    "공유에 들어온 사람이 여기에 보여요. 사람을 누르면 그 사람의 커서를 따라가요.",
+  "tour.files.title": "파일",
+  "tour.files.body":
+    "탭 하나가 파일 하나예요. 파일을 추가하거나 내 컴퓨터에서 끌어다 놓을 수 있어요.",
+  "tour.language.title": "언어",
+  "tour.language.body":
+    "언어에 맞게 코드 색이 달라져요. 자동으로 찾아 주고, 여기서 직접 바꿀 수도 있어요.",
+  "tour.menu.title": "더 보기",
+  "tour.menu.body":
+    "다운로드, 저장, 발표, 설정이 이 메뉴에 있어요. 이 안내는 설정에서 다시 볼 수 있어요.",
+  "tour.step": "{current} / {total}",
+  "tour.announce": "{total}단계 중 {current}단계: {title}. {body}",
+  "tour.nextAction": "다음",
+  "tour.backAction": "이전",
+  "tour.skipAction": "안내 건너뛰기",
+  "tour.doneAction": "완료",
+  "tour.replay.action": "안내 다시 보기",
+  "tour.replay.hint": "주요 기능을 짧게 안내해 드려요.",
 };

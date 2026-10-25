@@ -8,8 +8,8 @@ export type ButtonSize = "sm" | "md" | "lg";
 
 export const buttonBase =
   "inline-flex shrink-0 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium " +
-  "transition-[background-color,border-color,color,transform] duration-(--duration-fast) ease-out " +
-  "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 " +
+  "transition-[background-color,border-color,color,scale] duration-(--duration-fast) ease-out " +
+  "motion-safe:active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 " +
   "[&_svg]:pointer-events-none [&_svg]:shrink-0";
 
 export const buttonVariants: Record<ButtonVariant, string> = {

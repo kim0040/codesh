@@ -112,6 +112,7 @@ function LanguagePicker({ label, color }: { label: string; color: string }) {
       disabled={!canChange}
       aria-label={`${t("status.language.label")}: ${label}. ${t("status.language.changeAction")}`}
       data-testid="language-button"
+      data-tour="language"
       className="inline-flex h-6 items-center rounded-md px-1.5 hover:bg-fill-hover disabled:hover:bg-transparent coarse:h-9"
     >
       <LanguageBadge name={label} color={color} />

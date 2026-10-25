@@ -1,0 +1,49 @@
+/*
+ * The first-run tour. The spotlight is the element's box with a huge shadow around it, so the page
+ * dims everywhere but on the highlighted control. Only opacity and translate animate; the tokens
+ * collapse under prefers-reduced-motion and the rule at the bottom removes the rest.
+ */
+.tour-spot {
+  position: fixed;
+  z-index: var(--z-overlay);
+  pointer-events: none;
+  border-radius: 0.5rem;
+  box-shadow: 0 0 0 100vmax var(--scrim);
+  outline: 2px solid var(--fg);
+  animation: tour-spot-in var(--duration-normal) var(--easing-out);
+}
+
+/* The popover glides between steps, but never from its unplaced corner on the first one. */
+.tour-pop[data-placed] {
+  transition: translate var(--duration-normal) var(--easing-out);
+}
+
+@keyframes tour-spot-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .tour-spot {
+    outline-width: 3px;
+    box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.8);
+  }
+}
+
+/* Forced colours drop shadows: the outline alone marks the element. */
+@media (forced-colors: active) {
+  .tour-spot {
+    box-shadow: none;
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot,
+  .tour-pop {
+    animation: none;
+    transition: none;
+  }
+}

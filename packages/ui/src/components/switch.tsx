@@ -30,7 +30,7 @@ export function Switch({ label, description, className, id, ...props }: SwitchPr
       <SwitchPrimitive.Thumb
         className={cx(
           "pointer-events-none block size-4 rounded-full bg-fg-2 shadow-1",
-          "transition-[transform,background-color] duration-(--duration-normal) ease-spring",
+          "transition-[translate,background-color] duration-(--duration-normal) ease-spring",
           "data-[state=checked]:translate-x-4 data-[state=checked]:bg-accent-fg",
         )}
       />

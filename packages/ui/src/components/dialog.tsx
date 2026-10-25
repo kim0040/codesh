@@ -53,6 +53,8 @@ export interface DialogContentProps
   footer?: ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
   container?: HTMLElement | null;
+  /** Dim the page behind the dialog. Off when the caller draws its own backdrop (the tour's spotlight). */
+  scrim?: boolean;
 }
 
 const widths = { sm: "max-w-sm", md: "max-w-md", lg: "max-w-xl", xl: "max-w-4xl" } as const;
@@ -69,6 +71,7 @@ export function DialogContent({
   footer,
   size = "md",
   container,
+  scrim = true,
   className,
   children,
   onOpenAutoFocus,
@@ -79,7 +82,7 @@ export function DialogContent({
   const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
   return (
     <DialogPrimitive.Portal container={container}>
-      <DialogOverlay />
+      {scrim ? <DialogOverlay /> : null}
       <DialogPrimitive.Content
         className={cx(
           "ui-dialog fixed inset-0 z-(--z-modal) m-auto flex h-fit max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] flex-col rounded-xl border border-line bg-overlay text-fg [box-shadow:var(--edge),var(--elev-4)]",
