@@ -6,6 +6,7 @@ import { DocSession, isOutage } from "./session";
 interface ProviderConfig {
   token: () => Promise<string>;
   onAuthenticationFailed: (data: { reason: string }) => void;
+  onAuthenticated: (data: { scope: string }) => void;
   onUnsyncedChanges: (data: { number: number }) => void;
 }
 
@@ -145,6 +146,20 @@ describe("join failures", () => {
     provider.config.onAuthenticationFailed({ reason: "permission-denied" });
     expect(fakes.leaveAfterDenial).toHaveBeenCalledWith("share1");
     expect(session.getState()).toMatchObject({ denied: "unauthorized", lostEdits: true });
+    session.destroy();
+  });
+});
+
+describe("authentication", () => {
+  it("the latest answer decides read-only, also after a late one for an earlier provider", () => {
+    const session = open();
+    const provider = fakes.Provider.made[0];
+    if (!provider) throw new Error("no provider");
+    // An earlier provider of this document asked as a viewer; its answer reaches this one first.
+    provider.config.onAuthenticated({ scope: "readonly" });
+    expect(session.getState().readOnly).toBe(true);
+    provider.config.onAuthenticated({ scope: "read-write" });
+    expect(session.getState().readOnly).toBe(false);
     session.destroy();
   });
 });
