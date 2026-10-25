@@ -13,7 +13,7 @@ import {
   labParamsSchema,
   patchLabBodySchema,
   type ShareRecord,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { findShare, requireOwner } from "../access.js";
 import { allocateCode } from "../codes.js";
 import type { Ctx } from "../ctx.js";

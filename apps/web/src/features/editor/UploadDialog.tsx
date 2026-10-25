@@ -1,4 +1,4 @@
-import { Button, Dialog, DialogContent, Spinner, toast } from "@codesh/ui";
+import { Button, Dialog, DialogContent, Spinner, toast } from "@gachipad/ui";
 import { FolderUp, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { useT } from "../../lib/i18n";

@@ -4,8 +4,8 @@ import {
   LANGUAGES,
   type LanguageEntry,
   PLAIN_TEXT_ID,
-} from "@codesh/highlight";
-import { LanguageBadge, Popover, PopoverContent, PopoverTrigger, toast } from "@codesh/ui";
+} from "@gachipad/highlight";
+import { LanguageBadge, Popover, PopoverContent, PopoverTrigger, toast } from "@gachipad/ui";
 import { Check, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { fileText, setFileLanguage } from "../../lib/collab/model";

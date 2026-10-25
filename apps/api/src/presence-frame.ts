@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PresenceUser } from "@codesh/shared";
+import type { PresenceUser } from "@gachipad/shared";
 
 const HEAD = Buffer.from("event: presence\ndata: [");
 const TAIL = Buffer.from("]\n\n");

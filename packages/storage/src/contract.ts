@@ -1,5 +1,5 @@
-import type { LabRecord, ShareRecord } from "@codesh/shared";
-import { defaultSettings } from "@codesh/shared";
+import type { LabRecord, ShareRecord } from "@gachipad/shared";
+import { defaultSettings } from "@gachipad/shared";
 import { describe, expect, it } from "vitest";
 import {
   DuplicateSeqError,

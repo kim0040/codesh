@@ -1,4 +1,4 @@
-import { type Comment, commentSchema, YDOC } from "@codesh/shared";
+import { type Comment, commentSchema, YDOC } from "@gachipad/shared";
 import * as Y from "yjs";
 
 /**

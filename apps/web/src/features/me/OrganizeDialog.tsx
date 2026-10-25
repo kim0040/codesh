@@ -5,8 +5,8 @@ import {
   type PutLabelsBody,
   putLabelsBodySchema,
   type ShareListItem,
-} from "@codesh/shared";
-import { Button, cx, Dialog, DialogContent, Field, Input, isImeKey, toast } from "@codesh/ui";
+} from "@gachipad/shared";
+import { Button, cx, Dialog, DialogContent, Field, Input, isImeKey, toast } from "@gachipad/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, FolderPlus, Plus, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";

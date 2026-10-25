@@ -8,8 +8,8 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
-import type { Comment } from "@codesh/shared";
-import { YDOC } from "@codesh/shared";
+import type { Comment } from "@gachipad/shared";
+import { YDOC } from "@gachipad/shared";
 import * as Y from "yjs";
 import type { DocSession } from "../../../lib/collab/session";
 

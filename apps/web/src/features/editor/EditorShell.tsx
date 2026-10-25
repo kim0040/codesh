@@ -5,8 +5,8 @@ import {
   type LanguageEntry,
   languageForFilename,
   PLAIN_TEXT_ID,
-} from "@codesh/highlight";
-import { Button, EmptyState, Sheet, SheetContent, toast } from "@codesh/ui";
+} from "@gachipad/highlight";
+import { Button, EmptyState, Sheet, SheetContent, toast } from "@gachipad/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {

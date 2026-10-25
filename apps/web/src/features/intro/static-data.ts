@@ -1,5 +1,5 @@
 /*
- * Colours the page needs before the editor chunk has loaded. The values mirror @codesh/highlight
+ * Colours the page needs before the editor chunk has loaded. The values mirror @gachipad/highlight
  * (slate in dark mode, paper in light mode) so the first paint does not pull CodeMirror into the
  * route's main chunk; static-data.test.ts fails if they drift from the package.
  */

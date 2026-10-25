@@ -5,8 +5,8 @@ import {
   uploadParamsSchema,
   uploadQuerySchema,
   uploadResponseSchema,
-} from "@codesh/shared";
-import { FileTooLargeError } from "@codesh/storage";
+} from "@gachipad/shared";
+import { FileTooLargeError } from "@gachipad/storage";
 import { Unzip, UnzipInflate, UnzipPassThrough } from "fflate";
 import { z } from "zod";
 import type { Ctx } from "../ctx.js";

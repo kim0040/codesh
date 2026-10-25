@@ -1,4 +1,4 @@
-import { SLOW_CLIENT_CLOSE_CODE } from "@codesh/shared";
+import { SLOW_CLIENT_CLOSE_CODE } from "@gachipad/shared";
 
 /** The parts of a `ws` socket the guard needs (Hocuspocus hands out a proxy of it). */
 export interface GuardedSocket {

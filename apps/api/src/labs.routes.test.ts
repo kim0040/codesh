@@ -1,4 +1,4 @@
-import { channels } from "@codesh/shared";
+import { channels } from "@gachipad/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { readContent } from "./docs.js";
 import {

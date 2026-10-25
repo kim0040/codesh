@@ -11,7 +11,7 @@ import {
   generateFileId,
   type ShareRecord,
   YDOC,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import * as Y from "yjs";
 import type { Ctx } from "./ctx.js";
 import { ApiError, invalid, notFound, tooLarge } from "./errors.js";

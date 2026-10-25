@@ -1,5 +1,5 @@
-import { apiKeys } from "@codesh/shared";
-import { StorageCapacityError } from "@codesh/storage";
+import { apiKeys } from "@gachipad/shared";
+import { StorageCapacityError } from "@gachipad/storage";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
 

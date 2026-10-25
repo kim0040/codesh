@@ -12,7 +12,12 @@ import {
   lineNumbers,
   WidgetType,
 } from "@codemirror/view";
-import { DEFAULT_THEME_ID, getEditorTheme, getLanguage, participantColor } from "@codesh/highlight";
+import {
+  DEFAULT_THEME_ID,
+  getEditorTheme,
+  getLanguage,
+  participantColor,
+} from "@gachipad/highlight";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../../lib/i18n";
 import { DemoPlayer } from "./demo-player";

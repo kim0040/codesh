@@ -1,4 +1,4 @@
-import { createT } from "@codesh/i18n";
+import { createT } from "@gachipad/i18n";
 import {
   Bell,
   Copy,

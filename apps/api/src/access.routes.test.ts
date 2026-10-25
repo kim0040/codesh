@@ -1,4 +1,4 @@
-import { channels, verifyCollabToken } from "@codesh/shared";
+import { channels, verifyCollabToken } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   type Client,

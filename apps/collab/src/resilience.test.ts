@@ -3,7 +3,7 @@ import {
   COLLAB_MAX_PAYLOAD_BYTES,
   generateShareId,
   keys,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from "y-protocols/awareness";

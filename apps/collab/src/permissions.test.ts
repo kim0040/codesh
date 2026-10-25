@@ -1,4 +1,4 @@
-import { COLLAB_DENY_REASONS, generateClientId, PERMISSION_APPLY_MS } from "@codesh/shared";
+import { COLLAB_DENY_REASONS, generateClientId, PERMISSION_APPLY_MS } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CollabServer } from "./server.js";
 import {

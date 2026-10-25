@@ -1,4 +1,4 @@
-import type { SessionResponse } from "@codesh/shared";
+import type { SessionResponse } from "@gachipad/shared";
 import { api, isApiError } from "./api";
 import { dropAllKeys, dropKey } from "./credentials";
 import { getPrefs, setPrefs } from "./prefs";

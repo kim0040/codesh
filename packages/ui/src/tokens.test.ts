@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { contrastRatio, mix, PARTICIPANT_COLORS } from "@codesh/highlight";
+import { contrastRatio, mix, PARTICIPANT_COLORS } from "@gachipad/highlight";
 import { describe, expect, it } from "vitest";
 
 const styles = (file: string) => readFileSync(join(import.meta.dirname, "styles", file), "utf8");
@@ -117,7 +117,7 @@ describe("colour tokens", () => {
 });
 
 describe("participant palette", () => {
-  it("mirrors @codesh/highlight, slot by slot", () => {
+  it("mirrors @gachipad/highlight, slot by slot", () => {
     expect(PARTICIPANT_COLORS).toHaveLength(12);
     PARTICIPANT_COLORS.forEach((color, index) => {
       expect(tokens.get(`--participant-${index + 1}`)).toBe(color.hex);

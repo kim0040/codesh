@@ -1,4 +1,10 @@
-import { COLLAB_COMMAND_ERRORS, generateFileId, generateShareId, keys, YDOC } from "@codesh/shared";
+import {
+  COLLAB_COMMAND_ERRORS,
+  generateFileId,
+  generateShareId,
+  keys,
+  YDOC,
+} from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { CollabServer } from "./server.js";

@@ -7,7 +7,7 @@ import {
   pendingParamsSchema,
   resolvePendingBodySchema,
   shareParamsSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { findShare, requireOwner } from "../access.js";
 import { randomKey } from "../crypto.js";
 import type { Ctx } from "../ctx.js";

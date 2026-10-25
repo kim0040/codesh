@@ -1,4 +1,4 @@
-import { Button, Dialog, DialogContent, toast } from "@codesh/ui";
+import { Button, Dialog, DialogContent, toast } from "@gachipad/ui";
 import { CloudOff, Eye, HardDrive, Presentation, ShieldAlert, Wifi, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { chooseOfflineCopy } from "../../lib/device";

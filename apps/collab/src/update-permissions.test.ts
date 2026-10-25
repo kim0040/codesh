@@ -1,4 +1,4 @@
-import { participantPermissions, YDOC } from "@codesh/shared";
+import { participantPermissions, YDOC } from "@gachipad/shared";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { hasNewOperations, permitsUpdate } from "./update-permissions.js";

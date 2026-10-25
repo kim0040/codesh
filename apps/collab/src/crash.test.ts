@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { generateShareId } from "@codesh/shared";
-import { MONGO_TEST_URL, VALKEY_TEST_URL } from "@codesh/storage/testing";
+import { generateShareId } from "@gachipad/shared";
+import { MONGO_TEST_URL, VALKEY_TEST_URL } from "@gachipad/storage/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   Harness,

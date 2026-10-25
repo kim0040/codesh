@@ -1,5 +1,5 @@
-import { languageForFilename, PLAIN_TEXT_ID } from "@codesh/highlight";
-import { MAX_FILES_PER_SHARE } from "@codesh/shared";
+import { languageForFilename, PLAIN_TEXT_ID } from "@gachipad/highlight";
+import { MAX_FILES_PER_SHARE } from "@gachipad/shared";
 import { unzipSync } from "fflate";
 import type * as Y from "yjs";
 import { relativePathOf } from "../../lib/api";

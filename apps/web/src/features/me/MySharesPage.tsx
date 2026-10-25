@@ -1,6 +1,6 @@
-import { getLanguage } from "@codesh/highlight";
-import { formatDuration, formatRelativeTime } from "@codesh/i18n";
-import type { ShareListItem } from "@codesh/shared";
+import { getLanguage } from "@gachipad/highlight";
+import { formatDuration, formatRelativeTime } from "@gachipad/i18n";
+import type { ShareListItem } from "@gachipad/shared";
 import {
   Badge,
   Button,
@@ -15,7 +15,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {

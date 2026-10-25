@@ -1,5 +1,5 @@
-import type { MessageKey, TFunction } from "@codesh/i18n";
-import { Dialog, DialogContent, KbdGroup } from "@codesh/ui";
+import type { MessageKey, TFunction } from "@gachipad/i18n";
+import { Dialog, DialogContent, KbdGroup } from "@gachipad/ui";
 import { Fragment } from "react";
 import { useT } from "../../lib/i18n";
 import { setShortcutsOpen, useOverlays } from "../../lib/overlays";

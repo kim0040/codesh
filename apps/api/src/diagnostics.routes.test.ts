@@ -1,4 +1,4 @@
-import { type DiagnosticEvent, defaultSettings, type ServerDiagnosticBundle } from "@codesh/shared";
+import { type DiagnosticEvent, defaultSettings, type ServerDiagnosticBundle } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHarness, createShare, type Harness, integration } from "./testing/harness.js";
 

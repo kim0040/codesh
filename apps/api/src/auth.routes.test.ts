@@ -1,4 +1,4 @@
-import { defaultSettings } from "@codesh/shared";
+import { defaultSettings } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   escapeLdapFilter,

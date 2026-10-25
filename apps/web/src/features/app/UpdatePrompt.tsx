@@ -1,4 +1,4 @@
-import { Button } from "@codesh/ui";
+import { Button } from "@gachipad/ui";
 import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { applyAppUpdate, dismissAppUpdate, useAppUpdate } from "../../lib/app-update";

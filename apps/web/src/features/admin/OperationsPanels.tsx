@@ -1,4 +1,4 @@
-import type { AdminShare, DiagnosticEvent } from "@codesh/shared";
+import type { AdminShare, DiagnosticEvent } from "@gachipad/shared";
 import {
   Badge,
   Button,
@@ -9,7 +9,7 @@ import {
   Input,
   Select,
   Skeleton,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../../lib/api";

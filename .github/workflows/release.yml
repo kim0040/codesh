@@ -185,7 +185,7 @@ jobs:
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          pnpm --filter @codesh/web build
+          pnpm --filter @gachipad/web build
           mkdir -p dist/web-sourcemaps/assets
           cp apps/web/dist/assets/*.map dist/web-sourcemaps/assets/
           tar -czf "dist/codesh-web-sourcemaps-${VERSION}.tar.gz" -C dist/web-sourcemaps assets

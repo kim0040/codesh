@@ -1,5 +1,5 @@
 {
-  "name": "@codesh/ui",
+  "name": "@gachipad/ui",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -27,8 +27,8 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@codesh/highlight": "workspace:*",
-    "@codesh/i18n": "workspace:*",
+    "@gachipad/highlight": "workspace:*",
+    "@gachipad/i18n": "workspace:*",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.15",
     "@tailwindcss/vite": "4.3.3",

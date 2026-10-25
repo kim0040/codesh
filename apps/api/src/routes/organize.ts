@@ -6,7 +6,7 @@ import {
   putLabelsBodySchema,
   putLabelsResponseSchema,
   shareParamsSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import type { Ctx } from "../ctx.js";
 import { notFound } from "../errors.js";
 import type { App } from "./types.js";

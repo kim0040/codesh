@@ -1,5 +1,9 @@
-import { diagnosticError, diagnosticRoute } from "@codesh/shared";
-import { crashDiagnosticPath, ingestCrashDiagnostic, writeCrashDiagnostic } from "@codesh/storage";
+import { diagnosticError, diagnosticRoute } from "@gachipad/shared";
+import {
+  crashDiagnosticPath,
+  ingestCrashDiagnostic,
+  writeCrashDiagnostic,
+} from "@gachipad/storage";
 import { buildApp } from "./app.js";
 import { loadConfig, proxyWarnings } from "./config.js";
 import { createRuntime } from "./runtime.js";

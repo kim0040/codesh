@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, isImeKey, KbdGroup } from "@codesh/ui";
+import { Dialog, DialogContent, isImeKey, KbdGroup } from "@gachipad/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Search } from "lucide-react";

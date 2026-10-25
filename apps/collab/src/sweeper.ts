@@ -1,5 +1,5 @@
-import { keys } from "@codesh/shared";
-import type { Stores } from "@codesh/storage";
+import { keys } from "@gachipad/shared";
+import type { Stores } from "@gachipad/storage";
 import type { ValkeyLock } from "./lock.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;

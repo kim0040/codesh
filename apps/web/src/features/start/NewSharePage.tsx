@@ -1,4 +1,4 @@
-import { toast } from "@codesh/ui";
+import { toast } from "@gachipad/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { api } from "../../lib/api";

@@ -1,6 +1,6 @@
-import { getLanguage } from "@codesh/highlight";
-import { formatRelativeTime } from "@codesh/i18n";
-import { Button, EmptyState, LanguageBadge, PinInput, Skeleton, Spinner } from "@codesh/ui";
+import { getLanguage } from "@gachipad/highlight";
+import { formatRelativeTime } from "@gachipad/i18n";
+import { Button, EmptyState, LanguageBadge, PinInput, Skeleton, Spinner } from "@gachipad/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { History, LayoutTemplate, Plus, Radar, Upload } from "lucide-react";

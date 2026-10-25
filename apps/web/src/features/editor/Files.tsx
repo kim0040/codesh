@@ -1,5 +1,5 @@
-import { getLanguage, languageForFilename, PLAIN_TEXT_ID } from "@codesh/highlight";
-import { MAX_FILES_PER_SHARE, MAX_PATH_LENGTH } from "@codesh/shared";
+import { getLanguage, languageForFilename, PLAIN_TEXT_ID } from "@gachipad/highlight";
+import { MAX_FILES_PER_SHARE, MAX_PATH_LENGTH } from "@gachipad/shared";
 import {
   Button,
   Dialog,
@@ -12,7 +12,7 @@ import {
   IconButton,
   Input,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import {
   ChevronRight,
   Download,

@@ -3,7 +3,7 @@ import {
   patchSessionBodySchema,
   type SessionResponse,
   sessionResponseSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import type { Ctx } from "../ctx.js";
 import { publishPresence } from "../presence.js";
 import { type Session, saveProfile } from "../session.js";

@@ -1,4 +1,4 @@
-import { cx } from "@codesh/ui";
+import { cx } from "@gachipad/ui";
 import { Folder, Inbox } from "lucide-react";
 import type { ReactNode } from "react";
 import { useT } from "../../lib/i18n";

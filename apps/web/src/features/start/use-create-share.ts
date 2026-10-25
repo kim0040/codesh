@@ -1,6 +1,6 @@
-import type { MessageKey } from "@codesh/i18n";
-import type { Template } from "@codesh/shared";
-import { toast } from "@codesh/ui";
+import type { MessageKey } from "@gachipad/i18n";
+import type { Template } from "@gachipad/shared";
+import { toast } from "@gachipad/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";

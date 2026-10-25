@@ -2,5 +2,5 @@ import { expect, it } from "vitest";
 import { PACKAGE_NAME } from "./index.js";
 
 it("exports the package name", () => {
-  expect(PACKAGE_NAME).toBe("@codesh/highlight");
+  expect(PACKAGE_NAME).toBe("@gachipad/highlight");
 });

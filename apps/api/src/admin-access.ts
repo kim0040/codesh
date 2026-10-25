@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { keys } from "@codesh/shared";
+import { keys } from "@gachipad/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { safeEqual } from "./crypto.js";
 import type { Ctx } from "./ctx.js";

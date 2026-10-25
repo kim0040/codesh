@@ -1,4 +1,4 @@
-import { isThemeId, type ThemeId } from "@codesh/highlight";
+import { isThemeId, type ThemeId } from "@gachipad/highlight";
 import { useSyncExternalStore } from "react";
 
 /** Editor preferences, kept on this device (localStorage) and applied live. */

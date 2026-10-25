@@ -8,7 +8,7 @@ import {
   getLanguage,
   SAMPLES,
   TOKEN_NAMES,
-} from "@codesh/highlight";
+} from "@gachipad/highlight";
 import { useEffect, useRef, useState } from "react";
 import { Badge, LanguageBadge } from "../src/index.js";
 import { Section } from "./lib.js";

@@ -1,4 +1,4 @@
-import { EDITOR_THEMES, type ThemeId } from "@codesh/highlight";
+import { EDITOR_THEMES, type ThemeId } from "@gachipad/highlight";
 import {
   Button,
   Dialog,
@@ -12,7 +12,7 @@ import {
   setTheme,
   type ThemePreference,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { Minus, Plus } from "lucide-react";
 import { useId, useState } from "react";

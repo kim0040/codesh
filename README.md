@@ -197,7 +197,7 @@ pnpm install
 pnpm services:up      # MongoDB 8 and Valkey 8 for development
 pnpm dev              # web on :5173, API on :3001, collab on :3002
 pnpm check            # Biome, TypeScript typecheck, Vitest, license check
-pnpm test:e2e         # Playwright; first: pnpm --filter @codesh/web exec playwright install chromium
+pnpm test:e2e         # Playwright; first: pnpm --filter @gachipad/web exec playwright install chromium
 pnpm services:down
 ```
 

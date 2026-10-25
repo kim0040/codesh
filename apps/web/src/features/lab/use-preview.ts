@@ -1,4 +1,4 @@
-import { DEFAULT_FILE_ID, type UserRef, YDOC } from "@codesh/shared";
+import { DEFAULT_FILE_ID, type UserRef, YDOC } from "@gachipad/shared";
 import { useEffect, useRef, useState } from "react";
 import { useAwarenessSelector, useSessionState } from "../../lib/collab/hooks";
 import { DocSession, type SessionState } from "../../lib/collab/session";

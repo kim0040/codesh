@@ -1,4 +1,4 @@
-import { Button, TooltipProvider } from "@codesh/ui";
+import { Button, TooltipProvider } from "@gachipad/ui";
 import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppShell } from "../features/app/AppShell";

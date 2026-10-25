@@ -9,8 +9,8 @@ import {
 } from "@codemirror/merge";
 import { ChangeSet, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { DEFAULT_THEME_ID, getEditorTheme, getLanguage } from "@codesh/highlight";
-import { formatRelativeTime } from "@codesh/i18n";
+import { DEFAULT_THEME_ID, getEditorTheme, getLanguage } from "@gachipad/highlight";
+import { formatRelativeTime } from "@gachipad/i18n";
 import {
   Button,
   Dialog,
@@ -20,7 +20,7 @@ import {
   Select,
   Skeleton,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, History, Pause, Play, RotateCcw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";

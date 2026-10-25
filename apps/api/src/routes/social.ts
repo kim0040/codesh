@@ -6,7 +6,7 @@ import {
   okResponseSchema,
   PRESENCE_USER_TTL_SECONDS,
   presenceResponseSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { findShare, requireParticipant } from "../access.js";
 import type { Ctx } from "../ctx.js";
 import { ApiError, forbidden, invalid, notFound } from "../errors.js";

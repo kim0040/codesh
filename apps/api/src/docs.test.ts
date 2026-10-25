@@ -1,4 +1,4 @@
-import { DEFAULT_FILE_ID, YDOC } from "@codesh/shared";
+import { DEFAULT_FILE_ID, YDOC } from "@gachipad/shared";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { buildDoc, contentBytes, readContent } from "./docs.js";

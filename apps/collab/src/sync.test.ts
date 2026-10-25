@@ -1,4 +1,4 @@
-import { defaultSettings, keys } from "@codesh/shared";
+import { defaultSettings, keys } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Harness, servicesAvailable, sleep, storedText, waitFor } from "./testing/harness.js";
 

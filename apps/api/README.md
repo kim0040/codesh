@@ -6,8 +6,8 @@ Fastify 5 HTTP API (ARCHITECTURE §8–§10): sessions, sharing, join codes, wai
 
 ```sh
 pnpm services:up                       # Valkey (and MongoDB) for the dev stack
-pnpm --filter @codesh/api test         # unit + route tests (CODESH_INTEGRATION=1, needs Valkey)
-pnpm --filter @codesh/api test:unit    # unit tests only; route tests are skipped
+pnpm --filter @gachipad/api test         # unit + route tests (CODESH_INTEGRATION=1, needs Valkey)
+pnpm --filter @gachipad/api test:unit    # unit tests only; route tests are skipped
 ```
 
 Route tests use the real Valkey (database `1 + VITEST_POOL_ID`, flushed per harness) and the in-memory stores from `@codesh/storage`; `Harness.collab` stands in for collab on `cmd:*`. `collab.integration.test.ts` runs a real collab server on MongoDB and runs on its own after the route tests, because collab answers every `cmd:*` channel. `STORAGE=memory` starts the server with the memory stores too (development only; the default is `mongo`).

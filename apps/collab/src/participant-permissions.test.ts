@@ -1,4 +1,4 @@
-import { participantPermissions, YDOC } from "@codesh/shared";
+import { participantPermissions, YDOC } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { loadPersisted } from "./persisted-doc.js";

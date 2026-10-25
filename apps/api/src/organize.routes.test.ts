@@ -4,7 +4,7 @@ import {
   type Settings,
   type ShareListItem,
   type Template,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readContent } from "./docs.js";
 import {

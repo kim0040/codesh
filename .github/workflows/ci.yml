@@ -53,9 +53,9 @@ jobs:
       - name: Lint, typecheck, unit tests, licences
         run: pnpm check
       - name: Integration tests (MongoDB and Valkey)
-        run: pnpm --filter @codesh/api --filter @codesh/collab --filter @codesh/storage test
+        run: pnpm --filter @gachipad/api --filter @gachipad/collab --filter @gachipad/storage test
       - name: Web build
-        run: pnpm --filter @codesh/web build
+        run: pnpm --filter @gachipad/web build
       - name: Deploy script tests
         run: |
           bash deploy/security-scripts.test.sh
@@ -88,8 +88,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @codesh/web exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm --filter @codesh/web test:e2e
+      - run: pnpm --filter @gachipad/web exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm --filter @gachipad/web test:e2e
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

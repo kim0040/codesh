@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { signCollabToken, verifyCollabToken } from "@codesh/shared";
+import { signCollabToken, verifyCollabToken } from "@gachipad/shared";
 import { describe, expect, it } from "vitest";
 import { hashPin, randomKey, safeEqual, verifyPin } from "./crypto.js";
 

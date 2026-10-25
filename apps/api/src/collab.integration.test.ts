@@ -1,4 +1,4 @@
-import { YDOC } from "@codesh/shared";
+import { YDOC } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   Harness as CollabHarness,

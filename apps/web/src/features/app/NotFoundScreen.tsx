@@ -1,4 +1,4 @@
-import { Button, EmptyState } from "@codesh/ui";
+import { Button, EmptyState } from "@gachipad/ui";
 import { Link } from "@tanstack/react-router";
 import { SearchX } from "lucide-react";
 import { useT } from "../../lib/i18n";

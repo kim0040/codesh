@@ -102,7 +102,7 @@ for service in api collab caddy mdns; do
   fi
   if [ "$service" = caddy ] && [ -n "$base" ]; then
     # The preview may predate the update feature. Use this tree's web assets and edge routes.
-    pnpm --filter @codesh/web build >/dev/null
+    pnpm --filter @gachipad/web build >/dev/null
     node deploy/caddy/csp.mjs
     mkdir -p "$WORK/build-web"
     cp Caddyfile.production "$WORK/build-web/Caddyfile"

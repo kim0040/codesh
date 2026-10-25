@@ -1,4 +1,4 @@
-import type { ShareListItem } from "@codesh/shared";
+import type { ShareListItem } from "@gachipad/shared";
 
 /** Folders and tags of "my shares": grouping, filtering and suggestions (no React). */
 

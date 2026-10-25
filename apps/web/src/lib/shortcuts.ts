@@ -1,5 +1,5 @@
-import type { MessageKey } from "@codesh/i18n";
-import { isImeKey } from "@codesh/ui";
+import type { MessageKey } from "@gachipad/i18n";
+import { isImeKey } from "@gachipad/ui";
 import { keyLabelsFor, PLATFORM, type Platform } from "./platform";
 
 /**

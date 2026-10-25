@@ -1,11 +1,11 @@
-import { diagnosticError } from "@codesh/shared";
+import { diagnosticError } from "@gachipad/shared";
 import {
   connectMongo,
   createMemoryStores,
   createMongoStores,
   ensureIndexes,
   ServerDiagnostics,
-} from "@codesh/storage";
+} from "@gachipad/storage";
 import { Redis } from "ioredis";
 import { ldapAdapter, oidcAdapter } from "./auth/real.js";
 import type { Config } from "./config.js";

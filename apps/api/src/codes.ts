@@ -1,4 +1,4 @@
-import { generateJoinCode, JOIN_CODE_COOLDOWN_SECONDS, keys } from "@codesh/shared";
+import { generateJoinCode, JOIN_CODE_COOLDOWN_SECONDS, keys } from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
 
 export type CodeKind = "share" | "lab";

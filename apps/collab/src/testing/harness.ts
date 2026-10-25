@@ -18,15 +18,15 @@ import {
   type Role,
   type ShareRecord,
   signCollabToken,
-} from "@codesh/shared";
-import type { Stores } from "@codesh/storage";
+} from "@gachipad/shared";
+import type { Stores } from "@gachipad/storage";
 import {
   createTestDatabase,
   mongoAvailable,
   requireService,
   type TestDatabase,
   VALKEY_TEST_URL,
-} from "@codesh/storage/testing";
+} from "@gachipad/storage/testing";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { Redis } from "ioredis";
 import WebSocket from "ws";

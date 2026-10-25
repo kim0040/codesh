@@ -1,6 +1,6 @@
-import { PARTICIPANT_COLORS } from "@codesh/highlight";
-import { MAX_NAME_LENGTH } from "@codesh/shared";
-import { Avatar, Button, Dialog, DialogContent, Field, Input } from "@codesh/ui";
+import { PARTICIPANT_COLORS } from "@gachipad/highlight";
+import { MAX_NAME_LENGTH } from "@gachipad/shared";
+import { Avatar, Button, Dialog, DialogContent, Field, Input } from "@gachipad/ui";
 import { Check } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useT } from "../../lib/i18n";

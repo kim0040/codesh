@@ -1,4 +1,4 @@
-import { keys } from "@codesh/shared";
+import { keys } from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
 import { abuseKeys } from "./net.js";

@@ -1,4 +1,4 @@
-import { toast } from "@codesh/ui";
+import { toast } from "@gachipad/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useRef } from "react";

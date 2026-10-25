@@ -1,7 +1,7 @@
-import type { LanguageEntry } from "@codesh/highlight";
-import type { MessageKey } from "@codesh/i18n";
-import { BUILTIN_TEMPLATES } from "@codesh/shared";
-import { Avatar, Badge, Switch, ToggleGroup, ToggleGroupItem } from "@codesh/ui";
+import type { LanguageEntry } from "@gachipad/highlight";
+import type { MessageKey } from "@gachipad/i18n";
+import { BUILTIN_TEMPLATES } from "@gachipad/shared";
+import { Avatar, Badge, Switch, ToggleGroup, ToggleGroupItem } from "@gachipad/ui";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../../lib/i18n";
 import { PLATFORM, type Platform } from "../../lib/platform";
@@ -109,7 +109,7 @@ export function LanguageBrowser() {
     if (!near && attempt === 0) return;
     let cancelled = false;
     setState({ status: "loading" });
-    import("@codesh/highlight").then(
+    import("@gachipad/highlight").then(
       (module) => {
         if (!cancelled) setState({ status: "ready", languages: module.LANGUAGES });
       },

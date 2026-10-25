@@ -1,4 +1,4 @@
-import { YDOC } from "@codesh/shared";
+import { YDOC } from "@gachipad/shared";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { derivedStore } from "./hooks";

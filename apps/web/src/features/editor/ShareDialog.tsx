@@ -1,10 +1,10 @@
-import { formatDuration } from "@codesh/i18n";
+import { formatDuration } from "@gachipad/i18n";
 import {
   MAX_NOTE_LENGTH,
   MAX_PIN_LENGTH,
   MIN_PIN_LENGTH,
   type PatchShareBody,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import {
   Avatar,
   Badge,
@@ -23,7 +23,7 @@ import {
   TabsList,
   TabsTrigger,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Expand, Radio, Send, UserMinus, Users, X } from "lucide-react";
 import QRCode from "qrcode";

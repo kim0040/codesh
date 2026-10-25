@@ -5,7 +5,7 @@ import {
   ldapLoginBodySchema,
   okResponseSchema,
   sessionResponseSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ldapConfigSchema, oidcConfigSchema, type VerifiedIdentity } from "../auth/adapters.js";

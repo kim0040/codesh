@@ -3,7 +3,7 @@
  * (aria-hidden); the text that explains it sits next to it in the page.
  */
 
-import type { MessageKey } from "@codesh/i18n";
+import type { MessageKey } from "@gachipad/i18n";
 import { type CSSProperties, type ReactNode, useState } from "react";
 import { useT } from "../../lib/i18n";
 import { DownloadIcon, LockIcon } from "./icons";

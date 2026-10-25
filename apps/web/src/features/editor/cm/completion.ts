@@ -9,7 +9,7 @@ import {
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import type { EditorTheme } from "@codesh/highlight";
+import type { EditorTheme } from "@gachipad/highlight";
 import { completionTheme } from "./completion-theme";
 
 const FALLBACK_LANGUAGES = new Set([

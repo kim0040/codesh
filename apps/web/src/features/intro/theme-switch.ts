@@ -1,5 +1,5 @@
 /*
- * App theme preference, stored under the same key and applied the same way as @codesh/ui's
+ * App theme preference, stored under the same key and applied the same way as @gachipad/ui's
  * theme.ts. Kept here so the intro route does not load the UI component barrel for a few buttons.
  * `data-theme` on <html> is the source of truth, so every control on the page reads and follows it.
  */

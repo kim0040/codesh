@@ -1,4 +1,4 @@
-import { Toaster, toast } from "@codesh/ui";
+import { Toaster, toast } from "@gachipad/ui";
 import { type ReactNode, useEffect } from "react";
 import { onLeftovers } from "../../lib/device";
 import { retainEvents } from "../../lib/events";

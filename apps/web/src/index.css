@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "@codesh/ui/styles.css";
+@import "@gachipad/ui/styles.css";
 
 /* The shared UI package ships tokens, fonts and component styles; this file holds app-wide rules. */
 

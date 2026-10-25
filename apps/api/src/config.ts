@@ -1,4 +1,4 @@
-import { UPDATE_CHANNELS, type UpdateChannel } from "@codesh/shared";
+import { UPDATE_CHANNELS, type UpdateChannel } from "@gachipad/shared";
 import { z } from "zod";
 import { isValidCidr, parseCidr } from "./net.js";
 

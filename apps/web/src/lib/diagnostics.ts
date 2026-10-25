@@ -7,7 +7,7 @@ import {
   DiagnosticRing,
   diagnosticError,
   diagnosticLocation,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { getPrefs } from "./prefs";
 
 /** Correlates one live document session without accepting or storing its actual share id. */

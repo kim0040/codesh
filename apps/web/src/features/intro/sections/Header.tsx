@@ -1,4 +1,4 @@
-import { LOCALES } from "@codesh/i18n";
+import { LOCALES } from "@gachipad/i18n";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useLocale, useT } from "../../../lib/i18n";

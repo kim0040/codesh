@@ -3,8 +3,8 @@ import {
   diagnosticError,
   namespace,
   SWEEPER_INTERVAL_MS,
-} from "@codesh/shared";
-import { diagnosticShareRef, ServerDiagnostics, type Stores } from "@codesh/storage";
+} from "@gachipad/shared";
+import { diagnosticShareRef, ServerDiagnostics, type Stores } from "@gachipad/storage";
 import { Redis as RedisExtension } from "@hocuspocus/extension-redis";
 import { type Extension, Server } from "@hocuspocus/server";
 import { Redis } from "ioredis";

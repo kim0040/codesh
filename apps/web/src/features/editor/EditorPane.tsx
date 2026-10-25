@@ -1,7 +1,7 @@
 import type { LanguageSupport } from "@codemirror/language";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, placeholder } from "@codemirror/view";
-import { DEFAULT_THEME_ID, getEditorTheme, getLanguage, PLAIN_TEXT_ID } from "@codesh/highlight";
+import { DEFAULT_THEME_ID, getEditorTheme, getLanguage, PLAIN_TEXT_ID } from "@gachipad/highlight";
 import { type MutableRefObject, useEffect, useRef, useState } from "react";
 import { yCollab } from "y-codemirror.next";
 import * as Y from "yjs";

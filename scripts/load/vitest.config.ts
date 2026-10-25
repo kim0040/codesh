@@ -1,3 +1,3 @@
 import { defineProject } from "vitest/config";
 
-export default defineProject({ test: { name: "@codesh/load" } });
+export default defineProject({ test: { name: "@gachipad/load" } });

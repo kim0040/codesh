@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { apiKeys } from "@codesh/shared";
+import { apiKeys } from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
 import { abuseKeys } from "./net.js";

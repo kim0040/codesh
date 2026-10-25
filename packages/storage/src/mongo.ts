@@ -16,7 +16,7 @@ import {
   scrubDiagnosticSnapshot,
   settingsSchema,
   type UploadRecord,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import {
   Binary,
   type Collection,

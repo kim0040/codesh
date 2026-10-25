@@ -1,5 +1,5 @@
 import { EditorState } from "@codemirror/state";
-import type { TFunction } from "@codesh/i18n";
+import type { TFunction } from "@gachipad/i18n";
 
 /** CodeMirror's search panel and tooltips, translated through the app dictionary. */
 export function searchPhrases(t: TFunction) {

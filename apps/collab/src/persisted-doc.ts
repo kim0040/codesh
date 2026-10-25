@@ -1,5 +1,5 @@
-import { HISTORY_MAX_SNAPSHOTS } from "@codesh/shared";
-import { DuplicateSeqError, type Stores } from "@codesh/storage";
+import { HISTORY_MAX_SNAPSHOTS } from "@gachipad/shared";
+import { DuplicateSeqError, type Stores } from "@gachipad/storage";
 import * as Y from "yjs";
 
 /**

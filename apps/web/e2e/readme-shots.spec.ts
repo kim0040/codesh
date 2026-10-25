@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { AdminUpdateResponse } from "@codesh/shared";
+import type { AdminUpdateResponse } from "@gachipad/shared";
 import { type Browser, expect, type Page, test } from "@playwright/test";
 import * as Y from "yjs";
 import { ADMIN_TOKEN, BASE_URL } from "./env";
@@ -9,7 +9,7 @@ import { type User, waitForEditor } from "./helpers";
 /**
  * The screenshots of README.md, taken against the end-to-end stack with made-up names and code:
  *
- *   README_SHOTS=1 pnpm --filter @codesh/web exec playwright test readme-shots --workers=1
+ *   README_SHOTS=1 pnpm --filter @gachipad/web exec playwright test readme-shots --workers=1
  *
  * Run it against a fresh database (the start page lists nearby shares) and with the e2e stack's
  * own ports (apps/web/e2e/env.ts). PNGs land in docs/images/; README_SHOTS_OUT changes the folder.

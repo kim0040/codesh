@@ -1,4 +1,4 @@
-import { diagnosticError } from "@codesh/shared";
+import { diagnosticError } from "@gachipad/shared";
 import {
   connectMongo,
   crashDiagnosticPath,
@@ -6,7 +6,7 @@ import {
   ensureIndexes,
   ingestCrashDiagnostic,
   writeCrashDiagnostic,
-} from "@codesh/storage";
+} from "@gachipad/storage";
 import { loadConfig } from "./config.js";
 import { createCollabServer } from "./server.js";
 

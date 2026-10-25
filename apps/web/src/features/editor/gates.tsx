@@ -1,4 +1,4 @@
-import { Button, EmptyState, Field, Input, Spinner } from "@codesh/ui";
+import { Button, EmptyState, Field, Input, Spinner } from "@gachipad/ui";
 import { Link } from "@tanstack/react-router";
 import { Ban, Clock, DoorClosed, Hourglass, Lock, UserX } from "lucide-react";
 import { type FormEvent, useState } from "react";

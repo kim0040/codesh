@@ -5,7 +5,7 @@ import {
   keys,
   PRESENCE_USER_TTL_SECONDS,
   SESSION_COOKIE,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import "@fastify/cookie";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Ctx } from "./ctx.js";

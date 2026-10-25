@@ -1,4 +1,4 @@
-import { MAX_TITLE_LENGTH } from "@codesh/shared";
+import { MAX_TITLE_LENGTH } from "@gachipad/shared";
 import {
   Avatar,
   Badge,
@@ -11,7 +11,7 @@ import {
   IconButton,
   isImeKey,
   Tooltip,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeft,

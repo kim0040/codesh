@@ -4,8 +4,8 @@ import {
   channels,
   collabCommandSchema,
   type SseEvent,
-} from "@codesh/shared";
-import { createMemoryStores, type Stores } from "@codesh/storage";
+} from "@gachipad/shared";
+import { createMemoryStores, type Stores } from "@gachipad/storage";
 import type { LightMyRequestResponse } from "fastify";
 import { Redis } from "ioredis";
 import * as Y from "yjs";

@@ -1,4 +1,4 @@
-import type { SessionResponse } from "@codesh/shared";
+import type { SessionResponse } from "@gachipad/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { noteSessionIdentity } from "./device";

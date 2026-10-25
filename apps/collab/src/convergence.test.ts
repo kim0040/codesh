@@ -1,5 +1,5 @@
-import { generateShareId } from "@codesh/shared";
-import { createTestDatabase, mongoAvailable, type TestDatabase } from "@codesh/storage/testing";
+import { generateShareId } from "@gachipad/shared";
+import { createTestDatabase, mongoAvailable, type TestDatabase } from "@gachipad/storage/testing";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";

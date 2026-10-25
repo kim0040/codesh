@@ -1,4 +1,4 @@
-import { ERROR_STATUS, type ErrorCode } from "@codesh/shared";
+import { ERROR_STATUS, type ErrorCode } from "@gachipad/shared";
 
 /** Thrown by handlers; the error handler turns it into `{error: {code, message}}` (§9). */
 export class ApiError extends Error {

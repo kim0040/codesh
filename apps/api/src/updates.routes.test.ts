@@ -3,7 +3,7 @@ import { createServer, type IncomingHttpHeaders, type ServerResponse } from "nod
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AdminUpdateResponse, apiKeys, settingsSchema } from "@codesh/shared";
+import { type AdminUpdateResponse, apiKeys, settingsSchema } from "@gachipad/shared";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { UpdateConfig } from "./config.js";
 import { createHarness, eventually, type Harness, integration } from "./testing/harness.js";

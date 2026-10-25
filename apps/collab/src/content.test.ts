@@ -1,4 +1,4 @@
-import { YDOC } from "@codesh/shared";
+import { YDOC } from "@gachipad/shared";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";

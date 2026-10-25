@@ -1,4 +1,4 @@
-import type { MessageKey } from "@codesh/i18n";
+import type { MessageKey } from "@gachipad/i18n";
 
 /** The guide pages in reading order: the header, the footer and the previous/next links share it. */
 export const GUIDE_PAGES = [

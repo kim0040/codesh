@@ -1,4 +1,3 @@
-import { diagnosticError, type ErrorCode, errorResponse } from "@codesh/shared";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import {
@@ -7,6 +6,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from "@fastify/type-provider-zod";
+import { diagnosticError, type ErrorCode, errorResponse } from "@gachipad/shared";
 import Fastify, { type FastifyRequest, type FastifyServerOptions } from "fastify";
 import { adminAccess } from "./admin-access.js";
 import { Ctx, type Deps } from "./ctx.js";

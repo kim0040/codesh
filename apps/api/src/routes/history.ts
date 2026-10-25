@@ -5,7 +5,7 @@ import {
   okResponseSchema,
   restoreBodySchema,
   shareParamsSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import * as Y from "yjs";
 import { accessOf, findShare, requireOwner } from "../access.js";
 import type { Ctx } from "../ctx.js";

@@ -1,4 +1,4 @@
-import { codeParamsSchema, codeResolveResponseSchema } from "@codesh/shared";
+import { codeParamsSchema, codeResolveResponseSchema } from "@gachipad/shared";
 import { findShare } from "../access.js";
 import { releaseCode, resolveCode } from "../codes.js";
 import type { Ctx } from "../ctx.js";

@@ -1,4 +1,4 @@
-import { YDOC } from "@codesh/shared";
+import { YDOC } from "@gachipad/shared";
 import * as Y from "yjs";
 
 /**

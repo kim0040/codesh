@@ -1,4 +1,4 @@
-import { Button, Switch, toast } from "@codesh/ui";
+import { Button, Switch, toast } from "@gachipad/ui";
 import { useId, useSyncExternalStore } from "react";
 import {
   clearDiagnostics,

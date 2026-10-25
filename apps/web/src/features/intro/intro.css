@@ -6,8 +6,8 @@
  * step in tone (no hairlines, no shadows; the scrolled header is the one exception), the
  * six-cell shape is the one recurring motif, and only opacity and transform move.
  */
-@import "@codesh/ui/tokens.css";
-@import "@codesh/ui/fonts.css";
+@import "@gachipad/ui/tokens.css";
+@import "@gachipad/ui/fonts.css";
 
 .ix {
   /* Five type steps. */
@@ -69,7 +69,7 @@
 }
 
 /*
- * Element resets sit in the base layer so Tailwind utilities on @codesh/ui controls
+ * Element resets sit in the base layer so Tailwind utilities on @gachipad/ui controls
  * (font-medium, text-accent-fg, text sizes) still win over them.
  */
 @layer base {

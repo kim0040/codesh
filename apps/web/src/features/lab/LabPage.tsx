@@ -1,5 +1,5 @@
-import { formatRelativeTime } from "@codesh/i18n";
-import type { GetLabResponse, UserRef } from "@codesh/shared";
+import { formatRelativeTime } from "@gachipad/i18n";
+import type { GetLabResponse, UserRef } from "@gachipad/shared";
 import {
   Badge,
   Button,
@@ -12,7 +12,7 @@ import {
   Skeleton,
   Spinner,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";

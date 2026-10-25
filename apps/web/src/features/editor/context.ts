@@ -4,7 +4,7 @@ import {
   type GetShareResponse,
   participantPermissions,
   type UserRef,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { createContext, type MutableRefObject, useContext } from "react";
 import type * as Y from "yjs";
 import type { Participant } from "../../lib/collab/hooks";

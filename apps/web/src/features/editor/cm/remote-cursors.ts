@@ -1,7 +1,7 @@
 import { EditorSelection, StateEffect } from "@codemirror/state";
 import { EditorView, type LayerMarker, layer, RectangleMarker, ViewPlugin } from "@codemirror/view";
-import { contrastRatio, PARTICIPANT_COLORS } from "@codesh/highlight";
-import type { AwarenessState } from "@codesh/shared";
+import { contrastRatio, PARTICIPANT_COLORS } from "@gachipad/highlight";
+import type { AwarenessState } from "@gachipad/shared";
 import * as Y from "yjs";
 import type { DocSession } from "../../../lib/collab/session";
 

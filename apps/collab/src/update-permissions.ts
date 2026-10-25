@@ -1,4 +1,4 @@
-import { type ParticipantPermissions, YDOC } from "@codesh/shared";
+import { type ParticipantPermissions, YDOC } from "@gachipad/shared";
 import * as Y from "yjs";
 
 export type DecodedUpdate = ReturnType<typeof Y.decodeUpdate>;

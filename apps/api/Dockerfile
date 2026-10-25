@@ -17,8 +17,8 @@ RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store pnpm fetch --prod
 COPY . .
 ARG CODESH_VERSION
 RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store \
-    pnpm install --offline --frozen-lockfile --prod --filter @codesh/api... \
-    && pnpm --filter @codesh/api --prod deploy /out \
+    pnpm install --offline --frozen-lockfile --prod --filter @gachipad/api... \
+    && pnpm --filter @gachipad/api --prod deploy /out \
     && version="$(node -p 'require("./package.json").version')" \
     && { [ -z "$CODESH_VERSION" ] || [ "$CODESH_VERSION" = "$version" ] \
       || { echo "CODESH_VERSION=$CODESH_VERSION, package.json has $version" >&2; exit 1; }; } \

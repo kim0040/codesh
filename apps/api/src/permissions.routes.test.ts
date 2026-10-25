@@ -1,4 +1,4 @@
-import { channels, type GetShareResponse, participantPermissions } from "@codesh/shared";
+import { channels, type GetShareResponse, participantPermissions } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createHarness,

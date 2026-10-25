@@ -1,5 +1,5 @@
-import type { Settings } from "@codesh/shared";
-import { Button, toast } from "@codesh/ui";
+import type { Settings } from "@gachipad/shared";
+import { Button, toast } from "@gachipad/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";

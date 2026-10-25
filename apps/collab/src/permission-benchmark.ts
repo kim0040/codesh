@@ -1,6 +1,6 @@
-/** Run on the dev box with `pnpm --filter @codesh/collab exec tsx src/permission-benchmark.ts`. */
+/** Run on the dev box with `pnpm --filter @gachipad/collab exec tsx src/permission-benchmark.ts`. */
 import { performance } from "node:perf_hooks";
-import { participantPermissions, YDOC } from "@codesh/shared";
+import { participantPermissions, YDOC } from "@gachipad/shared";
 import * as Y from "yjs";
 import { validCommentAuthors } from "./comments.js";
 import { hasNewOperations, permitsUpdate } from "./update-permissions.js";

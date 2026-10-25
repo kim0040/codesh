@@ -1,5 +1,5 @@
 /*
- * Numbers the guide quotes. Limits come from @codesh/shared so a changed constant changes the
+ * Numbers the guide quotes. Limits come from @gachipad/shared so a changed constant changes the
  * text; the editor preferences are written out here because importing lib/prefs would pull the
  * whole highlighter into the page, and facts.test.ts fails if they drift from it.
  */
@@ -15,7 +15,7 @@ import {
   NEARBY_PREVIEW_LINES,
   PIN_ATTEMPT_WINDOW_SECONDS,
   PIN_MAX_ATTEMPTS,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 
 const MB = 1024 * 1024;
 const defaults = defaultSettings();

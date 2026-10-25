@@ -1,4 +1,4 @@
-export const PACKAGE_NAME = "@codesh/highlight";
+export const PACKAGE_NAME = "@gachipad/highlight";
 
 export {
   contrastRatio,

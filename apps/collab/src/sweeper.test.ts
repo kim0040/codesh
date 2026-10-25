@@ -1,4 +1,4 @@
-import { defaultSettings, generateClientId, keys } from "@codesh/shared";
+import { defaultSettings, generateClientId, keys } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ValkeyLock } from "./lock.js";
 import { sweep } from "./sweeper.js";

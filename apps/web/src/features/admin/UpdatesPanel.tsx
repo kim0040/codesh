@@ -1,6 +1,6 @@
-import { formatRelativeTime } from "@codesh/i18n";
-import type { AdminUpdateResponse } from "@codesh/shared";
-import { Badge, Button, EmptyState, Skeleton, toast } from "@codesh/ui";
+import { formatRelativeTime } from "@gachipad/i18n";
+import type { AdminUpdateResponse } from "@gachipad/shared";
+import { Badge, Button, EmptyState, Skeleton, toast } from "@gachipad/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CircleCheck,

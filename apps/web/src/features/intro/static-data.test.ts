@@ -1,8 +1,8 @@
-import { EDITOR_THEMES, getEditorTheme, getLanguage } from "@codesh/highlight";
+import { EDITOR_THEMES, getEditorTheme, getLanguage } from "@gachipad/highlight";
 import { describe, expect, it } from "vitest";
 import { EDITOR_COLORS, LANGS } from "./static-data.js";
 
-describe("static data mirrors @codesh/highlight", () => {
+describe("static data mirrors @gachipad/highlight", () => {
   it("uses the registry's names and colours for language chips", () => {
     for (const chip of LANGS) {
       const entry = getLanguage(chip.id);

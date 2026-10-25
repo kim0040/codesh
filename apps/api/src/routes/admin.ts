@@ -9,7 +9,7 @@ import {
   putSettingsBodySchema,
   type Settings,
   statsResponseSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { ldapConfigSchema, oidcConfigSchema } from "../auth/adapters.js";
 import type { Ctx } from "../ctx.js";
 import { ApiError, invalid } from "../errors.js";

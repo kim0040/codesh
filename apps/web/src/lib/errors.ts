@@ -1,4 +1,4 @@
-import type { MessageKey } from "@codesh/i18n";
+import type { MessageKey } from "@gachipad/i18n";
 import { type ClientErrorCode, isApiError } from "./api";
 
 interface ErrorText {

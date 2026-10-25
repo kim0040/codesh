@@ -1,6 +1,6 @@
 import type { EditorView } from "@codemirror/view";
-import { DEFAULT_FILE_ID, type GetShareResponse, type Role, type UserRef } from "@codesh/shared";
-import { toast } from "@codesh/ui";
+import { DEFAULT_FILE_ID, type GetShareResponse, type Role, type UserRef } from "@gachipad/shared";
+import { toast } from "@gachipad/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

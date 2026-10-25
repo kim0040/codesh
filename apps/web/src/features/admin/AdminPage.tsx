@@ -1,5 +1,5 @@
-import { formatRelativeTime } from "@codesh/i18n";
-import { type Settings, settingsSchema } from "@codesh/shared";
+import { formatRelativeTime } from "@gachipad/i18n";
+import { type Settings, settingsSchema } from "@gachipad/shared";
 import {
   Badge,
   Button,
@@ -13,7 +13,7 @@ import {
   TabsList,
   TabsTrigger,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {

@@ -1,4 +1,4 @@
-import { isShareId } from "@codesh/shared";
+import { isShareId } from "@gachipad/shared";
 import { useSyncExternalStore } from "react";
 
 /**

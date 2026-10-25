@@ -12,7 +12,7 @@ import {
   type DiagnosticSource,
   diagnosticError,
   scrubDiagnosticDetails,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import type { DiagnosticsStore } from "./types.js";
 
 /** 8 fixed slots per source, each <=384 KiB including <=256 KiB/500 events; total <=6 MiB serialized.

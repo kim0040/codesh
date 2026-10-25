@@ -1,4 +1,4 @@
-import { defaultSettings, keys } from "@codesh/shared";
+import { defaultSettings, keys } from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness, createShare, type Harness, integration } from "./testing/harness.js";
 
@@ -157,7 +157,7 @@ describe.skipIf(!integration)("admin API", () => {
         ...defaultSettings(),
         anonymousTtlHours: 48,
         subnetPrefixV4: 16,
-        contact: "help@codesh.corp",
+        contact: "help@gachipad.corp",
         rooms: [
           { name: "Room A", cidrs: [`${client.ip.split(".").slice(0, 2).join(".")}.0.0/16`] },
         ],

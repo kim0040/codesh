@@ -1,4 +1,4 @@
-import { formatNumber, type Locale } from "@codesh/i18n";
+import { formatNumber, type Locale } from "@gachipad/i18n";
 import {
   createContext,
   type ReactNode,

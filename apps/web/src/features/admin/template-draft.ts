@@ -1,4 +1,4 @@
-import type { TFunction } from "@codesh/i18n";
+import type { TFunction } from "@gachipad/i18n";
 import {
   MAX_TEMPLATE_DESCRIPTION_LENGTH,
   MAX_TEMPLATE_NAME_LENGTH,
@@ -6,7 +6,7 @@ import {
   type SettingsTemplate,
   settingsTemplateSchema,
   templateBytes,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { formatBytes } from "../../lib/format";
 
 export interface DraftFile {

@@ -6,7 +6,7 @@ import {
   PRESENCE_USER_TTL_SECONDS,
   type PresenceUser,
   type ShareRecord,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
 import { addressKey } from "./net.js";
 import { displayName, type Session } from "./session.js";

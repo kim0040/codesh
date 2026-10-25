@@ -1,4 +1,4 @@
-import { Button, Dialog, DialogContent } from "@codesh/ui";
+import { Button, Dialog, DialogContent } from "@gachipad/ui";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "../../lib/i18n";

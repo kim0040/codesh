@@ -1,4 +1,4 @@
-import { getLanguage, LANGUAGES } from "@codesh/highlight";
+import { getLanguage, LANGUAGES } from "@gachipad/highlight";
 import {
   generateShareId,
   MAX_FILES_PER_SHARE,
@@ -7,7 +7,7 @@ import {
   MAX_TEMPLATES_TOTAL_BYTES,
   type SettingsTemplate,
   templateBytes,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import {
   Button,
   Dialog,
@@ -18,7 +18,7 @@ import {
   LanguageBadge,
   Select,
   useFieldProps,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { formatBytes } from "../../lib/format";

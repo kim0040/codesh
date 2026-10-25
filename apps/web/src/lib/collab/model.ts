@@ -4,7 +4,7 @@ import {
   generateFileId,
   MAX_FILES_PER_SHARE,
   YDOC,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import * as Y from "yjs";
 
 /** Reading and changing the shared document model (docs/ARCHITECTURE.md §4). */

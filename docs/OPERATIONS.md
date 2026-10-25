@@ -415,9 +415,9 @@ CLI는 다음 순서로 대상 서버 URL을 찾습니다.
 
 Windows에서 저장소를 내려받은 뒤 Node.js 22 이상과 Corepack을 준비하고 다음 명령으로 CLI를 빌드해 전역 링크를 등록할 수 있습니다.
 ```powershell
-corepack pnpm install --filter @codesh/cli...
-corepack pnpm --filter @codesh/cli build
-corepack pnpm --filter @codesh/cli link --global
+corepack pnpm install --filter @gachipad/cli...
+corepack pnpm --filter @gachipad/cli build
+corepack pnpm --filter @gachipad/cli link --global
 $env:CODESH_URL = "http://192.168.1.20"
 codesh push .\sample-project --no-qr
 codesh open 123456

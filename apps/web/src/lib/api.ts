@@ -26,7 +26,7 @@ import type {
   StatsResponse,
   Template,
   UploadResult,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { recordDiagnostic, shouldRecordApiFailure } from "./diagnostics";
 
 /** Thin fetch client for the HTTP API (docs/ARCHITECTURE.md §9). Same origin, cookie session. */
@@ -246,26 +246,26 @@ export const api = {
 
   admin: {
     overview: (token: string) =>
-      request<import("@codesh/shared").AdminOverview>("GET", "/api/admin/overview", {
+      request<import("@gachipad/shared").AdminOverview>("GET", "/api/admin/overview", {
         headers: bearer(token),
       }),
     diagnostics: (token: string, query: { level?: string; source?: string; since?: string } = {}) =>
-      request<import("@codesh/shared").DiagnosticEvent[]>("GET", "/api/admin/diagnostics", {
+      request<import("@gachipad/shared").DiagnosticEvent[]>("GET", "/api/admin/diagnostics", {
         headers: bearer(token),
         query,
       }),
     diagnosticExport: (token: string) =>
-      request<import("@codesh/shared").ServerDiagnosticBundle>(
+      request<import("@gachipad/shared").ServerDiagnosticBundle>(
         "GET",
         "/api/admin/diagnostics/export",
         { headers: bearer(token) },
       ),
     security: (token: string) =>
-      request<import("@codesh/shared").AdminSecurity>("GET", "/api/admin/security", {
+      request<import("@gachipad/shared").AdminSecurity>("GET", "/api/admin/security", {
         headers: bearer(token),
       }),
     shares: (token: string, search = "", before?: string, beforeId?: string) =>
-      request<import("@codesh/shared").AdminShare[]>("GET", "/api/admin/shares", {
+      request<import("@gachipad/shared").AdminShare[]>("GET", "/api/admin/shares", {
         headers: bearer(token),
         query: { search, before, beforeId },
       }),

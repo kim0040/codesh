@@ -197,7 +197,7 @@ pnpm install
 pnpm services:up      # 개발용 MongoDB 8, Valkey 8
 pnpm dev              # 웹 :5173, API :3001, collab :3002
 pnpm check            # Biome, TypeScript 타입 검사, Vitest, 라이선스 검사
-pnpm test:e2e         # Playwright. 먼저: pnpm --filter @codesh/web exec playwright install chromium
+pnpm test:e2e         # Playwright. 먼저: pnpm --filter @gachipad/web exec playwright install chromium
 pnpm services:down
 ```
 

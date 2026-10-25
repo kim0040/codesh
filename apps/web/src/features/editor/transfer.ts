@@ -1,4 +1,4 @@
-import { toast } from "@codesh/ui";
+import { toast } from "@gachipad/ui";
 import { type DragEvent, useState } from "react";
 import { api } from "../../lib/api";
 import { useT } from "../../lib/i18n";

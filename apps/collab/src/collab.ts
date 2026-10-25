@@ -40,9 +40,9 @@ import {
   UNLOAD_DELAY_MS,
   verifyCollabToken,
   YDOC,
-} from "@codesh/shared";
-import type { ServerDiagnostics, ShareUpdate, Stores } from "@codesh/storage";
-import { diagnosticShareRef } from "@codesh/storage";
+} from "@gachipad/shared";
+import type { ServerDiagnostics, ShareUpdate, Stores } from "@gachipad/storage";
+import { diagnosticShareRef } from "@gachipad/storage";
 import type {
   afterHandleMessagePayload,
   afterUnloadDocumentPayload,

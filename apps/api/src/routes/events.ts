@@ -6,7 +6,7 @@ import {
   SSE_PRESENCE_REFRESH_MS,
   type SseEvent,
   sseEventSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import type { Ctx } from "../ctx.js";
 import {
   listNearbyCached,

@@ -6,7 +6,7 @@ import {
   type UpdaterStatus,
   type UpdateState,
   updaterStatusSchema,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import type { Redis } from "ioredis";
 import { z } from "zod";
 import type { UpdateConfig } from "./config.js";

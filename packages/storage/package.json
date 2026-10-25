@@ -1,5 +1,5 @@
 {
-  "name": "@codesh/storage",
+  "name": "@gachipad/storage",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,7 +12,7 @@
     "test": "CODESH_REQUIRE_SERVICES=1 vitest run"
   },
   "dependencies": {
-    "@codesh/shared": "workspace:*",
+    "@gachipad/shared": "workspace:*",
     "mongodb": "7.7.0"
   },
   "devDependencies": {

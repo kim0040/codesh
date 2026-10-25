@@ -8,7 +8,7 @@ import { browserCommand, PACKAGE_NAME, qrOutputType, safeJoin, sharePath } from 
 import { type Io, run } from "./run.js";
 
 it("exports the package name", () => {
-  expect(PACKAGE_NAME).toBe("@codesh/cli");
+  expect(PACKAGE_NAME).toBe("@gachipad/cli");
 });
 
 describe("server url", () => {

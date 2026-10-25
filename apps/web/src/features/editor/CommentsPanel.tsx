@@ -1,5 +1,5 @@
-import { formatRelativeTime } from "@codesh/i18n";
-import type { Comment } from "@codesh/shared";
+import { formatRelativeTime } from "@gachipad/i18n";
+import type { Comment } from "@gachipad/shared";
 import {
   Avatar,
   Button,
@@ -9,7 +9,7 @@ import {
   SheetContent,
   Switch,
   toast,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { Check, MessageSquare, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import * as Y from "yjs";

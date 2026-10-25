@@ -1,4 +1,4 @@
-import type { AdminUpdateResponse } from "@codesh/shared";
+import type { AdminUpdateResponse } from "@gachipad/shared";
 import { expect, type Page, test } from "@playwright/test";
 import { ADMIN_TOKEN } from "./env";
 import { closeAll, createShare, newUser, type } from "./helpers";

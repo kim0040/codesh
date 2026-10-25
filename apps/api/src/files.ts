@@ -1,4 +1,4 @@
-import { MAX_PATH_LENGTH, NEARBY_PREVIEW_LINES } from "@codesh/shared";
+import { MAX_PATH_LENGTH, NEARBY_PREVIEW_LINES } from "@gachipad/shared";
 
 /** Normalises an uploaded or client supplied path; null when it could escape its root. */
 export function sanitizePath(path: string): string | null {

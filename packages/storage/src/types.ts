@@ -12,7 +12,7 @@ import type {
   SnapshotKind,
   SnapshotRecord,
   UploadRecord,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 
 /** Persistence contract of docs/ARCHITECTURE.md §5. Only implementations import a database driver. */
 

@@ -10,7 +10,7 @@ import {
   type ShareMeta,
   type ShareRecord,
   signCollabToken,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { touchCode } from "./codes.js";
 import { safeEqual, verifyPin } from "./crypto.js";
 import type { Ctx } from "./ctx.js";

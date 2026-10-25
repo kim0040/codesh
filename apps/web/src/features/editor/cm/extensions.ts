@@ -19,7 +19,7 @@ import {
   lineNumbers,
   rectangularSelection,
 } from "@codemirror/view";
-import { getEditorTheme, type ThemeId } from "@codesh/highlight";
+import { getEditorTheme, type ThemeId } from "@gachipad/highlight";
 import type { EditorPrefs, Keymap } from "../../../lib/prefs";
 import { baseKeymap, editorCompletionKeymap, sublimeKeymap, undoKeymap } from "./keymaps";
 import { smoothCaret } from "./smooth-caret";

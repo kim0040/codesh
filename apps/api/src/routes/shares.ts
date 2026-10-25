@@ -17,8 +17,8 @@ import {
   patchShareBodySchema,
   type ShareListItem,
   shareParamsSchema,
-} from "@codesh/shared";
-import type { ShareUpdate } from "@codesh/storage";
+} from "@gachipad/shared";
+import type { ShareUpdate } from "@gachipad/storage";
 import { strToU8, zipSync } from "fflate";
 import type { z } from "zod";
 import {

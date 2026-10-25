@@ -1,4 +1,4 @@
-import { DEFAULT_FILE_ID, MAX_FILES_PER_SHARE, YDOC } from "@codesh/shared";
+import { DEFAULT_FILE_ID, MAX_FILES_PER_SHARE, YDOC } from "@gachipad/shared";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {

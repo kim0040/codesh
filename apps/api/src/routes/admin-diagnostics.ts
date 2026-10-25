@@ -11,8 +11,8 @@ import {
   type ServerDiagnosticBundle,
   shareIdSchema,
   shareParamsSchema,
-} from "@codesh/shared";
-import { diagnosticShareRef } from "@codesh/storage";
+} from "@gachipad/shared";
+import { diagnosticShareRef } from "@gachipad/storage";
 import { z } from "zod";
 import { randomKey } from "../crypto.js";
 import type { Ctx } from "../ctx.js";

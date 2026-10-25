@@ -1,4 +1,4 @@
-import type { Room } from "@codesh/shared";
+import type { Room } from "@gachipad/shared";
 
 /**
  * Network group resolution (§7): the room whose CIDR contains the client, else the IPv4 /24

@@ -1,4 +1,4 @@
-import { dictionaries } from "@codesh/i18n";
+import { dictionaries } from "@gachipad/i18n";
 import { describe, expect, it } from "vitest";
 import { TOUR_STEPS } from "./steps";
 

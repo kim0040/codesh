@@ -1,6 +1,6 @@
-import { getLanguage } from "@codesh/highlight";
-import type { MessageKey, TFunction } from "@codesh/i18n";
-import type { Template } from "@codesh/shared";
+import { getLanguage } from "@gachipad/highlight";
+import type { MessageKey, TFunction } from "@gachipad/i18n";
+import type { Template } from "@gachipad/shared";
 import {
   Button,
   cx,
@@ -10,7 +10,7 @@ import {
   isImeKey,
   LanguageBadge,
   Skeleton,
-} from "@codesh/ui";
+} from "@gachipad/ui";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Search, SearchX, TriangleAlert } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";

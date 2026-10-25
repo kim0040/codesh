@@ -1,4 +1,4 @@
-import { healthResponseSchema, versionResponseSchema } from "@codesh/shared";
+import { healthResponseSchema, versionResponseSchema } from "@gachipad/shared";
 import type { Ctx } from "../ctx.js";
 import type { App } from "./types.js";
 

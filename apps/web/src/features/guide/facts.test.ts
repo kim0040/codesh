@@ -1,5 +1,5 @@
-import { LANGUAGES } from "@codesh/highlight";
-import { defaultSettings } from "@codesh/shared";
+import { LANGUAGES } from "@gachipad/highlight";
+import { defaultSettings } from "@gachipad/shared";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PREFS, FONT_SIZE_MAX, FONT_SIZE_MIN, KEYMAPS, TAB_SIZES } from "../../lib/prefs";
 import { GUIDE_PAGES, LEGACY_ANCHORS } from "../intro/nav";

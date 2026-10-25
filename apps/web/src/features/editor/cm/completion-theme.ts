@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import type { EditorTheme } from "@codesh/highlight";
+import type { EditorTheme } from "@gachipad/highlight";
 
 /** Popup chrome uses the active editor theme and keeps the selected row high contrast. */
 export function completionTheme(theme: EditorTheme) {

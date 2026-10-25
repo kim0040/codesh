@@ -9,7 +9,7 @@ import {
   type Role,
   type UserRef,
   YDOC,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { HocuspocusProvider, type HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
 import type { Awareness } from "y-protocols/awareness";

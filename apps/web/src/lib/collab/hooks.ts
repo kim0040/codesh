@@ -1,5 +1,5 @@
-import type { AwarenessState, Comment, UserRef } from "@codesh/shared";
-import { YDOC } from "@codesh/shared";
+import type { AwarenessState, Comment, UserRef } from "@gachipad/shared";
+import { YDOC } from "@gachipad/shared";
 import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";

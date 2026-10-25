@@ -1,4 +1,4 @@
-import { EmptyState, type EmptyStateProps } from "@codesh/ui";
+import { EmptyState, type EmptyStateProps } from "@gachipad/ui";
 
 /** A full-page notice: expired, removed, not found, failed to load. */
 export function StatusScreen(props: EmptyStateProps) {

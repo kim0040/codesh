@@ -1,4 +1,4 @@
-import type { NearbyItem, PresenceUser, SseEventData, SseEventType } from "@codesh/shared";
+import type { NearbyItem, PresenceUser, SseEventData, SseEventType } from "@gachipad/shared";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
 /**

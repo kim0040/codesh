@@ -1,4 +1,4 @@
-import { SLOW_CLIENT_CLOSE_CODE } from "@codesh/shared";
+import { SLOW_CLIENT_CLOSE_CODE } from "@gachipad/shared";
 import { describe, expect, it, vi } from "vitest";
 import { guardSlowClient, SLOW_CLIENT_TERMINATE_MS } from "./slow-client.js";
 

@@ -1,4 +1,4 @@
-import { isJoinCode, isShareId, type Role } from "@codesh/shared";
+import { isJoinCode, isShareId, type Role } from "@gachipad/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";

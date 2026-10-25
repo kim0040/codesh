@@ -1,4 +1,4 @@
-import { createT, DEFAULT_LOCALE, isLocale, type Locale, type TFunction } from "@codesh/i18n";
+import { createT, DEFAULT_LOCALE, isLocale, type Locale, type TFunction } from "@gachipad/i18n";
 import {
   createContext,
   type ReactNode,

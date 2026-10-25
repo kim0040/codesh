@@ -7,8 +7,8 @@ import {
   type PresenceUser,
   type Settings,
   type SseEvent,
-} from "@codesh/shared";
-import { ServerDiagnostics, type Stores } from "@codesh/storage";
+} from "@gachipad/shared";
+import { ServerDiagnostics, type Stores } from "@gachipad/storage";
 import type { FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import type { LdapAdapter, OidcAdapter } from "./auth/adapters.js";

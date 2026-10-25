@@ -1,7 +1,7 @@
 /*
  * Tailwind v4 theme. `inline` makes utilities read the runtime variables from tokens.css, so
  * `bg-panel` follows `data-theme` on any ancestor instead of being frozen at :root.
- * Usage in an app: `@import "tailwindcss"; @import "@codesh/ui/styles.css";`
+ * Usage in an app: `@import "tailwindcss"; @import "@gachipad/ui/styles.css";`
  */
 @custom-variant coarse (@media (pointer: coarse));
 

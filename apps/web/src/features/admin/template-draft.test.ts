@@ -1,4 +1,4 @@
-import { MAX_TEMPLATES_TOTAL_BYTES, type SettingsTemplate } from "@codesh/shared";
+import { MAX_TEMPLATES_TOTAL_BYTES, type SettingsTemplate } from "@gachipad/shared";
 import { describe, expect, it } from "vitest";
 import { toDraft, validate } from "./template-draft";
 

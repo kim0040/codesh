@@ -1,4 +1,4 @@
-import { contrastRatio, PARTICIPANT_COLORS, rgbToHex } from "@codesh/highlight";
+import { contrastRatio, PARTICIPANT_COLORS, rgbToHex } from "@gachipad/highlight";
 import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { cx } from "../src/index.js";
 import { Label, Row, Section, ThemePair } from "./lib.js";

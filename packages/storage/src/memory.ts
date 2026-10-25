@@ -13,7 +13,7 @@ import {
   type SnapshotRecord,
   scrubDiagnosticSnapshot,
   type UploadRecord,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import {
   type AuditQuery,
   type AuditStore,

@@ -19,8 +19,8 @@ RUN version="$(node -p 'require("./package.json").version')" \
     && { [ -z "$CODESH_VERSION" ] || [ "$CODESH_VERSION" = "$version" ] \
       || { echo "CODESH_VERSION=$CODESH_VERSION, package.json has $version" >&2; exit 1; }; }
 RUN --mount=type=cache,id=codesh-pnpm,target=/pnpm/store \
-    pnpm install --offline --frozen-lockfile --filter @codesh/web... \
-    && pnpm --filter @codesh/web build \
+    pnpm install --offline --frozen-lockfile --filter @gachipad/web... \
+    && pnpm --filter @gachipad/web build \
     && node deploy/caddy/csp.mjs \
     && find apps/web/dist -type f -name '*.map' -delete
 

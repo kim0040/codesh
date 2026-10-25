@@ -5,7 +5,7 @@ import {
   generateShareId,
   keys,
   type ShareRecord,
-} from "@codesh/shared";
+} from "@gachipad/shared";
 import { codeTtlSeconds } from "./access.js";
 import { allocateCode, releaseCode, touchCode } from "./codes.js";
 import { randomKey } from "./crypto.js";
