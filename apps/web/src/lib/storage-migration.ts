@@ -51,15 +51,27 @@ export function mirrorLegacy(key: string, value: string | null): void {
   else localStorage.setItem(old, value);
 }
 
-export async function initializeLegacyDatabases(): Promise<void> {
-  try {
+/** Longest the first screen waits for `indexedDB.databases()`; an answer after that still counts. */
+const DATABASES_WAIT_MS = 1000;
+
+export async function initializeLegacyDatabases(waitMs = DATABASES_WAIT_MS): Promise<void> {
+  const detect = (async () => {
     // Existing Yjs databases stay in place: copying a live database would split concurrent tabs.
     if ((await indexedDB.databases()).some((db) => db.name?.startsWith(LEGACY_IDB_PREFIX))) {
       localStorage.setItem(LEGACY_MARKER, "1");
     }
-  } catch {
+  })().catch(() => {
     // Browsers without enumeration use the synchronously migrated device registry/prefs.
-  }
+  });
+  // Some browsers never settle databases(): boot goes on, the marker is still set if it answers.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    detect,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs);
+    }),
+  ]);
+  clearTimeout(timer);
 }
 
 // This module is the first import of main.tsx, before any module reads persisted preferences.
@@ -73,15 +85,17 @@ for (const name of ["localStorage", "sessionStorage"] as const) {
   }
 }
 
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (event) => {
-    if (!event.key?.startsWith(LEGACY_STORAGE_PREFIX) || !event.storageArea) return;
-    try {
-      const key = `gachipad.${event.key.slice(LEGACY_STORAGE_PREFIX.length)}`;
-      if (event.newValue === null) event.storageArea.removeItem(key);
-      else event.storageArea.setItem(key, event.newValue);
-    } catch {
-      // Blocked storage; a later reload retries migration.
-    }
-  });
+/** Old tabs write `codesh.*`; the new keys follow, except `forget`, which device.ts hears on both. */
+export function mirrorStorageEvent(event: StorageEvent): void {
+  if (!event.key?.startsWith(LEGACY_STORAGE_PREFIX) || !event.storageArea) return;
+  if (event.key === `${LEGACY_STORAGE_PREFIX}forget`) return;
+  try {
+    const key = `gachipad.${event.key.slice(LEGACY_STORAGE_PREFIX.length)}`;
+    if (event.newValue === null) event.storageArea.removeItem(key);
+    else event.storageArea.setItem(key, event.newValue);
+  } catch {
+    // Blocked storage; a later reload retries migration.
+  }
 }
+
+if (typeof window !== "undefined") window.addEventListener("storage", mirrorStorageEvent);

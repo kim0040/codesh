@@ -39,6 +39,18 @@ for name in "${SECRETS[@]}"; do
   fi
 done
 # legacy codesh name (1.0.x); remove in 2.0
+# An HTTPS alias needs a certificate for the new name. Only `tls internal` mints one by itself;
+# an operator certificate usually names the old host. The v1.0.1 updater runs this in the staged
+# candidate, so also look in the installation it exports through its lock path.
+tls_internal() {
+  local dir live="${GACHIPAD_LOCK_PATH:-${CODESH_LOCK_PATH:-}}" dirs=(tls)
+  [ -z "$live" ] || dirs+=("$(dirname "$(dirname "$live")")/tls")
+  for dir in "${dirs[@]}"; do
+    grep -Eqs '^[[:space:]]*tls[[:space:]]+internal([[:space:]]|$)' "$dir"/*.caddy && return 0
+  done
+  return 1
+}
+# legacy codesh name (1.0.x); remove in 2.0
 # v1.0.1 update.sh calls this NEW helper before inspecting/starting the NEW compose file.
 # Pin the old installation's project and Mongo names; no live data is copied or renamed.
 if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' "$TMP"; then
@@ -64,20 +76,27 @@ if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' 
     migrate_set UPDATE_REPO kim0040/gachipad
   fi
   # A custom operator hostname stays unchanged; the former default gains the new name too.
-  if [ "$(legacy_get MDNS_HOSTNAME)" = codesh.local ] || [ -z "$(legacy_get MDNS_HOSTNAME)" ]; then
-    migrate_set MDNS_HOSTNAME gachipad.local
-    migrate_set MDNS_ALIASES codesh.local
-    case "$(legacy_get SITE_ADDRESS)" in
-      codesh.local|https://codesh.local) migrate_set SITE_ALIASES ', gachipad.local' ;;
-      http://codesh.local) migrate_set SITE_ALIASES ', http://gachipad.local' ;;
-    esac
-  fi
+  # The updater appends the template's gachipad.local to a hand-trimmed .env before this runs.
+  case "$(legacy_get MDNS_HOSTNAME)" in
+    '' | codesh.local | gachipad.local)
+      migrate_set MDNS_HOSTNAME gachipad.local
+      migrate_set MDNS_ALIASES codesh.local
+      case "$(legacy_get SITE_ADDRESS)" in
+        codesh.local | https://codesh.local) if tls_internal; then migrate_set SITE_ALIASES ', gachipad.local'; fi ;;
+        http://codesh.local) migrate_set SITE_ALIASES ', http://gachipad.local' ;;
+      esac
+      ;;
+  esac
+  # Stop the deprecation warning: the old lines were copied above. A comment line is ignored
+  # by the v1.0.1 updater, which reads CODESH_* from the live .env only and restores its own
+  # copy of it on rollback.
+  sed 's/^\(CODESH_[A-Za-z0-9_]*=.*\)$/# migrated to GACHIPAD_*: \1/' "$TMP" >"$TMP.next" && mv "$TMP.next" "$TMP"
   migrate_set GACHIPAD_LEGACY_INSTALL 1
   echo "warning: migrated legacy installation settings; existing data locations retained" >&2
 fi
 
-cat "$TMP" >"$FILE"
-chmod 600 "$FILE"
+# Replace atomically (same directory) so an interrupted run never leaves a truncated .env.
+chmod 600 "$TMP" && mv "$TMP" "$FILE"
 # The legacy upgrader calls this helper before starting Compose, but does not copy state/.
 # Create the status mount as the operator so Docker cannot create a root-owned directory.
 mkdir -p state && chmod 755 state

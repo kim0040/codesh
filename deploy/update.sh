@@ -36,8 +36,10 @@ MARKER="$STATE/transaction"
 UNIT=gachipad-update
 SYSTEMD_DIR="${GACHIPAD_SYSTEMD_DIR:-/etc/systemd/system}"
 # legacy codesh name (1.0.x); remove in 2.0
-# Existing schedulers keep their installed unit/tag, avoiding two timers after the update.
-if [ -f "$SYSTEMD_DIR/codesh-update.timer" ] || [ "$(env_get GACHIPAD_LEGACY_INSTALL)" = 1 ]; then
+# An existing scheduler keeps its installed unit/tag, avoiding two timers after the update.
+# A host that never had one gets the new name, even when the installation itself is legacy.
+if [ -f "$SYSTEMD_DIR/codesh-update.timer" ] ||
+  { command -v crontab >/dev/null 2>&1 && grep -qF "# codesh-update $(pwd)" < <(crontab -l 2>/dev/null); }; then
   UNIT=codesh-update
 fi
 CRON_TAG="# $UNIT $(pwd)"

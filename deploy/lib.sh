@@ -147,8 +147,18 @@ stop_writes() {
 # mongo_transfer dump|validate|restore: Mongo tools as the root user, archive on stdin/stdout.
 # inside the mongo container. The password goes through a private config file, never arguments.
 mongo_transfer() {
+  # Names come from this installation's .env, not from the container: a container created before
+  # a partly finished update still carries the old environment (or none of these variables).
+  local db user
+  db="$(env_get MONGO_DATABASE)" user="$(env_get MONGO_ROOT_USER)"
+  # legacy codesh name (1.0.x); remove in 2.0
+  if [ -z "$db" ] || [ -z "$user" ]; then
+    if [ -n "$(env_get CODESH_VERSION)" ] || [ "$(env_get GACHIPAD_LEGACY_INSTALL)" = 1 ]; then
+      db="${db:-codesh}" user="${user:-codesh}"
+    else db="${db:-gachipad}" user="${user:-gachipad}"; fi
+  fi
   # shellcheck disable=SC2016 # expanded by the shell in the container
-  docker compose exec -T mongo sh -c '
+  docker compose exec -T -e MONGO_DATABASE="$db" -e MONGO_INITDB_ROOT_USERNAME="$user" mongo sh -c '
     set -eu
     umask 077
     cfg="$(mktemp)"
@@ -240,7 +250,9 @@ verify_bundle() {
 }
 
 # legacy codesh name (1.0.x); remove in 2.0
-# Environment compatibility is startup-only and warns once, without printing any values.
+# Environment compatibility is startup-only and warns once per run (children inherit the marker),
+# without printing any values. Only real environment variables warn: the migration comments the
+# old lines out of .env, and env_get still reads an old-style .env silently.
 legacy_env_names=()
 while read -r legacy_env_name; do
   [[ "$legacy_env_name" == CODESH_* ]] || continue
@@ -248,6 +260,7 @@ while read -r legacy_env_name; do
   new_env_name="GACHIPAD_${legacy_env_name#CODESH_}"
   if [ -z "${!new_env_name+x}" ]; then export "$new_env_name=${!legacy_env_name}"; fi
 done < <(compgen -e)
-if [ "${#legacy_env_names[@]}" -gt 0 ] || grep -q '^CODESH_' .env 2>/dev/null; then
+if [ "${#legacy_env_names[@]}" -gt 0 ] && [ -z "${GACHIPAD_LEGACY_ENV_WARNED:-}" ]; then
+  export GACHIPAD_LEGACY_ENV_WARNED=1
   echo "warning: legacy CODESH_ settings are deprecated; use GACHIPAD_ settings" >&2
 fi

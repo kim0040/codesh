@@ -14,6 +14,14 @@ verify_bundle .
 [ -f images.tar ] || die "images.tar is missing: run this from the extracted bundle"
 VERSION="$(cat VERSION)"
 
+# legacy codesh name (1.0.x); remove in 2.0
+# A 1.0.x installation keeps its data in codesh_* volumes. A folder without its .env would start an
+# empty gachipad project next to them, so stop unless the operator named a project or opted in.
+if [ ! -f .env ] && [ -z "${COMPOSE_PROJECT_NAME:-}${GACHIPAD_PROJECT:-}${GACHIPAD_NEW_INSTALL:-}" ] &&
+  grep -qx codesh_mongo-data < <(docker volume ls -q); then
+  die "the volumes of a codesh 1.0.x installation (codesh_mongo-data) exist on this host, but this folder has no .env. Update that installation in its own folder (./update.sh, or ./upgrade.sh <bundle>), or copy its .env here and run ./generate-secrets.sh .env first to keep its data. For a separate new installation set GACHIPAD_NEW_INSTALL=1."
+fi
+
 echo "install: loading images ($VERSION)"
 docker load -i images.tar
 

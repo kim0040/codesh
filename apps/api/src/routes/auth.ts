@@ -50,6 +50,16 @@ export function authRoutes(app: App, ctx: Ctx): void {
       .exec();
   };
 
+  // legacy codesh name (1.0.x); remove in 2.0
+  // Same attributes as the cookie 1.0.x set (session.ts setSessionCookie), so every browser deletes it.
+  const clearLegacyCookie = (reply: FastifyReply) =>
+    reply.clearCookie(LEGACY_SESSION_COOKIE, {
+      httpOnly: true,
+      secure: ctx.config.publicUrl.startsWith("https://"),
+      sameSite: "lax",
+      path: "/",
+    });
+
   /**
    * Logging in or out gives the browser a new `gachipad_sid`: the next person on a shared PC does
    * not inherit the previous user's shares, uploads and history, and a session id planted before
@@ -63,7 +73,7 @@ export function authRoutes(app: App, ctx: Ctx): void {
   ): Promise<Session> => {
     const previous = request.session;
     if (request.cookies[LEGACY_SESSION_COOKIE] !== undefined) {
-      reply.clearCookie(LEGACY_SESSION_COOKIE, { path: "/" });
+      clearLegacyCookie(reply);
     }
     const clientId = issueSession(ctx, reply);
     const profile = await ctx.valkey.hgetall(apiKeys.profile(previous.clientId));
@@ -200,7 +210,7 @@ export function authRoutes(app: App, ctx: Ctx): void {
     async (request, reply) => {
       await ctx.valkey.del(apiKeys.identity(request.session.clientId));
       if (request.cookies[LEGACY_SESSION_COOKIE] !== undefined) {
-        reply.clearCookie(LEGACY_SESSION_COOKIE, { path: "/" });
+        clearLegacyCookie(reply);
       }
       issueSession(ctx, reply);
       return OK;

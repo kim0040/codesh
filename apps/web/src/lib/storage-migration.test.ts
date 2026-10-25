@@ -1,5 +1,10 @@
-import { expect, it } from "vitest";
-import { migrateStorage } from "./storage-migration";
+import { afterEach, expect, it, vi } from "vitest";
+import { initializeLegacyDatabases, migrateStorage, mirrorStorageEvent } from "./storage-migration";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 function storage(seed: Record<string, string> = {}): Storage {
   const values = new Map(Object.entries(seed));
@@ -56,4 +61,61 @@ it("retains the source and retries after a quota failure", () => {
   s.setItem = set;
   migrateStorage(s);
   expect(s.getItem("gachipad.locale")).toBe("en");
+});
+
+// legacy codesh name (1.0.x); remove in 2.0
+it("boot does not wait for an indexedDB.databases() that never settles", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("localStorage", storage());
+  vi.stubGlobal("indexedDB", { databases: () => new Promise(() => {}) });
+  const done = vi.fn();
+  void initializeLegacyDatabases().then(done);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(done).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(done).toHaveBeenCalledOnce();
+  expect(localStorage.getItem("gachipad.legacy-storage")).toBeNull();
+});
+
+// legacy codesh name (1.0.x); remove in 2.0
+it("a late databases() answer still marks the profile as legacy", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("localStorage", storage());
+  vi.stubGlobal("indexedDB", {
+    databases: () =>
+      new Promise((resolve) => setTimeout(() => resolve([{ name: "codesh:doc:abc" }]), 1500)),
+  });
+  const boot = initializeLegacyDatabases();
+  await vi.advanceTimersByTimeAsync(1000);
+  await boot;
+  expect(localStorage.getItem("gachipad.legacy-storage")).toBeNull();
+  await vi.advanceTimersByTimeAsync(500);
+  expect(localStorage.getItem("gachipad.legacy-storage")).toBe("1");
+});
+
+// legacy codesh name (1.0.x); remove in 2.0
+it("a prompt databases() answer marks the profile before boot goes on", async () => {
+  vi.stubGlobal("localStorage", storage());
+  vi.stubGlobal("indexedDB", { databases: async () => [{ name: "codesh:doc:abc" }] });
+  await initializeLegacyDatabases();
+  expect(localStorage.getItem("gachipad.legacy-storage")).toBe("1");
+  vi.stubGlobal("localStorage", storage());
+  vi.stubGlobal("indexedDB", { databases: async () => [{ name: "gachipad:doc:abc" }] });
+  await initializeLegacyDatabases();
+  expect(localStorage.getItem("gachipad.legacy-storage")).toBeNull();
+});
+
+// legacy codesh name (1.0.x); remove in 2.0
+it("mirrors an old tab's writes to the new keys, but not forget messages", () => {
+  const s = storage();
+  const event = (key: string, newValue: string | null) =>
+    ({ key, newValue, storageArea: s }) as StorageEvent;
+  mirrorStorageEvent(event("codesh.theme", "dark"));
+  expect(s.getItem("gachipad.theme")).toBe("dark");
+  mirrorStorageEvent(event("codesh.theme", null));
+  expect(s.getItem("gachipad.theme")).toBeNull();
+  mirrorStorageEvent(event("codesh.forget", '{"tab":"a"}'));
+  expect(s.getItem("gachipad.forget")).toBeNull();
+  mirrorStorageEvent(event("other.key", "x"));
+  expect(s.getItem("gachipad.key")).toBeNull();
 });

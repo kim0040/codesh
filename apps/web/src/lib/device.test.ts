@@ -98,6 +98,21 @@ it("keeps old copies reachable without database enumeration and preserves them o
   expect(store.get("codesh.prefs")).toBe(JSON.stringify({ offlineCopy: "yes" }));
 });
 
+// legacy codesh name (1.0.x); remove in 2.0
+it("forgets a copy that a 1.0.x tab made after the migration, also without database enumeration", async () => {
+  const { store, dbs } = fakeBrowser({ databases: "missing" });
+  store.set("gachipad.storage-migrated.v1", "1");
+  store.set("codesh.device.copy:late", "1");
+  store.set("codesh.device.erase:gone", "1");
+  dbs.add("codesh:doc:late");
+  dbs.add("codesh:doc:gone");
+  const device = await load();
+  expect(await device.sweep()).toBe(true);
+  expect([...dbs]).toEqual([]);
+  expect(store.has("codesh.device.copy:late")).toBe(false);
+  expect(store.has("codesh.device.erase:gone")).toBe(false);
+});
+
 type Device = Awaited<ReturnType<typeof load>>;
 
 /** What a DocSession does before it opens a copy. */

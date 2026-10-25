@@ -103,18 +103,24 @@ const mark = (key: string) => store(key, "1");
 function unmark(key: string): void {
   try {
     localStorage.removeItem(key);
-    mirrorLegacy(key, null);
+    // legacy codesh name (1.0.x); remove in 2.0
+    // Also the twin an old tab wrote after the migration, whatever the profile's mode.
+    localStorage.removeItem(LEGACY_STORAGE_PREFIX + key.slice("gachipad.".length));
   } catch {
     // Blocked storage: nothing was stored either.
   }
 }
 
-/** Ids stored under a prefix; throws when storage is blocked. */
+/** Ids stored under a prefix or its legacy twin; throws when storage is blocked. */
 function storedIds(prefix: string): string[] {
+  // legacy codesh name (1.0.x); remove in 2.0
+  // A tab still running 1.0.x writes the old key even after the migration.
+  const legacy = LEGACY_STORAGE_PREFIX + prefix.slice("gachipad.".length);
   const ids: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key?.startsWith(prefix)) ids.push(key.slice(prefix.length));
+    else if (key?.startsWith(legacy)) ids.push(key.slice(legacy.length));
   }
   return ids;
 }

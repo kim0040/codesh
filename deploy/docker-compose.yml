@@ -35,7 +35,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/caddy/Dockerfile
-    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-web:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-web:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env; on a 1.0.x install run ./generate-secrets.sh .env first, it migrates the old settings}
     cap_add: [NET_BIND_SERVICE]
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
@@ -60,7 +60,7 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-api:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-api:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env; on a 1.0.x install run ./generate-secrets.sh .env first, it migrates the old settings}
     read_only: true
     tmpfs: [/tmp]
     environment:
@@ -115,7 +115,7 @@ services:
     build:
       context: ..
       dockerfile: apps/collab/Dockerfile
-    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-collab:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-collab:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env; on a 1.0.x install run ./generate-secrets.sh .env first, it migrates the old settings}
     read_only: true
     tmpfs: [/tmp]
     environment:
@@ -228,7 +228,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/mdns/Dockerfile
-    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-mdns:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env}
+    image: ${GACHIPAD_REGISTRY:-ghcr.io/kim0040}/gachipad-mdns:${GACHIPAD_VERSION:?set GACHIPAD_VERSION in .env; on a 1.0.x install run ./generate-secrets.sh .env first, it migrates the old settings}
     network_mode: host
     read_only: true
     cap_drop: [ALL]

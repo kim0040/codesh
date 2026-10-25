@@ -98,6 +98,34 @@ describe.skipIf(!integration)("session routes", () => {
   });
 
   // legacy codesh name (1.0.x); remove in 2.0
+  it("clears the legacy cookie with the attributes it was set with", async () => {
+    const secure = await createHarness({ config: { publicUrl: "https://gachipad.corp" } });
+    try {
+      for (const [harness, secureFlag] of [
+        [h, false],
+        [secure, true],
+      ] as const) {
+        const client = harness.client();
+        const signed = (await client.get("/api/session")).cookies.find(
+          (cookie) => cookie.name === "gachipad_sid",
+        );
+        client.setCookie("codesh_sid", decodeURIComponent(signed?.value ?? ""));
+        const logout = await client.post("/api/auth/logout");
+        const cleared = [logout.headers["set-cookie"]]
+          .flat()
+          .find((line) => String(line).startsWith("codesh_sid="));
+        expect(cleared).toMatch(/HttpOnly/i);
+        expect(cleared).toMatch(/SameSite=Lax/i);
+        expect(cleared).toMatch(/Path=\//);
+        expect(/; Secure/i.test(String(cleared))).toBe(secureFlag);
+        expect(cleared).toMatch(/Expires=Thu, 01 Jan 1970/);
+      }
+    } finally {
+      await secure.close();
+    }
+  });
+
+  // legacy codesh name (1.0.x); remove in 2.0
   it("rejects unsigned legacy cookies and prefers a valid new cookie over a different old one", async () => {
     const first = await h.client().get("/api/session");
     const second = await h.client().get("/api/session");

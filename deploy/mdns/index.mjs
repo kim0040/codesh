@@ -11,8 +11,9 @@ const hosts = [...new Set([host, ...(process.env.MDNS_ALIASES || "").split(",").
 const port = Number(process.env.MDNS_PORT || 80);
 const ip = process.env.MDNS_IP || "";
 
-if (hosts.some((name) => !name.endsWith(".local"))) {
-  console.error(`mdns: MDNS_HOSTNAME must end in .local, got "${host}"`);
+const invalid = hosts.find((name) => !name.endsWith(".local"));
+if (invalid !== undefined) {
+  console.error(`mdns: MDNS_HOSTNAME and MDNS_ALIASES must end in .local, got "${invalid}"`);
   process.exit(1);
 }
 
