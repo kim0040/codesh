@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import {
   type AuditRecord,
+  type DiagnosticSnapshot,
   defaultSettings,
   type LabRecord,
   type LabStudent,
@@ -10,6 +11,7 @@ import {
   type ShareRecord,
   type SnapshotKind,
   type SnapshotRecord,
+  scrubDiagnosticSnapshot,
   type UploadRecord,
 } from "@codesh/shared";
 import {
@@ -42,6 +44,52 @@ const defined = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 
 class MemoryShareStore implements ShareStore {
+  async adminList(search: string, before?: Date, beforeId?: string) {
+    return [...this.shares.values()]
+      .filter(
+        (s) =>
+          (!s.expiresAt || s.expiresAt > new Date()) &&
+          s.title.toLowerCase().includes(search.toLowerCase()) &&
+          (!before ||
+            s.createdAt < before ||
+            (s.createdAt.getTime() === before.getTime() &&
+              beforeId !== undefined &&
+              s.id < beforeId)),
+      )
+      .sort(
+        (a, b) =>
+          b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+      )
+      .slice(0, 100)
+      .map((s) =>
+        copy({
+          id: s.id,
+          title: s.title,
+          language: s.language,
+          saved: s.saved,
+          ownerId: s.ownerId,
+          ...(s.labId ? { labId: s.labId } : {}),
+          createdAt: s.createdAt,
+          lastActiveAt: s.lastActiveAt,
+          expiresAt: s.expiresAt,
+          sizeBytes: s.sizeBytes,
+          locked: s.locked,
+        }),
+      );
+  }
+  async adminSummary() {
+    const now = Date.now();
+    const shares = [...this.shares.values()].filter(
+      (s) => !s.expiresAt || s.expiresAt.getTime() > now,
+    );
+    const activity = Array<number>(24).fill(0);
+    for (const s of shares) {
+      const hour = Math.floor((now - s.createdAt.getTime()) / 3600000);
+      if (hour >= 0 && hour < 24) activity[23 - hour] = (activity[23 - hour] ?? 0) + 1;
+    }
+    return { shares: shares.length, activity };
+  }
+
   private readonly shares = new Map<string, ShareRecord>();
 
   async create(share: ShareRecord) {
@@ -455,8 +503,19 @@ class MemoryAuditStore implements AuditStore {
   }
 }
 
+class MemoryDiagnosticsStore {
+  private readonly slots = new Map<string, DiagnosticSnapshot>();
+  async replace(snapshot: DiagnosticSnapshot) {
+    const clean = scrubDiagnosticSnapshot(snapshot);
+    if (clean) this.slots.set(clean.slot, copy(clean));
+  }
+  async list() {
+    return copy([...this.slots.values()]);
+  }
+}
 export function createMemoryStores(): Stores {
   return {
+    diagnostics: new MemoryDiagnosticsStore(),
     shares: new MemoryShareStore(),
     updates: new MemoryUpdateLog(),
     snapshots: new MemorySnapshotStore(),

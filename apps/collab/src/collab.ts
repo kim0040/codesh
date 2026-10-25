@@ -16,6 +16,7 @@ import {
   collabCommandSchema,
   DEFAULT_FILE_ID,
   defaultSettings,
+  diagnosticError,
   FLUSH_INTERVAL_MS,
   HISTORY_SNAPSHOT_INTERVAL_MS,
   keys,
@@ -37,7 +38,7 @@ import {
   verifyCollabToken,
   YDOC,
 } from "@codesh/shared";
-import type { ShareUpdate, Stores } from "@codesh/storage";
+import type { ServerDiagnostics, ShareUpdate, Stores } from "@codesh/storage";
 import type {
   afterHandleMessagePayload,
   afterUnloadDocumentPayload,
@@ -116,6 +117,7 @@ export const DEFAULT_TIMINGS: CollabTimings = {
 };
 
 export interface CollabDeps {
+  diagnostics?: ServerDiagnostics;
   stores: Stores;
   /** Commands (locks, nearby). */
   redis: Redis;
@@ -385,7 +387,10 @@ export class Collab implements Extension<CollabContext> {
       historyIntervalMs: this.timings.historyIntervalMs,
       // Valkey unreachable: skip the compaction rather than fail the flush with it.
       stillOwner: () => this.lock.renew(lockKey).catch(() => false),
-      onFlush: (ms) => this.deps.metrics.flushSeconds.observe(ms / 1000),
+      onFlush: (ms) => {
+        this.deps.metrics.flushSeconds.observe(ms / 1000);
+        if (ms > 200) this.deps.diagnostics?.record("slow_flush", { durationMs: ms });
+      },
     });
     core.owner = await this.lock.acquire(lockKey).catch(() => false);
     try {
@@ -671,6 +676,7 @@ export class Collab implements Extension<CollabContext> {
 
   /** Logs `error` unless the same `key` was logged within `ERROR_LOG_INTERVAL_MS`. */
   private logThrottled(key: string, message: string, error: unknown) {
+    this.deps.diagnostics?.record("background_error", diagnosticError(error), "error");
     const now = Date.now();
     if (now - (this.loggedAt.get(key) ?? 0) < ERROR_LOG_INTERVAL_MS) return;
     this.loggedAt.set(key, now);
@@ -683,6 +689,7 @@ export class Collab implements Extension<CollabContext> {
       return await task();
     } catch (error) {
       if (isDenied(error, COLLAB_DENY_REASONS.notFound)) throw error;
+      this.deps.diagnostics?.record("mongo_error", diagnosticError(error), "error");
       console.error(`collab: ${label} failed`, error);
       throw deny(COLLAB_DENY_REASONS.unavailable);
     }
@@ -708,12 +715,16 @@ export class Collab implements Extension<CollabContext> {
           state.flushRetryAt = 0;
         })
         .catch((error) => {
+          this.deps.diagnostics?.record("flush_error", diagnosticError(error), "error");
           this.deps.metrics.flushErrors.inc();
           // Back off exponentially so an outage does not become a retry and log storm; the
           // buffer keeps every update meanwhile.
           state.flushFailures++;
           const delay = this.timings.flushIntervalMs * 2 ** state.flushFailures;
           state.flushRetryAt = Date.now() + Math.min(delay, FLUSH_BACKOFF_MAX_MS);
+          this.deps.diagnostics?.record("flush_backoff", {
+            backoffMs: Math.min(delay, FLUSH_BACKOFF_MAX_MS),
+          });
           this.logThrottled(
             `flush:${state.name}`,
             `collab: flush of ${state.name} failed (${state.flushFailures} in a row), retrying`,
@@ -788,7 +799,10 @@ export class Collab implements Extension<CollabContext> {
           // null: that command failed, so keep the current role and retry on the next tick.
           if (got === null || got === undefined) return;
           if (state.core.owner) {
-            if (!got) state.core.disown();
+            if (!got) {
+              this.deps.diagnostics?.record("lock_lost", {}, "error");
+              state.core.disown();
+            }
             return;
           }
           if (!got) return;

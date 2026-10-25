@@ -2,6 +2,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
   type AuditRecord,
+  type DiagnosticSnapshot,
   defaultSettings,
   type LabRecord,
   type LabStudent,
@@ -12,6 +13,7 @@ import {
   type ShareRecord,
   type SnapshotKind,
   type SnapshotRecord,
+  scrubDiagnosticSnapshot,
   settingsSchema,
   type UploadRecord,
 } from "@codesh/shared";
@@ -109,6 +111,77 @@ function isDuplicateKey(error: unknown): boolean {
 }
 
 class MongoShareStore implements ShareStore {
+  async adminList(search: string, before?: Date, beforeId?: string) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const docs = await this.shares
+      .find(
+        {
+          $and: [
+            { $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] },
+            ...(search ? [{ title: { $regex: escaped, $options: "i" } }] : []),
+            ...(before
+              ? [
+                  {
+                    $or: [
+                      { createdAt: { $lt: before } },
+                      ...(beforeId ? [{ createdAt: before, _id: { $lt: beforeId } }] : []),
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        },
+        {
+          projection: {
+            _id: 1,
+            title: 1,
+            language: 1,
+            saved: 1,
+            ownerId: 1,
+            labId: 1,
+            createdAt: 1,
+            lastActiveAt: 1,
+            expiresAt: 1,
+            sizeBytes: 1,
+            locked: 1,
+          },
+        },
+      )
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(100)
+      .toArray();
+    return docs.map((s) => ({
+      id: s._id,
+      title: s.title,
+      language: s.language,
+      saved: s.saved,
+      ownerId: s.ownerId,
+      ...(s.labId ? { labId: s.labId } : {}),
+      createdAt: s.createdAt,
+      lastActiveAt: s.lastActiveAt,
+      expiresAt: s.expiresAt,
+      sizeBytes: s.sizeBytes,
+      locked: s.locked,
+    }));
+  }
+  async adminSummary() {
+    const now = Date.now();
+    const rows = await this.shares
+      .aggregate<{ _id: number; count: number }>([
+        { $match: { $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date(now) } }] } },
+        {
+          $group: {
+            _id: { $floor: { $divide: [{ $subtract: [new Date(now), "$createdAt"] }, 3600000] } },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+    const activity = Array<number>(24).fill(0);
+    for (const row of rows) if (row._id >= 0 && row._id < 24) activity[23 - row._id] = row.count;
+    return { shares: rows.reduce((n, r) => n + r.count, 0), activity };
+  }
+
   constructor(private readonly shares: Collection<ShareDoc>) {}
 
   async create({ id, ...rest }: ShareRecord) {
@@ -667,8 +740,26 @@ class MongoAuditStore implements AuditStore {
   }
 }
 
+class MongoDiagnosticsStore {
+  constructor(private readonly db: Db) {}
+  async replace(snapshot: DiagnosticSnapshot) {
+    const clean = scrubDiagnosticSnapshot(snapshot);
+    if (clean)
+      await this.db
+        .collection<DiagnosticSnapshot & { _id: string }>("diagnostics")
+        .replaceOne({ _id: clean.slot }, clean, { upsert: true });
+  }
+  async list() {
+    return this.db
+      .collection<DiagnosticSnapshot>("diagnostics")
+      .find({}, { projection: { _id: 0 } })
+      .limit(16)
+      .toArray();
+  }
+}
 export function createMongoStores(db: Db): Stores {
   return {
+    diagnostics: new MongoDiagnosticsStore(db),
     shares: new MongoShareStore(db.collection<ShareDoc>(COLLECTIONS.shares)),
     updates: new MongoUpdateLog(db.collection<UpdateDoc>(COLLECTIONS.updates)),
     snapshots: new MongoSnapshotStore(db.collection<SnapshotDoc>(COLLECTIONS.snapshots)),

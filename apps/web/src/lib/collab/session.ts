@@ -20,6 +20,7 @@ import {
   registerHolder,
   within,
 } from "../device";
+import { captureDiagnosticError, newDiagnosticReference, recordDiagnostic } from "../diagnostics";
 import { subscribePrefs } from "../prefs";
 import { acquireSocket } from "./socket";
 
@@ -169,6 +170,11 @@ export class DocSession {
   private listeners = new Set<() => void>();
   private destroyed = false;
   private everConnected = false;
+  private readonly diagnosticRef = newDiagnosticReference();
+  private readonly diagnosticsStarted = Date.now();
+  private diagnosticsSynced = false;
+  private diagnosticReconnects = 0;
+  private offlineSince: number | null = null;
   private editedWhileAway = false;
   private lastLocalEditAt = 0;
   /**
@@ -248,8 +254,12 @@ export class DocSession {
       token: () => this.fetchToken(),
       // Typing is batched on the wire for ~30 fps awareness, not for document updates.
       onStatus: () => this.refreshStatus(),
-      onConnect: () => this.refreshStatus(),
+      onConnect: () => {
+        recordDiagnostic("connect", { shareRef: this.diagnosticRef });
+        this.refreshStatus();
+      },
       onDisconnect: () => {
+        recordDiagnostic("disconnect", { shareRef: this.diagnosticRef });
         if (this.everConnected) this.patch({ synced: false });
         this.refreshStatus();
       },
@@ -269,6 +279,13 @@ export class DocSession {
       onAuthenticationFailed: ({ reason }) => this.handleDenied(reason),
       onSynced: ({ state }) => {
         if (!state) return;
+        if (!this.diagnosticsSynced) {
+          this.diagnosticsSynced = true;
+          const durationMs = Date.now() - this.diagnosticsStarted;
+          recordDiagnostic("first_sync", { durationMs, shareRef: this.diagnosticRef });
+          if (durationMs > 5000)
+            recordDiagnostic("slow_sync", { durationMs, shareRef: this.diagnosticRef });
+        }
         this.patch({ synced: true });
         this.refreshStatus();
         if (this.editedWhileAway) {
@@ -282,6 +299,11 @@ export class DocSession {
       },
       onClose: ({ event }) => {
         const reason = event.reason;
+        recordDiagnostic("disconnect", {
+          closeCode: event.code,
+          reason,
+          shareRef: this.diagnosticRef,
+        });
         const rejoin = reason === "provider_initiated" || reason === COLLAB_CLOSE_REASONS.reauth;
         if (rejoin && !this.destroyed && !this.left && provider === this.provider) {
           // `provider_initiated`: the server answering a Close sent by an earlier provider of
@@ -426,6 +448,7 @@ export class DocSession {
       }
       return result.token;
     } catch (error) {
+      captureDiagnosticError("sync_error", error, { shareRef: this.diagnosticRef });
       this.lastJoin = { ok: false, error: error instanceof ApiError ? error : null };
       return "";
     }
@@ -438,6 +461,7 @@ export class DocSession {
    * or collab refusing a token the API had just issued (its permission generation is stale).
    */
   private handleDenied(reason: string) {
+    recordDiagnostic("permission_error", { reason, shareRef: this.diagnosticRef }, "error");
     this.authorized = false;
     const failure = this.lastJoin.ok ? null : this.lastJoin.error;
     if (reason === COLLAB_DENY_REASONS.unavailable || (!this.lastJoin.ok && isOutage(failure))) {
@@ -510,7 +534,26 @@ export class DocSession {
     else if (this.socket.status === "connecting") {
       status = this.everConnected ? "reconnecting" : "connecting";
     } else status = this.everConnected ? "disconnected" : "connecting";
-    if (status !== this.state.status) this.patch({ status });
+    if (status !== this.state.status) {
+      if (status === "offline") {
+        this.offlineSince = Date.now();
+        recordDiagnostic("offline", { reason: "offline", shareRef: this.diagnosticRef });
+      }
+      if (status === "reconnecting")
+        recordDiagnostic("reconnect", {
+          reconnects: ++this.diagnosticReconnects,
+          shareRef: this.diagnosticRef,
+        });
+      if (status === "connected" && this.offlineSince !== null) {
+        recordDiagnostic("offline", {
+          offlineMs: Date.now() - this.offlineSince,
+          reason: "connected",
+          shareRef: this.diagnosticRef,
+        });
+        this.offlineSince = null;
+      }
+      this.patch({ status });
+    }
   }
 
   /** Re-checks the connection state once (the socket does not emit on every change). */

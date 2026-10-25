@@ -1,5 +1,5 @@
 import { COLLAB_MAX_PAYLOAD_BYTES, namespace, SWEEPER_INTERVAL_MS } from "@codesh/shared";
-import type { Stores } from "@codesh/storage";
+import { diagnosticShareRef, ServerDiagnostics, type Stores } from "@codesh/storage";
 import { Redis as RedisExtension } from "@hocuspocus/extension-redis";
 import { type Extension, Server } from "@hocuspocus/server";
 import { Redis } from "ioredis";
@@ -26,6 +26,7 @@ export interface CollabOptions {
 
 export interface CollabServer {
   server: Server;
+  diagnostics: ServerDiagnostics;
   collab: Collab;
   metrics: CollabMetrics;
   readonly httpURL: string;
@@ -75,6 +76,21 @@ function routes(metrics: CollabMetrics, ready: () => Promise<unknown>): Extensio
 }
 
 export function createCollabServer(options: CollabOptions): CollabServer {
+  let server: Server | undefined;
+  const diagnostics = new ServerDiagnostics(
+    "collab",
+    options.stores.diagnostics,
+    options.instanceId,
+    () => ({
+      connections: server?.hocuspocus.getConnectionsCount() ?? 0,
+      documents: server?.hocuspocus.getDocumentsCount() ?? 0,
+      participants: Object.fromEntries(
+        [...(server?.hocuspocus.documents ?? new Map()).entries()]
+          .slice(0, 1000)
+          .map(([id, doc]) => [diagnosticShareRef(options.secret, id), doc.getConnectionsCount()]),
+      ),
+    }),
+  );
   const redis = new Redis(options.valkeyUrl, {
     maxRetriesPerRequest: 2,
     connectionName: `collab:${options.instanceId}`,
@@ -83,18 +99,21 @@ export function createCollabServer(options: CollabOptions): CollabServer {
   // ioredis reconnects by itself; without listeners it reports every failed attempt as unhandled.
   let valkeyErrorAt = 0;
   const onValkeyError = (error: unknown) => {
+    diagnostics.record("valkey_error", {}, "error");
     if (Date.now() - valkeyErrorAt < 10_000) return;
     valkeyErrorAt = Date.now();
     console.error("collab: Valkey connection error", error);
   };
   redis.on("error", onValkeyError);
   subscriber.on("error", onValkeyError);
-  let server: Server | undefined;
+  redis.on("ready", () => diagnostics.record("valkey_recovered"));
+  subscriber.on("ready", () => diagnostics.record("valkey_recovered"));
   const metrics = createMetrics(() => ({
     connections: server?.hocuspocus.getConnectionsCount() ?? 0,
     documents: server?.hocuspocus.getDocumentsCount() ?? 0,
   }));
   const collab = new Collab({
+    diagnostics,
     stores: options.stores,
     redis,
     subscriber,
@@ -133,6 +152,7 @@ export function createCollabServer(options: CollabOptions): CollabServer {
 
   return {
     server: instance,
+    diagnostics,
     collab,
     metrics,
     get httpURL() {
@@ -142,6 +162,7 @@ export function createCollabServer(options: CollabOptions): CollabServer {
       return instance.webSocketURL;
     },
     async listen() {
+      await diagnostics.start();
       await collab.start();
       await instance.listen();
       if (sweeperIntervalMs > 0) {
@@ -152,7 +173,10 @@ export function createCollabServer(options: CollabOptions): CollabServer {
           if (sweeping) return;
           sweeping = true;
           sweep(options.stores, sweeperLock)
-            .catch((error) => console.error("collab: sweep failed", error))
+            .catch((error) => {
+              diagnostics.record("background_error", {}, "error");
+              console.error("collab: sweep failed", error);
+            })
             .finally(() => {
               sweeping = false;
             });
@@ -168,6 +192,7 @@ export function createCollabServer(options: CollabOptions): CollabServer {
         await instance.destroy();
         redis.disconnect();
         subscriber.disconnect();
+        await diagnostics.close();
       })();
       return destroying;
     },

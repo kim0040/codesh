@@ -2,6 +2,7 @@ import type { Readable } from "node:stream";
 import type {
   Access,
   AuditRecord,
+  DiagnosticSnapshot,
   LabRecord,
   LabStudent,
   Settings,
@@ -36,7 +37,25 @@ export type ShareUpdate = Partial<
   >
 > & { access?: Partial<Access> };
 
+export type AdminShareRecord = Pick<
+  ShareRecord,
+  | "id"
+  | "title"
+  | "language"
+  | "saved"
+  | "ownerId"
+  | "labId"
+  | "createdAt"
+  | "lastActiveAt"
+  | "expiresAt"
+  | "sizeBytes"
+  | "locked"
+>;
 export interface ShareStore {
+  /** Metadata only, newest first, max 100. Search is a literal title substring. */
+  adminList(search: string, before?: Date, beforeId?: string): Promise<AdminShareRecord[]>;
+  adminSummary(): Promise<{ shares: number; activity: number[] }>;
+
   create(share: ShareRecord): Promise<void>;
   get(id: string): Promise<ShareRecord | null>;
   /** Returns the updated share, or null if it does not exist. */
@@ -214,7 +233,13 @@ export interface AuditStore {
   deleteOlderThan(before: Date): Promise<number>;
 }
 
+export interface DiagnosticsStore {
+  replace(snapshot: DiagnosticSnapshot): Promise<void>;
+  list(): Promise<DiagnosticSnapshot[]>;
+}
+
 export interface Stores {
+  diagnostics: DiagnosticsStore;
   shares: ShareStore;
   updates: UpdateLog;
   snapshots: SnapshotStore;

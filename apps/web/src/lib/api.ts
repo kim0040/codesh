@@ -27,6 +27,7 @@ import type {
   Template,
   UploadResult,
 } from "@codesh/shared";
+import { recordDiagnostic } from "./diagnostics";
 
 /** Thin fetch client for the HTTP API (docs/ARCHITECTURE.md §9). Same origin, cookie session. */
 
@@ -117,6 +118,7 @@ export async function rawRequest(
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
+  const started = performance.now();
   let response: Response;
   try {
     response = await fetch(url, {
@@ -128,9 +130,28 @@ export async function rawRequest(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
+    recordDiagnostic(
+      "api_failure",
+      { method, route: path, status: 0, code: "network", durationMs: performance.now() - started },
+      "error",
+    );
     throw new ApiError(0, "network", "Network error", null);
   }
-  if (!response.ok) throw await errorFrom(response);
+  if (!response.ok) {
+    const error = await errorFrom(response);
+    recordDiagnostic(
+      "api_failure",
+      {
+        method,
+        route: path,
+        status: response.status,
+        code: error.code,
+        durationMs: performance.now() - started,
+      },
+      response.status >= 500 ? "error" : "warn",
+    );
+    throw error;
+  }
   return response;
 }
 
@@ -223,6 +244,34 @@ export const api = {
   distributeLab: (id: string) => request<{ count: number }>("POST", `/api/labs/${id}/distribute`),
 
   admin: {
+    overview: (token: string) =>
+      request<import("@codesh/shared").AdminOverview>("GET", "/api/admin/overview", {
+        headers: bearer(token),
+      }),
+    diagnostics: (token: string, query: { level?: string; source?: string; since?: string } = {}) =>
+      request<import("@codesh/shared").DiagnosticEvent[]>("GET", "/api/admin/diagnostics", {
+        headers: bearer(token),
+        query,
+      }),
+    diagnosticExport: (token: string) =>
+      request<import("@codesh/shared").ServerDiagnosticBundle>(
+        "GET",
+        "/api/admin/diagnostics/export",
+        { headers: bearer(token) },
+      ),
+    security: (token: string) =>
+      request<import("@codesh/shared").AdminSecurity>("GET", "/api/admin/security", {
+        headers: bearer(token),
+      }),
+    shares: (token: string, search = "", before?: string, beforeId?: string) =>
+      request<import("@codesh/shared").AdminShare[]>("GET", "/api/admin/shares", {
+        headers: bearer(token),
+        query: { search, before, beforeId },
+      }),
+    shareAction: (token: string, id: string, action: "lock" | "expire" | "delete") =>
+      request<{ ok: true }>("POST", `/api/admin/shares/${id}/${action}`, {
+        headers: bearer(token),
+      }),
     settings: (token: string) =>
       request<Settings>("GET", "/api/admin/settings", { headers: bearer(token) }),
     putSettings: (token: string, body: PutSettingsBody) =>

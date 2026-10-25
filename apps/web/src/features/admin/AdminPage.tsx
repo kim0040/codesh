@@ -31,7 +31,10 @@ import { errorText } from "../../lib/errors";
 import { usePresence } from "../../lib/events";
 import { formatBytes } from "../../lib/format";
 import { useLocale, useT } from "../../lib/i18n";
+import { queryClient as appQueryClient } from "../../lib/query";
+import { DiagnosticsPanel, OverviewPanel, SecurityPanel, SharesPanel } from "./OperationsPanels";
 import { TemplatesEditor } from "./TemplatesEditor";
+import { TemplatesPanel } from "./TemplatesPanel";
 import { UpdatesPanel, updateQuery } from "./UpdatesPanel";
 
 const TOKEN_KEY = "codesh.admin";
@@ -56,6 +59,8 @@ function saveToken(token: string) {
 export function AdminPage() {
   const [token, setToken] = useState(loadToken);
   const logout = () => {
+    void appQueryClient.cancelQueries({ queryKey: ["admin"] });
+    appQueryClient.removeQueries({ queryKey: ["admin"] });
     saveToken("");
     setToken("");
   };
@@ -87,8 +92,9 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
     setBusy(true);
     setInvalid(false);
     try {
-      await api.admin.settings(value.trim());
+      await api.admin.security(value.trim());
       onToken(value.trim());
+      setValue("");
     } catch (error) {
       if (isApiError(error) && (error.status === 401 || error.status === 403)) setInvalid(true);
       else
@@ -147,9 +153,9 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
 
 function AdminConsole({ token, onLogout }: { token: string; onLogout: () => void }) {
   const t = useT();
-  const [tab, setTab] = useState("settings");
+  const [tab, setTab] = useState("overview");
   const settings = useQuery({
-    queryKey: ["admin", "settings", token],
+    queryKey: ["admin", "settings"],
     queryFn: () => api.admin.settings(token),
     retry: false,
   });
@@ -180,7 +186,22 @@ function AdminConsole({ token, onLogout }: { token: string; onLogout: () => void
       </header>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList aria-label={t("admin.title")}>
+        <TabsList aria-label={t("admin.title")} className="max-w-full flex-wrap">
+          <TabsTrigger value="overview" data-testid="admin-nav-overview">
+            {t("admin.nav.overview")}
+          </TabsTrigger>
+          <TabsTrigger value="shares" data-testid="admin-nav-shares">
+            {t("admin.nav.shares")}
+          </TabsTrigger>
+          <TabsTrigger value="diagnostics" data-testid="admin-nav-diagnostics">
+            {t("admin.nav.diagnostics")}
+          </TabsTrigger>
+          <TabsTrigger value="security" data-testid="admin-nav-security">
+            {t("admin.nav.security")}
+          </TabsTrigger>
+          <TabsTrigger value="templates" data-testid="admin-nav-templates">
+            {t("admin.setting.group.templates")}
+          </TabsTrigger>
           <TabsTrigger value="settings">{t("admin.nav.settings")}</TabsTrigger>
           <TabsTrigger value="people">{t("admin.nav.people")}</TabsTrigger>
           <TabsTrigger value="audit">{t("admin.nav.audit")}</TabsTrigger>
@@ -194,7 +215,28 @@ function AdminConsole({ token, onLogout }: { token: string; onLogout: () => void
             ) : null}
           </TabsTrigger>
         </TabsList>
-        <main id="main" className="pt-5">
+        <main id="main" className="min-w-0 pt-5">
+          <TabsContent value="overview">
+            <OverviewPanel token={token} onDiagnostics={() => setTab("diagnostics")} />
+          </TabsContent>
+          <TabsContent value="shares">
+            <SharesPanel token={token} />
+          </TabsContent>
+          <TabsContent value="diagnostics">
+            <DiagnosticsPanel token={token} />
+          </TabsContent>
+          <TabsContent value="security">
+            <SecurityPanel token={token} />
+          </TabsContent>
+          <TabsContent value="templates">
+            {settings.isPending ? (
+              <Loading />
+            ) : settings.isError ? (
+              <ErrorBlock onRetry={() => void settings.refetch()} />
+            ) : (
+              <TemplatesPanel token={token} initial={settings.data} />
+            )}
+          </TabsContent>
           <TabsContent value="settings">
             {settings.isPending ? (
               <Loading />
@@ -315,7 +357,7 @@ function SettingsForm({ token, initial }: { token: string; initial: Settings }) 
   const save = useMutation({
     mutationFn: () => api.admin.putSettings(token, draft),
     onSuccess: (saved) => {
-      queryClient.setQueryData(["admin", "settings", token], saved);
+      queryClient.setQueryData(["admin", "settings"], saved);
       toast({ title: t("admin.saved"), tone: "success", duration: 2500 });
     },
     // The draft is kept, so the admin can fix the value and save again.
@@ -663,6 +705,10 @@ function Audit({
     return <EmptyState size="sm" icon={<ScrollText />} title={t("admin.audit.empty")} />;
 
   const actionLabel = (action: string) => {
+    if (action === "admin.login_failed") return t("admin.ops.failedLogins");
+    if (action === "admin.share.lock") return t("admin.ops.lock");
+    if (action === "admin.share.expire") return t("admin.ops.expire");
+    if (action === "admin.share.delete") return t("admin.ops.delete");
     if (action === "share.create") return t("admin.audit.action.create");
     if (action === "share.join" || action === "share.open") return t("admin.audit.action.open");
     if (action === "share.download") return t("admin.audit.action.download");
@@ -722,7 +768,7 @@ function Audit({
 function Status({ token }: { token: string }) {
   const t = useT();
   const stats = useQuery({
-    queryKey: ["admin", "stats", token],
+    queryKey: ["admin", "stats"],
     queryFn: () => api.admin.stats(token),
     refetchInterval: 10_000,
     retry: false,

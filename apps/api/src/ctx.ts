@@ -8,7 +8,7 @@ import {
   type Settings,
   type SseEvent,
 } from "@codesh/shared";
-import type { Stores } from "@codesh/storage";
+import { ServerDiagnostics, type Stores } from "@codesh/storage";
 import type { FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import type { LdapAdapter, OidcAdapter } from "./auth/adapters.js";
@@ -20,6 +20,7 @@ import { DEFAULT_UPDATE_TIMERS, UpdateChecker, type UpdateTimers } from "./updat
 import { VERSION } from "./version.js";
 
 export interface Deps {
+  diagnostics?: ServerDiagnostics;
   config: Config;
   stores: Stores;
   valkey: Redis;
@@ -65,6 +66,12 @@ export class Ctx {
   /** In-flight or recent nearby lists per network group, see `listNearbyCached`. */
   readonly nearbyCache = new Map<string, { at: number; list: Promise<NearbyItem[]> }>();
   readonly trusted: Cidr[];
+  readonly adminAllowed: Cidr[];
+  readonly diagnostics: ServerDiagnostics;
+  readonly startedAt = Date.now();
+  readonly version: string;
+  adminAuditAt = 0;
+  adminAuditPending = false;
   /** Background check for a newer release (docs/OPERATIONS.md "업데이트"). */
   readonly updates: UpdateChecker;
   /** Open SSE streams in this process per client, so presence outlives a closed second tab. */
@@ -93,12 +100,18 @@ export class Ctx {
     this.commandTimeoutMs = deps.commandTimeoutMs ?? COLLAB_COMMAND_TIMEOUT_MS;
     this.nearbyCacheMs = deps.nearbyCacheMs ?? NEARBY_CACHE_MS;
     this.trusted = parseCidrs(deps.config.trustProxy);
+    this.adminAllowed = parseCidrs(deps.config.adminAllowCidr);
+    this.version = deps.version ?? VERSION;
+    this.diagnostics =
+      deps.diagnostics ??
+      new ServerDiagnostics("api", deps.stores.diagnostics, process.env.HOSTNAME ?? "default");
     this.updates = new UpdateChecker(
       deps.config.update,
       deps.valkey,
       deps.version ?? VERSION,
       deps.updateTimers ?? DEFAULT_UPDATE_TIMERS,
       deps.updateFetch,
+      () => this.diagnostics.record("update_error", {}, "warn"),
     );
   }
 
@@ -107,6 +120,11 @@ export class Ctx {
     const value = await this.stores.settings.get();
     this.cached = { value, at: Date.now() };
     return value;
+  }
+
+  /** Last known settings for safe diagnostic presence flags while the database is unavailable. */
+  settingsSnapshot(): Settings | null {
+    return this.cached?.value ?? null;
   }
 
   invalidateSettings(): void {

@@ -38,6 +38,7 @@ import {
 } from "../../lib/prefs";
 import { useSession } from "../../lib/session";
 import { useEditor } from "./context";
+import { DiagnosticsSection } from "./DiagnosticsSection";
 
 /** Editor and app settings: stored on this device and applied live, no save button. */
 export function SettingsSheet() {
@@ -358,6 +359,8 @@ function SettingsBody() {
           />
         </Dialog>
       </Section>
+
+      <DiagnosticsSection />
 
       <Section title={t("settings.section.misc")}>
         <Switch

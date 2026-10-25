@@ -57,9 +57,10 @@ describe.skipIf(!integration)("admin API", () => {
         const client = strict.client();
         for (let i = 0; i < 3; i++)
           expect((await client.get("/api/admin/stats", bearer("guess"))).statusCode).toBe(403);
-        const blocked = await client.get("/api/admin/stats", bearer());
+        const blocked = await client.get("/api/admin/stats", bearer("guess"));
         expect(blocked.statusCode).toBe(429);
         expect(errorCode(blocked)).toBe("rate_limited");
+        expect((await client.get("/api/admin/stats", bearer())).statusCode).toBe(200);
       } finally {
         await strict.close();
       }
@@ -84,7 +85,7 @@ describe.skipIf(!integration)("admin API", () => {
           200,
         );
       }
-      // A console loading a few resources at once: each request reserves a slot and gives it back.
+      // Legitimate parallel requests do not consume the guessed-token bucket.
       const parallel = await Promise.all(
         Array.from({ length: 3 }, () => client.get("/api/admin/settings", bearer())),
       );
@@ -92,8 +93,8 @@ describe.skipIf(!integration)("admin API", () => {
 
       for (let i = 0; i < 3; i++)
         expect((await client.get("/api/admin/stats", bearer("guess"))).statusCode).toBe(403);
-      // Failures used the limit up: even the right token waits.
-      expect((await client.get("/api/admin/stats", bearer())).statusCode).toBe(429);
+      // Guesses cannot lock out a legitimate administrator behind the same NAT.
+      expect((await client.get("/api/admin/stats", bearer())).statusCode).toBe(200);
     } finally {
       await strict.close();
     }
@@ -188,10 +189,14 @@ describe.skipIf(!integration)("admin API", () => {
   });
 
   describe("audit", () => {
-    it("records nothing while auditing is off", async () => {
+    it("records no regular activity while auditing is off", async () => {
       const client = h.client();
       await createShare(client);
-      expect(await h.stores.audit.list({ limit: 10 })).toEqual([]);
+      expect(
+        (await h.stores.audit.list({ limit: 10 })).filter(
+          (entry) => entry.action !== "admin.login_failed",
+        ),
+      ).toEqual([]);
     });
 
     it("records who did what once enabled, newest first, and serves it to the admin", async () => {

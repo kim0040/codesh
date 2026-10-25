@@ -55,3 +55,34 @@ describe("config", () => {
     expect(() => loadConfig({ UPDATE_API_URL: "file:///etc/passwd" })).toThrow();
   });
 });
+
+describe("admin CIDR config", () => {
+  it("defaults to no restriction and parses IPv4/IPv6 CIDRs", () => {
+    expect(loadConfig({}).adminAllowCidr).toEqual([]);
+    expect(loadConfig({ ADMIN_ALLOW_CIDR: " 10.0.0.0/8, ::1/128 " }).adminAllowCidr).toEqual([
+      "10.0.0.0/8",
+      "::1/128",
+    ]);
+  });
+  it("rejects malformed admin and trusted-proxy restrictions", () => {
+    for (const field of ["ADMIN_ALLOW_CIDR", "TRUST_PROXY"])
+      for (const value of ["oops", "10.0.0.0/33", "::1/129"])
+        expect(() => loadConfig({ [field]: value })).toThrow();
+  });
+});
+
+it("rejects universal proxy trust that would let anyone forge the client IP", () => {
+  for (const value of ["0.0.0.0/0", "::/0"])
+    expect(() => loadConfig({ TRUST_PROXY: value })).toThrow();
+});
+
+it("rejects weak production admin tokens and still permits disabling the API", () => {
+  const production = {
+    NODE_ENV: "production",
+    SESSION_SECRET: "s".repeat(40),
+    COLLAB_SECRET: "c".repeat(40),
+  };
+  expect(() => loadConfig({ ...production, ADMIN_TOKEN: "short" })).toThrow("ADMIN_TOKEN");
+  expect(loadConfig({ ...production, ADMIN_TOKEN: "" }).adminToken).toBe("");
+  expect(loadConfig({ ...production, ADMIN_TOKEN: "a".repeat(64) }).adminToken).toHaveLength(64);
+});

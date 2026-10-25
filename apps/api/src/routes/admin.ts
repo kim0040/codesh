@@ -10,13 +10,11 @@ import {
   type Settings,
   statsResponseSchema,
 } from "@codesh/shared";
-import type { FastifyRequest } from "fastify";
 import { ldapConfigSchema, oidcConfigSchema } from "../auth/adapters.js";
-import { safeEqual } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
-import { ApiError, forbidden, invalid, notFound } from "../errors.js";
+import { ApiError, invalid } from "../errors.js";
 import { isValidCidr } from "../net.js";
-import { rateLimit, rateRelease } from "../rate.js";
+import { adminDiagnosticRoutes } from "./admin-diagnostics.js";
 import type { App } from "./types.js";
 
 /**
@@ -53,24 +51,12 @@ function validateSettings(settings: Settings): Settings {
 }
 
 export function adminRoutes(app: App, ctx: Ctx): void {
-  /** `Authorization: Bearer <ADMIN_TOKEN>`; an empty ADMIN_TOKEN switches the admin API off. */
-  const adminOnly = async (request: FastifyRequest) => {
-    const expected = ctx.config.adminToken;
-    if (expected === "") throw notFound("Not found");
-    // Guessing the token is brute force like any other: the attempt is reserved before the check
-    // (so parallel guesses are counted) and given back when the token is right, so the console's
-    // own requests do not use up the limit.
-    const { ip } = request.session;
-    await rateLimit(ctx, ip, "login", ctx.config.rateLimit.loginPerMinute);
-    const header = request.headers.authorization ?? "";
-    const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-    if (!safeEqual(token, expected)) throw forbidden("Invalid admin token");
-    await rateRelease(ctx, ip, "login");
-  };
+  adminDiagnosticRoutes(app, ctx);
+  // The application onRequest hook authenticates all admin routes before validation.
 
   app.get(
     "/api/admin/settings",
-    { preHandler: adminOnly, schema: { response: { 200: getSettingsResponseSchema } } },
+    { schema: { response: { 200: getSettingsResponseSchema } } },
     async () => ctx.stores.settings.get(),
   );
 
@@ -78,7 +64,6 @@ export function adminRoutes(app: App, ctx: Ctx): void {
     "/api/admin/settings",
     {
       bodyLimit: SETTINGS_BODY_LIMIT,
-      preHandler: adminOnly,
       schema: { body: putSettingsBodySchema, response: { 200: getSettingsResponseSchema } },
     },
     async (request) => {
@@ -93,7 +78,6 @@ export function adminRoutes(app: App, ctx: Ctx): void {
   app.get(
     "/api/admin/audit",
     {
-      preHandler: adminOnly,
       schema: { querystring: auditQuerySchema, response: { 200: auditResponseSchema } },
     },
     async (request) => {
@@ -113,35 +97,31 @@ export function adminRoutes(app: App, ctx: Ctx): void {
     },
   );
 
-  app.get(
-    "/api/admin/stats",
-    { preHandler: adminOnly, schema: { response: { 200: statsResponseSchema } } },
-    async () => {
-      const now = Date.now();
-      // The indexes are scored by expiry; drop what has expired before counting.
-      const result = await ctx.valkey
-        .multi()
-        .zremrangebyscore(apiKeys.sharesIndex, "-inf", String(now))
-        .zcard(apiKeys.sharesIndex)
-        .zremrangebyscore(apiKeys.labsIndex, "-inf", String(now))
-        .zcard(apiKeys.labsIndex)
-        .zcount(apiKeys.presenceAll, String(now - PRESENCE_USER_TTL_SECONDS * 1000), "+inf")
-        .zremrangebyscore(apiKeys.uploadsIndex, "-inf", String(now))
-        .zrange(apiKeys.uploadsIndex, "0", "-1")
-        .exec();
-      const value = (index: number) => result?.[index]?.[1];
-      const uploads = (value(6) as string[] | undefined) ?? [];
-      return {
-        shares: Number(value(1) ?? 0),
-        labs: Number(value(3) ?? 0),
-        onlineUsers: Number(value(4) ?? 0),
-        uploadBytes: uploads.reduce(
-          (sum, member) => sum + (Number(member.slice(member.lastIndexOf(":") + 1)) || 0),
-          0,
-        ),
-      };
-    },
-  );
+  app.get("/api/admin/stats", { schema: { response: { 200: statsResponseSchema } } }, async () => {
+    const now = Date.now();
+    // The indexes are scored by expiry; drop what has expired before counting.
+    const result = await ctx.valkey
+      .multi()
+      .zremrangebyscore(apiKeys.sharesIndex, "-inf", String(now))
+      .zcard(apiKeys.sharesIndex)
+      .zremrangebyscore(apiKeys.labsIndex, "-inf", String(now))
+      .zcard(apiKeys.labsIndex)
+      .zcount(apiKeys.presenceAll, String(now - PRESENCE_USER_TTL_SECONDS * 1000), "+inf")
+      .zremrangebyscore(apiKeys.uploadsIndex, "-inf", String(now))
+      .zrange(apiKeys.uploadsIndex, "0", "-1")
+      .exec();
+    const value = (index: number) => result?.[index]?.[1];
+    const uploads = (value(6) as string[] | undefined) ?? [];
+    return {
+      shares: Number(value(1) ?? 0),
+      labs: Number(value(3) ?? 0),
+      onlineUsers: Number(value(4) ?? 0),
+      uploadBytes: uploads.reduce(
+        (sum, member) => sum + (Number(member.slice(member.lastIndexOf(":") + 1)) || 0),
+        0,
+      ),
+    };
+  });
 
   const updateResponse = async () => {
     const { repo, channel } = ctx.config.update;
@@ -156,13 +136,13 @@ export function adminRoutes(app: App, ctx: Ctx): void {
 
   app.get(
     "/api/admin/update",
-    { preHandler: adminOnly, schema: { response: { 200: adminUpdateResponseSchema } } },
+    { schema: { response: { 200: adminUpdateResponseSchema } } },
     updateResponse,
   );
 
   app.post(
     "/api/admin/update/check",
-    { preHandler: adminOnly, schema: { response: { 200: adminUpdateResponseSchema } } },
+    { schema: { response: { 200: adminUpdateResponseSchema } } },
     async () => {
       if (ctx.updates.enabled) {
         const fresh = await ctx.valkey.set(

@@ -1,5 +1,6 @@
 import { UPDATE_CHANNELS, type UpdateChannel } from "@codesh/shared";
 import { z } from "zod";
+import { isValidCidr, parseCidr } from "./net.js";
 
 const DEV_SECRET = "dev-only-secret-change-me";
 
@@ -29,8 +30,27 @@ const envSchema = z.object({
   COLLAB_SECRET: z.string().default(DEV_SECRET),
   /** Empty disables the admin API. */
   ADMIN_TOKEN: z.string().default(""),
+  ADMIN_ALLOW_CIDR: z
+    .string()
+    .default("")
+    .refine(
+      (value) => value.split(",").every((cidr) => !cidr.trim() || isValidCidr(cidr.trim())),
+      "ADMIN_ALLOW_CIDR must contain valid CIDRs",
+    ),
   /** Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted. */
-  TRUST_PROXY: z.string().default(""),
+  TRUST_PROXY: z
+    .string()
+    .default("")
+    .refine(
+      (value) =>
+        value
+          .split(",")
+          .every(
+            (cidr) =>
+              !cidr.trim() || (isValidCidr(cidr.trim()) && parseCidr(cidr.trim())?.prefix !== 0),
+          ),
+      "TRUST_PROXY must contain valid, non-universal proxy CIDRs",
+    ),
   /** Origin users reach the app on, e.g. https://codesh.local. Used for OIDC redirect URIs. */
   PUBLIC_URL: z.string().default(""),
   /** Requests per client IP and minute, per bucket. */
@@ -96,6 +116,7 @@ export interface Config {
   sessionSecret: string;
   collabSecret: string;
   adminToken: string;
+  adminAllowCidr: string[];
   trustProxy: string[];
   publicUrl: string;
   rateLimit: RateLimits;
@@ -107,6 +128,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const parsed = envSchema.parse(env);
   const production = parsed.NODE_ENV === "production";
   if (production) {
+    if (parsed.ADMIN_TOKEN !== "" && parsed.ADMIN_TOKEN.length < 32)
+      throw new Error("ADMIN_TOKEN must contain at least 32 random characters in production");
     for (const name of ["SESSION_SECRET", "COLLAB_SECRET"] as const) {
       if (parsed[name] === DEV_SECRET || parsed[name].length < 32) {
         throw new Error(`${name} must be set to at least 32 characters in production`);
@@ -123,6 +146,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionSecret: parsed.SESSION_SECRET,
     collabSecret: parsed.COLLAB_SECRET,
     adminToken: parsed.ADMIN_TOKEN,
+    adminAllowCidr: parsed.ADMIN_ALLOW_CIDR.split(",")
+      .map((cidr) => cidr.trim())
+      .filter(Boolean),
     trustProxy: parsed.TRUST_PROXY.split(",")
       .map((cidr) => cidr.trim())
       .filter(Boolean),

@@ -60,6 +60,7 @@ async function countHit(
     ttl = windowSeconds;
   }
   if (count > limit) {
+    ctx.diagnostics.record("rate_limit");
     ctx.metrics.rateLimited.inc({ bucket: bucket.split(":")[0] ?? bucket });
     throw new ApiError("rate_limited", "Too many requests", { "Retry-After": String(ttl) });
   }

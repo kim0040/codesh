@@ -2,6 +2,7 @@ export * from "./api-keys.js";
 export * from "./collab.js";
 export * from "./collab-token.js";
 export * from "./constants.js";
+export * from "./diagnostics.js";
 export * from "./document.js";
 export * from "./errors.js";
 export * from "./events.js";
