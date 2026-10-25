@@ -56,6 +56,31 @@ function saveToken(token: string) {
   }
 }
 
+export function insecureAdminTransport(location: Pick<Location, "protocol" | "hostname">): boolean {
+  const host = location.hostname.toLowerCase();
+  return (
+    location.protocol === "http:" &&
+    host !== "localhost" &&
+    host !== "[::1]" &&
+    host !== "::1" &&
+    !/^127(?:\.\d{1,3}){3}$/.test(host)
+  );
+}
+
+function TransportWarning() {
+  const t = useT();
+  if (!insecureAdminTransport(window.location)) return null;
+  return (
+    <p
+      role="alert"
+      data-testid="admin-http-warning"
+      className="rounded-lg border border-warning-text bg-warning-soft p-3 text-body-sm text-warning-text"
+    >
+      {t("admin.ops.httpWarning")}
+    </p>
+  );
+}
+
 export function AdminPage() {
   const [token, setToken] = useState(loadToken);
   const logout = () => {
@@ -118,6 +143,7 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
           <ShieldCheck aria-hidden="true" className="size-5 text-fg-3" />
           {t("admin.login.title")}
         </h1>
+        <TransportWarning />
         <Field
           label={t("admin.login.tokenLabel")}
           error={
@@ -184,6 +210,8 @@ function AdminConsole({ token, onLogout }: { token: string; onLogout: () => void
           {t("admin.logoutAction")}
         </Button>
       </header>
+
+      <TransportWarning />
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label={t("admin.title")} className="max-w-full flex-wrap">
@@ -707,7 +735,8 @@ function Audit({
   const actionLabel = (action: string) => {
     if (action === "admin.login_failed") return t("admin.ops.failedLogins");
     if (action === "admin.share.lock") return t("admin.ops.lock");
-    if (action === "admin.share.expire") return t("admin.ops.expire");
+    if (action === "admin.share.unlock") return t("admin.ops.unlock");
+    if (action === "admin.share.expire") return t("admin.ops.delete");
     if (action === "admin.share.delete") return t("admin.ops.delete");
     if (action === "share.create") return t("admin.audit.action.create");
     if (action === "share.join" || action === "share.open") return t("admin.audit.action.open");

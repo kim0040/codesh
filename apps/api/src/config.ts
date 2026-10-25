@@ -35,7 +35,7 @@ const envSchema = z.object({
     .default("")
     .refine(
       (value) => value.split(",").every((cidr) => !cidr.trim() || isValidCidr(cidr.trim())),
-      "ADMIN_ALLOW_CIDR must contain valid CIDRs",
+      "ADMIN_ALLOW_CIDR must contain valid CIDRs; list IPv4 and IPv6 separately when using both",
     ),
   /** Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted. */
   TRUST_PROXY: z
@@ -193,5 +193,10 @@ export function proxyWarnings(config: Config): string[] {
   if (!config.production || config.trustProxy.length > 0) return [];
   return [
     "TRUST_PROXY is empty: every client is seen with the address of the connection. Behind a reverse proxy set TRUST_PROXY to its CIDR, or all users share one rate limit, one PIN counter and one network group.",
+    ...(config.adminAllowCidr.length > 0
+      ? [
+          "ADMIN_ALLOW_CIDR is set but TRUST_PROXY is empty: behind a reverse proxy the admin restriction checks the proxy address, not the client. Configure only the actual proxy CIDRs.",
+        ]
+      : []),
   ];
 }

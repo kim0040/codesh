@@ -6,6 +6,7 @@ import {
   participantPermissionsSchema,
   type Role,
   type UserRef,
+  YDOC,
 } from "@codesh/shared";
 import { HocuspocusProvider, type HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { IndexeddbPersistence } from "y-indexeddb";
@@ -44,6 +45,8 @@ export interface JoinCredentials {
 }
 
 export interface SessionState {
+  /** Local-only text snapshots retained before a permission resync, until explicitly dismissed. */
+  unsentText: { id: number; fileId: string; path: string; text: string }[];
   status: ConnectionStatus;
   /** The first sync with the server (or the local copy, when offline) is done. */
   synced: boolean;
@@ -209,6 +212,7 @@ export class DocSession {
     this.socket = held.socket;
     this.releaseSocket = held.release;
     this.state = {
+      unsentText: [],
       status: "connecting",
       synced: false,
       role: options.role,
@@ -521,7 +525,7 @@ export class DocSession {
     if (message.type === "permission_refused") {
       this.patch({ readOnly: true });
       this.options.onPermissionRefused?.();
-      void this.resync();
+      void this.resync(true);
       return;
     }
     if (message.type === "too_large") {
@@ -541,7 +545,7 @@ export class DocSession {
     // keep poisoning this client's later updates (packages/shared/src/collab.ts).
     const recentlyEdited = Date.now() - this.lastLocalEditAt < 4000;
     if (message.readOnly && !wasReadOnly && (recentlyEdited || this.state.unsynced > 0)) {
-      void this.resync();
+      void this.resync(true);
     }
   }
 
@@ -594,8 +598,31 @@ export class DocSession {
   }
 
   /** Drop the Y.Doc, its local copy and the provider, then start over from the server state. */
-  async resync(): Promise<void> {
+  async resync(preserveText = false): Promise<void> {
     if (this.destroyed || this.left) return;
+    if (preserveText) {
+      // A refusal has no per-file acknowledgement. Keep a conservative snapshot, including
+      // orphaned text roots and offline edits, rather than guessing which local text was refused.
+      const unsentText = [...this.state.unsentText];
+      const files = this.doc.getMap<Y.Map<unknown>>(YDOC.files);
+      for (const name of this.doc.share.keys()) {
+        if (!name.startsWith(YDOC.fileText(""))) continue;
+        const root = this.doc.share.get(name);
+        if (!(root instanceof Y.Text) && root?.constructor !== Y.AbstractType) continue;
+        const fileId = name.slice(YDOC.fileText("").length);
+        const text = this.doc.getText(name).toString();
+        if (unsentText.some((saved) => saved.fileId === fileId && saved.text === text)) continue;
+        const file = files.get(fileId);
+        const path = file instanceof Y.Map ? file.get("path") : undefined;
+        unsentText.push({
+          id: unsentText.length,
+          fileId,
+          path: typeof path === "string" ? path : fileId,
+          text,
+        });
+      }
+      this.patch({ unsentText });
+    }
     const epoch = ++this.epoch;
     const old = this.provider;
     const oldDoc = this.doc;
@@ -629,6 +656,10 @@ export class DocSession {
       copyKept: false,
     });
     this.refreshStatus();
+  }
+
+  dismissUnsentText(): void {
+    this.patch({ unsentText: [] });
   }
 
   /**

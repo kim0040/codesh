@@ -143,7 +143,21 @@ describe("Yjs permission classifier", () => {
         change(doc, (copy) => copy.getText("file:missing").insert(0, "x")),
         none,
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+  it.each(["insert", "delete"])("allows %s in a deleted file with other text edits", (kind) => {
+    const doc = fixture();
+    doc.getMap(YDOC.files).set("second", new Y.Map());
+    doc.getText("file:second").insert(0, "old");
+    doc.getMap(YDOC.files).delete("second");
+    const update = change(doc, (copy) => {
+      copy.getText("file:main").insert(0, "main edit");
+      const text = copy.getText("file:second");
+      if (kind === "insert") text.insert(0, "late edit");
+      else text.delete(0, 1);
+    });
+    expect(permitsUpdate(doc, update, none)).toBe(true);
+    expect(doc.getMap(YDOC.files).has("second")).toBe(false);
   });
   it("resolves omitted parents from both origin and rightOrigin", () => {
     const doc = fixture();

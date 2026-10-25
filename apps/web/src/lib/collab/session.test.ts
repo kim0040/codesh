@@ -223,6 +223,10 @@ describe("permission messages", () => {
     const session = open();
     const previous = session.doc;
     previous.getMap("meta").set("title", "forged");
+    previous.getText("file:main").insert(0, "my unsent main text");
+    previous.getText("file:deleted").insert(0, "my unsent deleted file text");
+    previous.getMap("files").set("main", "invalid file metadata");
+    previous.getMap("file:invalid").set("bad", "not a text root");
     const resync = vi.spyOn(session, "resync");
     fakes.Provider.made[0]?.config.onStateless({
       payload: JSON.stringify({ type: "permission_refused" }),
@@ -233,6 +237,13 @@ describe("permission messages", () => {
     expect(session.doc.getMap("meta").has("title")).toBe(false);
     expect(fakes.dropCopy).toHaveBeenCalledWith("share1");
     expect(session.getState().readOnly).toBe(true);
+    expect(session.getState().unsentText).toEqual([
+      { id: 0, fileId: "main", path: "main", text: "my unsent main text" },
+      { id: 1, fileId: "deleted", path: "deleted", text: "my unsent deleted file text" },
+    ]);
+    expect(session.doc.getText("file:main").toString()).toBe("");
+    session.dismissUnsentText();
+    expect(session.getState().unsentText).toEqual([]);
     fakes.Provider.made[1]?.config.onAuthenticated({ scope: "read-write" });
     expect(session.getState().readOnly).toBe(false);
     session.destroy();

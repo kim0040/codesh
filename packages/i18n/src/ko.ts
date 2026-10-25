@@ -318,6 +318,12 @@ export const ko: KoDictionary = {
   "perm.ownerOnly": "소유자가 허용할 수 있는 작업입니다.",
   "perm.labLock": "실습 잠금은 강사가 관리합니다.",
   "perm.refused": "허용되지 않은 변경입니다. 공유를 다시 동기화했습니다.",
+  "perm.unsentTitle": "보내지 못한 텍스트를 이 탭에 보관했습니다",
+  "perm.unsentBody":
+    "권한이 바뀌어 공유를 다시 동기화했습니다. 탭을 닫기 전에 로컬 텍스트를 복사하세요. 이미 동기화한 텍스트와 삭제된 파일이 포함될 수 있습니다.",
+  "perm.copyUnsent": "보내지 못한 텍스트 복사",
+  "perm.discardUnsent": "이 사본 버리기",
+  "perm.unsentCopied": "복사했습니다",
   "share.dialog.access.permissions": "참여자 권한",
   "share.dialog.access.permissionsHint":
     "편집자에게 적용됩니다. 보기 전용 링크와 잠금은 계속 적용됩니다.",
@@ -984,13 +990,16 @@ export const ko: KoDictionary = {
   "admin.ops.active": "최근 활동",
   "admin.ops.participants": "현재 참여자 {count}명",
   "admin.ops.lock": "잠금",
-  "admin.ops.expire": "지금 만료",
+  "admin.ops.unlock": "잠금 해제",
+  "admin.ops.down": "중단됨",
+  "admin.ops.httpWarning":
+    "일반 HTTP 연결입니다. 관리자 토큰이 평문으로 전송됩니다. HTTPS를 사용하고 ADMIN_ALLOW_CIDR을 제한하세요.",
   "admin.ops.delete": "삭제",
   "admin.ops.newest": "최신 문서",
   "admin.ops.older": "이전 문서",
   "admin.ops.confirm": "작업 확인",
   "admin.ops.confirmBody":
-    "선택한 공유 문서에 이 작업을 적용합니다. 만료하거나 삭제한 문서는 복구할 수 없습니다.",
+    "선택한 공유 문서에 이 작업을 적용합니다. 삭제한 문서는 복구할 수 없습니다.",
 
   // ── Identity ──
   "identity.title": "이름을 정해 주세요",

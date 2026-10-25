@@ -66,6 +66,7 @@ services:
       <<: *app-env
       SESSION_SECRET: ${SESSION_SECRET:?run ./generate-secrets.sh}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      ADMIN_ALLOW_CIDR: ${ADMIN_ALLOW_CIDR:-}
       PUBLIC_URL: ${PUBLIC_URL:-}
       TRUST_PROXY: ${TRUST_PROXY:-${NETWORK_SUBNET:-172.29.88.0/24}}
       RATE_LIMIT_API_PER_MIN: ${RATE_LIMIT_API_PER_MIN:-1200}

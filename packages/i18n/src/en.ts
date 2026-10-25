@@ -296,6 +296,12 @@ export const en = {
   "perm.ownerOnly": "The owner controls this action.",
   "perm.labLock": "The instructor controls the lab lock.",
   "perm.refused": "This change is not allowed. The share has been synced again.",
+  "perm.unsentTitle": "Your unsent text is kept in this tab",
+  "perm.unsentBody":
+    "Permissions changed and the share was synced again. Copy your local text before closing this tab. This copy may include text already synced and files that were deleted.",
+  "perm.copyUnsent": "Copy my unsent text",
+  "perm.discardUnsent": "Discard this copy",
+  "perm.unsentCopied": "Copied",
   "share.dialog.access.permissions": "Participant permissions",
   "share.dialog.access.permissionsHint":
     "Applies to editors. View-only links and locks still prevent editing.",
@@ -982,13 +988,16 @@ export const en = {
   "admin.ops.active": "Last active",
   "admin.ops.participants": "{count} participants now",
   "admin.ops.lock": "Lock",
-  "admin.ops.expire": "Expire now",
+  "admin.ops.unlock": "Unlock",
+  "admin.ops.down": "Down",
+  "admin.ops.httpWarning":
+    "This connection uses plain HTTP. Your admin token travels in clear text. Use HTTPS and restrict ADMIN_ALLOW_CIDR.",
   "admin.ops.delete": "Delete",
   "admin.ops.newest": "Newest",
   "admin.ops.older": "Older",
   "admin.ops.confirm": "Confirm action",
   "admin.ops.confirmBody":
-    "Apply this action to the selected share. Expired or deleted shares cannot be recovered.",
+    "Apply this action to the selected share. Deleted shares cannot be recovered.",
 
   // ── Identity ──
   "identity.title": "Choose a name",

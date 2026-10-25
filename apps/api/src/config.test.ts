@@ -35,6 +35,15 @@ describe("config", () => {
     expect(proxyWarnings(loadConfig(prod))).toEqual([expect.stringContaining("TRUST_PROXY")]);
     expect(proxyWarnings(loadConfig({ ...prod, TRUST_PROXY: "10.0.0.0/8" }))).toEqual([]);
     expect(proxyWarnings(loadConfig({}))).toEqual([]);
+    expect(proxyWarnings(loadConfig({ ...prod, ADMIN_ALLOW_CIDR: "10.0.0.0/8" }))).toEqual([
+      expect.stringContaining("TRUST_PROXY"),
+      expect.stringContaining("ADMIN_ALLOW_CIDR"),
+    ]);
+    expect(
+      proxyWarnings(
+        loadConfig({ ...prod, ADMIN_ALLOW_CIDR: "10.0.0.0/8", TRUST_PROXY: "127.0.0.1/32" }),
+      ),
+    ).toEqual([]);
   });
 
   it("checks for updates by default and turns the check off with UPDATE_CHECK=off", () => {
@@ -65,6 +74,7 @@ describe("admin CIDR config", () => {
     ]);
   });
   it("rejects malformed admin and trusted-proxy restrictions", () => {
+    expect(() => loadConfig({ ADMIN_ALLOW_CIDR: "oops" })).toThrow("IPv4 and IPv6 separately");
     for (const field of ["ADMIN_ALLOW_CIDR", "TRUST_PROXY"])
       for (const value of ["oops", "10.0.0.0/33", "::1/129"])
         expect(() => loadConfig({ [field]: value })).toThrow();

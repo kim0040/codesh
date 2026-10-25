@@ -261,6 +261,7 @@ export class Collab implements Extension<CollabContext> {
   private timers: NodeJS.Timeout[] = [];
   private readonly refused = new WeakSet<Connection>();
   private readonly awarenessBudget = new WeakMap<Connection, { tokens: number; at: number }>();
+  private readonly updateBudget = new WeakMap<Connection, { tokens: number; at: number }>();
   /** Perm messages received so far, and the recent ones per share (see `catchUp`). */
   private permCount = 0;
   private readonly recentPerms = new Map<string, RecentPerm[]>();
@@ -588,8 +589,23 @@ export class Collab implements Extension<CollabContext> {
   async beforeSync({ connection, document, type, payload }: beforeSyncPayload<CollabContext>) {
     // y-protocols: 1 = SyncStep2, 2 = Update; SyncStep1 carries no content.
     if (type !== 1 && type !== 2) return;
+    const now = Date.now();
+    const budget = this.updateBudget.get(connection) ?? { tokens: 200, at: now };
+    budget.tokens = Math.min(200, budget.tokens + (Math.max(0, now - budget.at) * 50) / 1000);
+    budget.at = now;
+    this.updateBudget.set(connection, budget);
+    if (budget.tokens < 1) {
+      connection.readOnly = true;
+      connection.close({ code: 4429, reason: "Document update rate exceeded" });
+      return;
+    }
+    budget.tokens--;
     const state = this.docs.get(document.name);
-    if (!state) return;
+    if (!state) {
+      connection.readOnly = true;
+      connection.close({ code: 4401, reason: "Document state unavailable" });
+      return;
+    }
     const actor = context(connection);
     // Every opaque non-owner update can contain metadata, even if it appears to be plain text.
     // Decode once and share it with the comment guard; owners skip the permission classifier.

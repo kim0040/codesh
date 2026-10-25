@@ -139,11 +139,10 @@ export function permitsUpdate(
     }
     if (at.root === YDOC.comments) return true; // attribution is checked separately
     if (at.root.startsWith(YDOC.fileText(""))) {
-      const fileId = at.root.slice(YDOC.fileText("").length);
+      // A deleted file can still have in-flight/offline text edits. The files map gates visibility.
       return (
         at.keys.length === 1 &&
         at.keys[0] === null &&
-        (permissions.files || doc.getMap(YDOC.files).has(fileId)) &&
         (item.content instanceof Y.ContentString || item.content instanceof Y.ContentDeleted)
       );
     }
