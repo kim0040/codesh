@@ -1,13 +1,15 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { type ComponentType, type ReactNode, useEffect, useRef } from "react";
 import { useT } from "../../lib/i18n";
 import { PLATFORM, type Platform } from "../../lib/platform";
 import { chordKeys, chordsFor, type ShortcutId } from "../../lib/shortcuts";
+import { useFocusOnArrival } from "../intro/arrival";
 import { usePrefersReducedMotion, useScrollReveal } from "../intro/hooks";
 import { ArrowRightIcon } from "../intro/icons";
 import { GUIDE_PAGES, type GuideSlug } from "../intro/nav";
 import { reveal } from "../intro/reveal";
 import { useGuide } from "./copy";
+import { fragmentId } from "./fragment";
 
 export interface TocItem {
   id: string;
@@ -35,16 +37,22 @@ export function GuidePage({
   const root = useRef<HTMLDivElement>(null);
   const reduced = usePrefersReducedMotion();
   useScrollReveal(root, reduced);
-  // The page mounts after its text has loaded, so the browser's own jump to #<id> found nothing.
+  // Reached through the app, the page starts with focus on its title (the text has loaded by now).
+  const heading = useRef<HTMLHeadingElement>(null);
+  useFocusOnArrival(heading);
+  // The page mounts after its text has loaded, so the browser's own jump to #<id> found nothing;
+  // a later change of the fragment (Back, Forward, a link on the page) comes through here too.
+  const hash = useRouterState({ select: (state) => state.location.hash });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the router's hash says the address changed
   useEffect(() => {
-    const id = decodeURIComponent(window.location.hash.slice(1));
+    const id = fragmentId(window.location.hash);
     if (id) document.getElementById(id)?.scrollIntoView({ block: "start" });
-  }, []);
+  }, [hash]);
   return (
     <div className="ix-page" ref={root}>
       <div className="ix-wrap">
         <div className="ix-gh">
-          <h1 className="ix-gh1" {...reveal()}>
+          <h1 className="ix-gh1" ref={heading} tabIndex={-1} {...reveal()}>
             {title}
           </h1>
           <p className="ix-lead" {...reveal(70)}>

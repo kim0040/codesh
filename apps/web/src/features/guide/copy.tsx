@@ -29,7 +29,8 @@ export const DEFAULT_GUIDE_SETTINGS: GuideSettings = {
   uploadMB: FACTS.defaultUploadMB,
 };
 
-// Each language's text is its own chunk, fetched when a guide page first needs it.
+// Each language's text is its own chunk, imported when a guide page first needs it. The service
+// worker precaches both (vite.config.ts), so they also download once per build for offline use.
 const loading = new Map<Locale, Promise<Dictionary>>();
 
 function loadDictionary(locale: Locale): Promise<Dictionary> {

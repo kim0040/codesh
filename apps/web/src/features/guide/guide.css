@@ -4,10 +4,6 @@
  * fragments (.ix-mock) carry data-ui and keep the product's own look.
  */
 
-.ix main:focus {
-  outline: none;
-}
-
 .ix-page {
   --ix-tile: var(--panel);
   padding-block: clamp(24px, 4vw, 56px) clamp(56px, 8vw, 120px);

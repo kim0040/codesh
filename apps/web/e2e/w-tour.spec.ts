@@ -218,6 +218,38 @@ test("it waits while another dialog is open", async ({ browser }) => {
   }
 });
 
+test("it waits while the editor's own dialogs are open, and does not take their focus", async ({
+  browser,
+}) => {
+  const user = await firstTimer(browser, "Own");
+  const { page } = user;
+  try {
+    await createShare(page);
+    await answerDeviceQuestion(page);
+    // New file opens right away, inside the quiet moment before the tour.
+    await page.getByTestId("add-file").click();
+    const dialog = page.getByRole("dialog", { name: "New file" });
+    const input = page.getByTestId("file-name-input");
+    await expect(input).toBeFocused();
+    await input.fill("notes.md");
+    await page.waitForTimeout(QUIET_MS);
+    await expect(tourDialog(page)).toHaveCount(0);
+    // The dialog is still the active one: visible to assistive technology, focus and text kept.
+    await expect(dialog).toBeVisible();
+    await expect(dialog).not.toHaveAttribute("aria-hidden", "true");
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue("notes.md");
+
+    // Closing it lets the tour in, once.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(tourDialog(page)).toBeVisible();
+    await expect(page.getByTestId("tour-next")).toBeFocused();
+  } finally {
+    await closeAll(user);
+  }
+});
+
 test("a viewer's tour leaves out what a viewer cannot do", async ({ browser }) => {
   const owner = await newUser(browser, "Owner");
   const viewer = await firstTimer(browser, "Viewer");

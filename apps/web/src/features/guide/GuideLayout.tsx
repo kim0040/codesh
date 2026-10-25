@@ -32,7 +32,6 @@ function PageSkeleton() {
  */
 export function GuideLayout() {
   const root = useRef<HTMLDivElement>(null);
-  const main = useRef<HTMLElement>(null);
   const reduced = usePrefersReducedMotion();
   useScrollReveal(root, reduced);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -46,21 +45,21 @@ export function GuideLayout() {
     [publicSettings],
   );
 
-  // A new page starts at the top with focus on its content, as a full page load would. The
-  // first render is the page load itself, so the browser has done this already.
+  // Moving between guide pages starts the next one at the top at once, also while its text loads.
+  // Focus follows when the page mounts (GuidePage), and the first entry from another page does the
+  // same there (useFocusOnArrival).
   const shown = useRef(pathname);
   useEffect(() => {
     if (shown.current === pathname) return;
     shown.current = pathname;
     if (!window.location.hash) window.scrollTo(0, 0);
-    main.current?.focus({ preventScroll: true });
   }, [pathname]);
 
   return (
     <div className="ix" ref={root} style={editorVars}>
       {/* The skip link is the app shell's (routes/__root.tsx); it points at #main. */}
       <Header />
-      <main id="main" ref={main} tabIndex={-1}>
+      <main id="main" tabIndex={-1}>
         <Suspense fallback={<PageSkeleton />}>
           <GuideCopyProvider settings={settings}>
             <Outlet />

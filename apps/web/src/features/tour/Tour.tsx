@@ -32,7 +32,8 @@ export interface TourProps {
 
 /**
  * The first-run tour: a modal popover that points at real controls with a spotlight. Steps whose
- * element is not on screen are left out. It is lazy-loaded, so returning visitors never fetch it.
+ * element is not on screen are left out. It is imported only when it runs; the service worker
+ * still precaches it, so it is downloaded once per build for offline use.
  */
 export default function Tour({ onFinish, onExited }: TourProps) {
   const t = useT();
@@ -183,6 +184,7 @@ export default function Tour({ onFinish, onExited }: TourProps) {
           closeLabel={t("common.close")}
           className="tour-pop"
           data-testid="tour"
+          data-tour=""
           data-side={place?.side}
           data-placed={place ? "" : undefined}
           style={{
