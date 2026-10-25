@@ -23,18 +23,23 @@ export function completionTheme(theme: EditorTheme) {
       padding: "0.25rem",
       fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace)",
     },
-    ".cm-tooltip-autocomplete li": {
+    // As specific as the library's own row rule, which would otherwise keep its 1px padding.
+    ".cm-tooltip.cm-tooltip-autocomplete > ul > li": {
       boxSizing: "border-box",
-      minHeight: "2.75rem",
+      minHeight: "var(--completion-row, 1.75rem)",
       maxWidth: "100%",
       overflow: "hidden",
-      padding: "0.5rem 0.625rem",
+      padding: "0.25rem 0.5rem",
       borderRadius: "0.25rem",
       color: theme.foreground,
     },
-    ".cm-tooltip-autocomplete li[aria-selected]": {
+    ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": {
       backgroundColor: selectedBackground,
       color: selectedForeground,
+      boxShadow: `inset 2px 0 ${theme.tokens.function}`,
+    },
+    // Before an arrow key picks a row, a quiet mark shows the one Tab would take.
+    ".cm-tooltip-autocomplete ul:not(:has(li[aria-selected])) li:first-child": {
       boxShadow: `inset 2px 0 ${theme.tokens.function}`,
     },
     ".cm-completionLabel": {

@@ -13,8 +13,9 @@
   }
 }
 
+/* Touch rows stay 44px tall; the editor theme reads this through --completion-row. */
 @media (pointer: coarse) {
-  .cm-tooltip-autocomplete li {
-    min-height: 44px;
+  :root {
+    --completion-row: 2.75rem;
   }
 }

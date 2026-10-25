@@ -5,10 +5,10 @@ import {
   type CompletionResult,
   type CompletionSource,
   closeCompletion,
-  startCompletion,
 } from "@codemirror/autocomplete";
-import type { Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { syntaxTree } from "@codemirror/language";
+import type { EditorState, Extension } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import type { EditorTheme } from "@codesh/highlight";
 import { completionTheme } from "./completion-theme";
 
@@ -37,43 +37,30 @@ const FALLBACK_LANGUAGES = new Set([
   "lua",
 ]);
 
+/** Languages whose names may contain a hyphen (CSS properties, HTML attributes). */
+const HYPHEN_LANGUAGES = new Set(["css", "scss", "sass", "less", "html", "xml", "vue", "svelte"]);
+
+/** Typing opens the list only after this many name characters; Ctrl+Space opens it at any length. */
+const MIN_TYPED = 2;
+
 const keywordLists = new Map<string, Promise<readonly string[]>>();
 
-/** Activate only on CodeMirror's local typing transactions; Yjs updates cannot open the popup. */
-const localTypingCompletion = ViewPlugin.fromClass(
-  class {
-    timer: number | null = null;
+function namePatterns(languageId: string): { before: RegExp; word: RegExp } {
+  return HYPHEN_LANGUAGES.has(languageId)
+    ? { before: /[A-Za-z_$][\w$-]*$/, word: /[A-Za-z_$][\w$-]*/g }
+    : { before: /[A-Za-z_$][\w$]*$/, word: /[A-Za-z_$][\w$]*/g };
+}
 
-    update(update: ViewUpdate) {
-      if (update.view.composing) {
-        this.clearTimer();
-        return;
-      }
-      if (
-        !update.docChanged ||
-        update.state.readOnly ||
-        !update.transactions.some((transaction) => transaction.isUserEvent("input.type"))
-      ) {
-        return;
-      }
-      this.clearTimer();
-      const view = update.view;
-      this.timer = window.setTimeout(() => {
-        this.timer = null;
-        if (view.hasFocus && !view.composing && !view.state.readOnly) startCompletion(view);
-      }, 350);
-    }
+/** Comments and string literals are prose: the list stays closed there unless asked for. */
+function inProse(state: EditorState, pos: number): boolean {
+  const node = syntaxTree(state).resolveInner(pos, -1);
+  return /comment|string|regexp|docstring/i.test(node.type.name);
+}
 
-    destroy() {
-      this.clearTimer();
-    }
-
-    private clearTimer() {
-      if (this.timer !== null) window.clearTimeout(this.timer);
-      this.timer = null;
-    }
-  },
-);
+/** Snippet templates ("for name in collection:") insert more than was asked for; plain keywords stay. */
+function isSnippet(option: Completion): boolean {
+  return typeof option.apply === "function" && option.type === "keyword";
+}
 
 const closeForComposition = EditorView.domEventHandlers({
   compositionstart(_event, view) {
@@ -94,31 +81,41 @@ function wordsForLanguage(languageId: string): Promise<readonly string[]> {
   return words;
 }
 
-/** A bounded document scan keeps word completion responsive even for large shared files. */
-function documentWords(context: CompletionContext): string[] {
+/** A bounded scan around the cursor, counting how often each name is used there. */
+function documentWords(
+  context: CompletionContext,
+  word: RegExp,
+  typed: string,
+): Map<string, number> {
   const start = Math.max(0, context.pos - 50_000);
   const end = Math.min(context.state.doc.length, context.pos + 50_000);
   const text = context.state.doc.sliceString(start, end);
-  const currentToken = context.matchBefore(/[\w$-]*/)?.text;
-  const words = new Set<string>();
-  for (const match of text.matchAll(/[A-Za-z_$][\w$-]*/g)) {
-    const word = match[0];
-    if (!word || word === currentToken) continue;
-    words.add(word);
-    if (words.size >= 250) break;
+  const counts = new Map<string, number>();
+  for (const match of text.matchAll(word)) {
+    const name = match[0];
+    if (name.length < 3 || name === typed) continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    if (counts.size >= 2000) break;
   }
-  return [...words];
+  return counts;
 }
 
 function completionSource(languageId: string): CompletionSource {
+  const names = namePatterns(languageId);
   return async (context) => {
-    const token = context.matchBefore(/[\w$-]*/);
+    const token = context.matchBefore(names.before);
+    const typed = token?.text ?? "";
+    if (!context.explicit && (typed.length < MIN_TYPED || inProse(context.state, context.pos)))
+      return null;
+    const from = token?.from ?? context.pos;
+    const lower = typed.toLowerCase();
+    // Only names that continue what was typed, never the word itself.
+    const fits = (label: string) =>
+      label !== typed && label.length > typed.length && label.toLowerCase().startsWith(lower);
+
     const nativeSources = context.state
       .languageDataAt<CompletionSource>("autocomplete", context.pos)
       .filter((source) => typeof source === "function");
-    const hasWord = Boolean(token && token.from < context.pos);
-    if (!hasWord && !context.explicit && nativeSources.length === 0) return null;
-
     const nativeResults = await Promise.all(
       nativeSources.map(async (source) => {
         try {
@@ -132,30 +129,23 @@ function completionSource(languageId: string): CompletionSource {
     const options = new Map<string, Completion>();
     for (const result of nativeResults) {
       for (const option of result?.options ?? []) {
-        if (!options.has(option.label)) options.set(option.label, option);
+        if (isSnippet(option) || !fits(option.label) || options.has(option.label)) continue;
+        options.set(option.label, option);
         if (options.size >= 300) break;
       }
-      if (options.size >= 300) break;
     }
-
-    if (hasWord || context.explicit) {
-      const fallback = await wordsForLanguage(languageId);
-      for (const word of fallback) {
-        if (!options.has(word)) options.set(word, { label: word, type: "keyword" });
-      }
-      for (const word of documentWords(context)) {
-        if (!options.has(word)) options.set(word, { label: word, type: "variable" });
-        if (options.size >= 550) break;
-      }
+    for (const word of await wordsForLanguage(languageId)) {
+      if (fits(word) && !options.has(word)) options.set(word, { label: word, type: "keyword" });
+    }
+    // Names used in this file rank by how often they appear, so the one in use comes first.
+    for (const [word, count] of documentWords(context, names.word, typed)) {
+      if (!fits(word) || options.has(word)) continue;
+      options.set(word, { label: word, type: "variable", boost: Math.min(count, 20) - 1 });
+      if (options.size >= 500) break;
     }
 
     if (options.size === 0) return null;
-    const nativeFrom = nativeResults.find((result) => result?.options.length)?.from;
-    const result: CompletionResult = {
-      from: hasWord ? (token?.from ?? context.pos) : (nativeFrom ?? context.pos),
-      options: [...options.values()],
-      validFor: /^[\w$-]*$/,
-    };
+    const result: CompletionResult = { from, options: [...options.values()] };
     return result;
   };
 }
@@ -171,14 +161,17 @@ export function completionExtension(
   return [
     completionTheme(theme),
     autocompletion({
-      activateOnTyping: false,
+      // CodeMirror opens it only for local typing ("input.type"), never for remote Yjs updates.
+      activateOnTyping: true,
+      activateOnTypingDelay: 350,
       defaultKeymap: false,
+      filterStrict: true,
       interactionDelay: 0,
-      maxRenderedOptions: 9,
-      selectOnOpen: true,
+      maxRenderedOptions: 6,
+      // Nothing is picked until an arrow key: Enter keeps making new lines, Tab takes the first.
+      selectOnOpen: false,
       override: [completionSource(languageId)],
     }),
-    localTypingCompletion,
     closeForComposition,
   ];
 }

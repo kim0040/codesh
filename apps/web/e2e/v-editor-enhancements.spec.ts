@@ -75,12 +75,81 @@ test("Python completion opens manually, accepts Tab and Enter, and leaves Tab in
     await owner.page.keyboard.press("Tab");
     await expect.poll(() => editorText(owner.page)).toBe("print");
 
+    // Enter makes a new line until an arrow key picks a row.
     await owner.page.keyboard.press("Control+A");
     await owner.page.keyboard.press("Backspace");
-    await owner.page.keyboard.type("pr");
+    await owner.page.keyboard.type("prin");
     await expect(listbox.getByRole("option", { name: /print/ })).toBeVisible();
     await owner.page.keyboard.press("Enter");
+    await expect(owner.page.locator(".cm-line")).toHaveCount(2);
+    await expect.poll(() => editorText(owner.page)).toBe("prin");
+    await owner.page.keyboard.press("Control+A");
+    await owner.page.keyboard.press("Backspace");
+    await owner.page.keyboard.type("prin");
+    await expect(listbox.getByRole("option", { name: /print/ })).toBeVisible();
+    await owner.page.keyboard.press("ArrowDown");
+    await owner.page.keyboard.press("Enter");
     await expect.poll(() => editorText(owner.page)).toBe("print");
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+test("completion stays out of the way: one letter, comments, strings, snippets and the typed word", async ({
+  browser,
+}) => {
+  const owner = await newUser(browser, "Owner");
+  try {
+    await createShare(owner.page);
+    await chooseLanguage(owner.page, "Python");
+    await owner.page.locator(".cm-content").click();
+    const listbox = owner.page.getByRole("listbox");
+    const clear = async () => {
+      await owner.page.keyboard.press("Control+A");
+      await owner.page.keyboard.press("Backspace");
+    };
+    const settle = () => owner.page.waitForTimeout(600);
+
+    await owner.page.keyboard.type("p");
+    await settle();
+    await expect(listbox).toBeHidden();
+
+    // Opened by typing, it closes again when the name gets too short or ends.
+    await owner.page.keyboard.type("r");
+    await expect(listbox.getByRole("option", { name: /print/ })).toBeVisible();
+    await owner.page.keyboard.press("Backspace");
+    await settle();
+    await expect(listbox).toBeHidden();
+    await owner.page.keyboard.type("r ");
+    await settle();
+    await expect(listbox).toBeHidden();
+
+    await clear();
+    await owner.page.keyboard.type("# pri");
+    await settle();
+    await expect(listbox).toBeHidden();
+
+    await clear();
+    await owner.page.keyboard.type('x = "pri');
+    await settle();
+    await expect(listbox).toBeHidden();
+
+    await clear();
+    await owner.page.keyboard.type("de");
+    await expect(listbox.getByRole("option", { name: /^def/ }).first()).toBeVisible();
+    await expect(listbox.getByText("definition")).toHaveCount(0);
+
+    // Names from the file come in prefix order, never by loose letter matches.
+    await clear();
+    await owner.page.keyboard.type("total_count = 1\ntotal_count += 1\nto");
+    await expect(listbox.getByRole("option", { name: /total_count/ })).toBeVisible();
+    await expect(listbox.getByRole("option", { name: /^(?!to)/ })).toHaveCount(0);
+
+    // A word that is already complete does not offer itself.
+    await clear();
+    await owner.page.keyboard.type("print");
+    await settle();
+    await expect(listbox.getByRole("option", { name: /^print$/ })).toHaveCount(0);
   } finally {
     await closeAll(owner);
   }
