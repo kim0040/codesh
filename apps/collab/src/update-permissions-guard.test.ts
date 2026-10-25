@@ -20,4 +20,62 @@ describe("beforeSync document state", () => {
     });
     doc.destroy();
   });
+
+  it.each(["text", "metadata", "viewer"])(
+    "waits for the initial full sync after an auth retry (%s)",
+    async (kind) => {
+      const collab = new Collab({} as ConstructorParameters<typeof Collab>[0]);
+      const doc = Object.assign(new Y.Doc(), { name: "retry" });
+      doc.getMap("meta").set("title", "Original");
+      doc.getText("file:main").insert(0, "base");
+      collab.docs.set(doc.name, {
+        share: { access: {} },
+        locked: false,
+        core: { sizeEstimate: 0 },
+      } as unknown as NonNullable<ReturnType<typeof collab.docs.get>>);
+      const connection = {
+        readOnly: kind === "viewer",
+        context: { role: kind === "viewer" ? "view" : "edit", controller: false },
+        sendStateless: vi.fn(),
+      };
+      const local = new Y.Doc();
+      Y.applyUpdate(local, Y.encodeStateAsUpdate(doc));
+      const updates: Uint8Array[] = [];
+      local.on("update", (update: Uint8Array) => updates.push(update));
+      local.getText("file:main").insert(4, " first");
+      local.getText("file:main").insert(10, " second");
+      if (kind === "metadata") local.getMap("meta").set("title", "Forbidden");
+      const handle = async (type: number, payload: Uint8Array) => {
+        const args = { connection, document: doc, type, payload };
+        await collab.beforeSync(args as unknown as Parameters<Collab["beforeSync"]>[0]);
+        if (!connection.readOnly) Y.applyUpdate(doc, payload);
+        await collab.afterHandleMessage(
+          args as unknown as Parameters<Collab["afterHandleMessage"]>[0],
+        );
+      };
+      // Failed authentication discarded the first increment. The retry drains the second
+      // before SyncStep2 supplies both; refusing it as a permission violation loses valid edits.
+      await handle(2, updates[1] as Uint8Array);
+      expect(doc.getText("file:main").toString()).toBe("base");
+      expect(doc.store.pendingStructs).toBeNull();
+      expect(connection.sendStateless).not.toHaveBeenCalled();
+
+      await handle(1, Y.encodeStateAsUpdate(local, Y.encodeStateVector(doc)));
+      if (kind === "text") {
+        expect(doc.getText("file:main").toString()).toBe("base first second");
+        expect(connection.sendStateless).not.toHaveBeenCalled();
+        local.getText("file:main").insert(17, " third");
+        await handle(2, updates.at(-1) as Uint8Array);
+        expect(doc.getText("file:main").toString()).toBe("base first second third");
+      } else {
+        expect(doc.getText("file:main").toString()).toBe("base");
+        expect(connection.sendStateless).toHaveBeenCalledWith(
+          JSON.stringify({ type: "permission_refused" }),
+        );
+      }
+      expect(doc.getMap("meta").get("title")).toBe("Original");
+      local.destroy();
+      doc.destroy();
+    },
+  );
 });

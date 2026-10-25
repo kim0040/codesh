@@ -119,27 +119,50 @@ export function useScrollReveal(root: RefObject<HTMLElement | null>, reduced: bo
     container.setAttribute("data-reveal-ready", "");
     // Reading layout here also settles the hidden state before the first paint, so nothing fades out.
     const fold = window.innerHeight * 0.92;
-    const waiting = targets.filter((node) => {
-      if (node.getBoundingClientRect().top >= fold) return true;
-      show(node);
-      return false;
-    });
+    const waiting = new Set(
+      targets.filter((node) => {
+        if (node.getBoundingClientRect().top >= fold) return true;
+        show(node);
+        return false;
+      }),
+    );
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           // Scrolled past without ever intersecting: show it, or it would be blank on the way back.
           if (!entry.isIntersecting && entry.boundingClientRect.top >= 0) continue;
           show(entry.target as HTMLElement);
+          waiting.delete(entry.target as HTMLElement);
           observer.unobserve(entry.target);
         }
       },
       { rootMargin: "0px 0px -8% 0px", threshold: 0.08 },
     );
     for (const node of waiting) observer.observe(node);
+    // A short target can jump across the viewport between observer samples without crossing
+    // a threshold. Reveal everything reached or passed, including after an anchor jump.
+    let frame = 0;
+    const revealPassed = () => {
+      frame = 0;
+      for (const node of waiting) {
+        if (node.getBoundingClientRect().top >= window.innerHeight * 0.92) continue;
+        show(node);
+        waiting.delete(node);
+        observer.unobserve(node);
+      }
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(revealPassed);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
     window.addEventListener("beforeprint", showAll);
     return () => {
       observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
       window.removeEventListener("beforeprint", showAll);
+      if (frame) cancelAnimationFrame(frame);
       container.removeAttribute("data-reveal-ready");
     };
   }, [root, reduced]);
