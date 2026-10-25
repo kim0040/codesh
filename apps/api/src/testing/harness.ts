@@ -296,6 +296,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     host: "127.0.0.1",
     port: 0,
     storage: "memory",
+    databaseUrl: "memory:",
+    databaseUrlSet: false,
     mongoUrl: "",
     valkeyUrl: VALKEY_URL,
     sessionSecret: "s".repeat(40),

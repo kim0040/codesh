@@ -4,6 +4,8 @@ export const API_PORT = Number(process.env.E2E_API_PORT ?? 3101);
 export const COLLAB_PORT = Number(process.env.E2E_COLLAB_PORT ?? 3102);
 export const BASE_URL = `http://localhost:${WEB_PORT}`;
 export const MONGO_URL = process.env.E2E_MONGO_URL ?? "mongodb://localhost:27017/gachipad_e2e";
+/** Optional backend URL passed to both servers; when absent the MongoDB default stays active. */
+export const DATABASE_URL = process.env.E2E_DATABASE_URL;
 export const VALKEY_URL = process.env.E2E_VALKEY_URL ?? "redis://localhost:6379/5";
 
 /**

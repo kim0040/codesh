@@ -1,11 +1,5 @@
 import { diagnosticError } from "@gachipad/shared";
-import {
-  connectMongo,
-  createMemoryStores,
-  createMongoStores,
-  ensureIndexes,
-  ServerDiagnostics,
-} from "@gachipad/storage";
+import { openStores, ServerDiagnostics } from "@gachipad/storage";
 import { Redis } from "ioredis";
 import { ldapAdapter, oidcAdapter } from "./auth/real.js";
 import type { Config } from "./config.js";
@@ -20,25 +14,22 @@ export interface Runtime {
 export async function createRuntime(config: Config): Promise<Runtime> {
   const valkey = new Redis(config.valkeyUrl);
   const subscriber = valkey.duplicate();
-  const mongo =
-    config.storage === "mongo"
-      ? await connectMongo(config.mongoUrl, { serverSelectionTimeoutMS: 30_000 })
-      : null;
-  if (mongo) await ensureIndexes(mongo.db);
-  const stores = mongo ? createMongoStores(mongo.db) : createMemoryStores();
+  const storage = await openStores(config.databaseUrl, { mongoServerSelectionTimeoutMS: 30_000 });
+  config.storage = storage.kind;
+  const stores = storage.stores;
   const diagnostics = new ServerDiagnostics(
     "api",
     stores.diagnostics,
     process.env.INSTANCE_ID ?? "api",
   );
   let mongoFailed = false;
-  mongo?.client.on("serverHeartbeatFailed", (event) => {
+  storage.mongoClient?.on("serverHeartbeatFailed", (event) => {
     mongoFailed = true;
     const failure =
       event && typeof event === "object" && "failure" in event ? event.failure : event;
     diagnostics.record("mongo_error", diagnosticError(failure), "error");
   });
-  mongo?.client.on("serverHeartbeatSucceeded", () => {
+  storage.mongoClient?.on("serverHeartbeatSucceeded", () => {
     if (mongoFailed) {
       mongoFailed = false;
       diagnostics.record("mongo_recovered");
@@ -58,7 +49,7 @@ export async function createRuntime(config: Config): Promise<Runtime> {
     async close() {
       subscriber.disconnect();
       await valkey.quit().catch(() => undefined);
-      await mongo?.close();
+      await storage.close();
     },
   };
 }

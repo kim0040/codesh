@@ -24,7 +24,7 @@ function share(id: string, overrides: Partial<ShareRecord> = {}): ShareRecord {
     createdAt: T0,
     updatedAt: T0,
     lastActiveAt: T0,
-    expiresAt: later(24 * 3600_000),
+    expiresAt: new Date(Date.now() + 24 * 3600_000),
     saved: false,
     savedBy: [],
     access: {
@@ -184,7 +184,7 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
         await shares.create(share("unsaved1"));
         await shares.create(share("saved001", { saved: true, savedBy: [OWNER], expiresAt: null }));
         const at = later(60_000);
-        const expiry = later(25 * 3600_000);
+        const expiry = new Date(Date.now() + 25 * 3600_000);
         expect(await shares.touch("unsaved1", at, expiry, 42)).toBe(true);
         expect(await shares.touch("saved001", at, expiry)).toBe(true);
         expect(await shares.touch("missing1", at, expiry)).toBe(false);
@@ -217,7 +217,7 @@ export function storeContract(name: string, open: () => Promise<Stores>) {
       it("deletes expired shares but not saved ones", async () => {
         const { shares } = await open();
         await shares.create(share("expired1", { expiresAt: later(1000) }));
-        await shares.create(share("kept0001", { expiresAt: later(10_000) }));
+        await shares.create(share("kept0001", { expiresAt: new Date(Date.now() + 86_400_000) }));
         await shares.create(share("saved001", { expiresAt: null, saved: true }));
         expect(await shares.deleteExpired(later(5000))).toEqual(["expired1"]);
         expect(await shares.get("expired1")).toBeNull();

@@ -6,12 +6,34 @@ describe("config", () => {
     expect(loadConfig({})).toMatchObject({
       port: 3001,
       mongoUrl: "mongodb://localhost:27017/gachipad",
+      databaseUrl: "mongodb://localhost:27017/gachipad",
+      databaseUrlSet: true,
       valkeyUrl: "redis://localhost:6379",
       adminToken: "",
-      storage: "mongo",
+      storage: "mongodb",
       trustProxy: [],
       production: false,
     });
+  });
+
+  it("selects DATABASE_URL first and preserves MONGO_URL fallback and memory mode", () => {
+    const selected = loadConfig({
+      DATABASE_URL: "sqlite:///tmp/gachipad.db",
+      MONGO_URL: "mongodb://hidden:secret@host/db",
+    });
+    expect(selected).toMatchObject({ storage: "sqlite", databaseUrl: "sqlite:///tmp/gachipad.db" });
+    const fallback = loadConfig({ MONGO_URL: "postgresql://user:secret@host/db" });
+    expect(fallback).toMatchObject({
+      storage: "postgresql",
+      databaseUrl: "postgresql://user:secret@host/db",
+    });
+    expect(loadConfig({ STORAGE: "memory" })).toMatchObject({
+      storage: "memory",
+      databaseUrl: "memory:",
+    });
+    expect(() => loadConfig({ DATABASE_URL: "file:///tmp/db" })).toThrow(
+      "Unsupported database URL scheme",
+    );
   });
 
   it("reads env and splits TRUST_PROXY", () => {

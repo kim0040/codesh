@@ -15,4 +15,5 @@ export {
   type MongoConnection,
   UPLOADS_BUCKET,
 } from "./mongo.js";
+export { type OpenedStores, openStores, type StorageKind, storageKindFromUrl } from "./open.js";
 export * from "./types.js";

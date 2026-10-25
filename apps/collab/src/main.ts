@@ -1,23 +1,20 @@
 import { diagnosticError } from "@gachipad/shared";
 import {
-  connectMongo,
   crashDiagnosticPath,
-  createMongoStores,
-  ensureIndexes,
   ingestCrashDiagnostic,
+  openStores,
   writeCrashDiagnostic,
 } from "@gachipad/storage";
 import { loadConfig } from "./config.js";
 import { createCollabServer } from "./server.js";
 
 const config = loadConfig();
-const mongo = await connectMongo(config.mongoUrl);
-await ensureIndexes(mongo.db);
+const storage = await openStores(config.databaseUrl);
 const server = createCollabServer({
   port: config.port,
   address: config.host,
   quiet: config.production,
-  stores: createMongoStores(mongo.db),
+  stores: storage.stores,
   valkeyUrl: config.valkeyUrl,
   secret: config.collabSecret,
   instanceId: config.instanceId,
@@ -30,12 +27,12 @@ const crashPath = crashDiagnosticPath("collab");
 ingestCrashDiagnostic(crashPath, server.diagnostics);
 
 let mongoFailed = false;
-mongo.client.on("serverHeartbeatFailed", (event) => {
+storage.mongoClient?.on("serverHeartbeatFailed", (event) => {
   mongoFailed = true;
   const failure = event && typeof event === "object" && "failure" in event ? event.failure : event;
   server.diagnostics.record("mongo_error", diagnosticError(failure), "error");
 });
-mongo.client.on("serverHeartbeatSucceeded", () => {
+storage.mongoClient?.on("serverHeartbeatSucceeded", () => {
   if (mongoFailed) {
     mongoFailed = false;
     server.diagnostics.record("mongo_recovered");
@@ -70,7 +67,7 @@ async function shutdown(signal: string) {
   }, SHUTDOWN_TIMEOUT_MS).unref();
   try {
     await server.destroy();
-    await mongo.close();
+    await storage.close();
     process.exit(0);
   } catch (error) {
     console.error("collab: shutdown failed", diagnosticError(error));
