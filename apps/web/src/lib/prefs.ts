@@ -21,6 +21,8 @@ export interface EditorPrefs {
   keymap: Keymap;
   /** The cursor glides as you type (none under `prefers-reduced-motion`). */
   smoothTyping: boolean;
+  /** Offer language-aware completions while editing. */
+  codeCompletion: boolean;
   /** Show invites as system notifications while the tab is in the background. */
   notifications: boolean;
   /**
@@ -43,6 +45,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
   lineNumbers: true,
   keymap: "default",
   smoothTyping: true,
+  codeCompletion: true,
   notifications: false,
   offlineCopy: "undecided",
 };
@@ -75,6 +78,7 @@ export function sanitizePrefs(input: unknown): EditorPrefs {
     lineNumbers: bool("lineNumbers", d.lineNumbers),
     keymap: KEYMAPS.find((k) => k === keymap) ?? d.keymap,
     smoothTyping: bool("smoothTyping", d.smoothTyping),
+    codeCompletion: bool("codeCompletion", d.codeCompletion),
     notifications: bool("notifications", d.notifications),
     // Before the choice existed the setting was a boolean that defaulted to on without asking:
     // `true` was never a decision, `false` was.

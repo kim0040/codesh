@@ -1,5 +1,11 @@
 import type { EditorView } from "@codemirror/view";
-import { detectLanguage, getLanguage, PLAIN_TEXT_ID } from "@codesh/highlight";
+import {
+  detectLanguage,
+  getLanguage,
+  type LanguageEntry,
+  languageForFilename,
+  PLAIN_TEXT_ID,
+} from "@codesh/highlight";
 import { Button, EmptyState, Sheet, SheetContent, toast } from "@codesh/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -85,6 +91,11 @@ function AloneHint() {
   );
 }
 
+function hasRecognizedCodeLanguage(path: string): boolean {
+  const entry = languageForFilename(path);
+  return Boolean(entry && entry.id !== PLAIN_TEXT_ID);
+}
+
 export function EditorShell({ follow }: { follow: FollowResult }) {
   const t = useT();
   const ctx = useEditor();
@@ -95,8 +106,47 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
   const importDropped = useImport();
   const [treeOpen, setTreeOpen] = useState(ctx.files.length > 1);
   const [secretWarning, setSecretWarning] = useState(false);
+  const [languageSuggestion, setLanguageSuggestion] = useState<{
+    fileId: string;
+    language: LanguageEntry;
+  } | null>(null);
+  const detectionTimer = useRef<number | null>(null);
+  const suggestedFiles = useRef(new Set<string>());
   const language = ctx.activeFile.language;
   const { viewRef } = ctx;
+
+  const lastLanguage = useRef({
+    fileId: ctx.activeFile.id,
+    language,
+    path: ctx.activeFile.path,
+  });
+  useEffect(() => {
+    if (detectionTimer.current !== null) window.clearTimeout(detectionTimer.current);
+    detectionTimer.current = null;
+    const previous = lastLanguage.current;
+    if (previous.fileId === ctx.activeFile.id && previous.language !== language) {
+      suggestedFiles.current.delete(ctx.activeFile.id);
+    }
+    if (
+      previous.fileId !== ctx.activeFile.id ||
+      previous.language !== language ||
+      previous.path !== ctx.activeFile.path
+    ) {
+      setLanguageSuggestion(null);
+    }
+    lastLanguage.current = {
+      fileId: ctx.activeFile.id,
+      language,
+      path: ctx.activeFile.path,
+    };
+  }, [ctx.activeFile.id, ctx.activeFile.path, language]);
+
+  useEffect(
+    () => () => {
+      if (detectionTimer.current !== null) window.clearTimeout(detectionTimer.current);
+    },
+    [],
+  );
 
   // ── actions ──────────────────────────────────────────────────────
   const actions = useRef({
@@ -416,6 +466,53 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
     [ctx.activeFile.id, ctx.activeFile.path, ctx.doc, language, t],
   );
 
+  const onType = useCallback(() => {
+    const fileId = ctx.activeFile.id;
+    const path = ctx.activeFile.path;
+    if (
+      ctx.readOnly ||
+      language !== PLAIN_TEXT_ID ||
+      hasRecognizedCodeLanguage(path) ||
+      suggestedFiles.current.has(fileId)
+    ) {
+      return;
+    }
+    if (detectionTimer.current !== null) window.clearTimeout(detectionTimer.current);
+    detectionTimer.current = window.setTimeout(() => {
+      detectionTimer.current = null;
+      const view = viewRef.current;
+      if (
+        !view ||
+        ctx.readOnly ||
+        ctx.activeFile.id !== fileId ||
+        ctx.activeFile.language !== PLAIN_TEXT_ID ||
+        hasRecognizedCodeLanguage(ctx.activeFile.path)
+      ) {
+        return;
+      }
+      const result = detectLanguage({ content: view.state.doc.toString() });
+      if (!result.language || result.confidence < 0.7) return;
+      suggestedFiles.current.add(fileId);
+      setLanguageSuggestion({ fileId, language: result.language });
+    }, 1000);
+  }, [
+    ctx.activeFile.id,
+    ctx.activeFile.language,
+    ctx.activeFile.path,
+    ctx.readOnly,
+    language,
+    viewRef,
+  ]);
+
+  const useLanguageSuggestion = useCallback(() => {
+    if (!languageSuggestion || languageSuggestion.fileId !== ctx.activeFile.id || ctx.readOnly)
+      return;
+    setFileLanguage(ctx.doc, languageSuggestion.fileId, languageSuggestion.language.id);
+    setLanguageSuggestion(null);
+  }, [ctx.activeFile.id, ctx.doc, ctx.readOnly, languageSuggestion]);
+
+  const dismissLanguageSuggestion = useCallback(() => setLanguageSuggestion(null), []);
+
   const onDropFiles = useCallback(
     (transfer: DataTransfer) => {
       if (ctx.readOnly) return;
@@ -464,6 +561,7 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
                   viewRef={ctx.viewRef}
                   info={ctx.info}
                   onPaste={onPaste}
+                  onType={onType}
                   onOpenComments={(ids) => ctx.openPanel("comments", ids[0])}
                   onDropFiles={onDropFiles}
                 />
@@ -474,7 +572,13 @@ export function EditorShell({ follow }: { follow: FollowResult }) {
         </div>
       </main>
 
-      <StatusBar />
+      <StatusBar
+        suggestedLanguage={
+          languageSuggestion?.fileId === ctx.activeFile.id ? languageSuggestion.language : null
+        }
+        onUseSuggestion={useLanguageSuggestion}
+        onDismissSuggestion={dismissLanguageSuggestion}
+      />
 
       {ops.dialogs}
       <ShareDialog />

@@ -14,7 +14,7 @@ export function TabsList({ variant = "underline", className, ...props }: TabsLis
     <TabsPrimitive.List
       data-variant={variant}
       className={cx(
-        "group/tabs flex max-w-full items-center overflow-x-auto",
+        "group/tabs flex max-w-full items-center overflow-x-auto overflow-y-hidden",
         variant === "underline"
           ? "gap-1 border-b border-line"
           : "gap-0.5 self-start rounded-lg border border-line bg-fill-hover p-0.5",
@@ -33,7 +33,7 @@ export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsP
         "transition-[color,background-color] duration-(--duration-fast) ease-out hover:text-fg",
         "data-[state=active]:text-fg disabled:opacity-50 coarse:h-11",
         // underline variant: a 2px bar scales in under the active tab
-        "group-data-[variant=underline]/tabs:after:absolute group-data-[variant=underline]/tabs:after:inset-x-2 group-data-[variant=underline]/tabs:after:-bottom-px",
+        "group-data-[variant=underline]/tabs:after:absolute group-data-[variant=underline]/tabs:after:inset-x-2 group-data-[variant=underline]/tabs:after:bottom-0",
         "group-data-[variant=underline]/tabs:after:h-0.5 group-data-[variant=underline]/tabs:after:origin-center group-data-[variant=underline]/tabs:after:scale-x-0 group-data-[variant=underline]/tabs:after:rounded-full group-data-[variant=underline]/tabs:after:bg-accent group-data-[variant=underline]/tabs:after:transition-transform group-data-[variant=underline]/tabs:after:duration-(--duration-normal) group-data-[variant=underline]/tabs:after:ease-out group-data-[variant=underline]/tabs:after:content-['']",
         "group-data-[variant=underline]/tabs:data-[state=active]:after:scale-x-100",
         // segmented variant: raised pill

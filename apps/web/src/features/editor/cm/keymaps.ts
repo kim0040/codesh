@@ -1,4 +1,12 @@
-import { closeBracketsKeymap } from "@codemirror/autocomplete";
+import {
+  acceptCompletion,
+  closeBracketsKeymap,
+  completionKeymap,
+  completionStatus,
+  moveCompletionSelection,
+  selectedCompletionIndex,
+  startCompletion,
+} from "@codemirror/autocomplete";
 import {
   addCursorAbove,
   addCursorBelow,
@@ -122,6 +130,23 @@ export const sublimeKeymap: readonly KeyBinding[] = [
   { key: "Mod-/", run: toggleComment },
   { key: "Mod-]", run: indentMore },
   { key: "Mod-[", run: indentLess },
+];
+
+const completeWithTab: Command = (view) => {
+  const status = completionStatus(view.state);
+  const initialSelection = selectedCompletionIndex(view.state);
+  if (view.composing || status !== "active") return false;
+  if (initialSelection === null) moveCompletionSelection(true)(view);
+  return acceptCompletion(view);
+};
+const openCompletions: Command = (view) =>
+  !view.composing && !view.state.readOnly && startCompletion(view);
+
+/** Tab accepts only when the popup is open; otherwise the editor's indent binding handles it. */
+export const editorCompletionKeymap: readonly KeyBinding[] = [
+  { key: "Tab", run: completeWithTab, preventDefault: true },
+  ...completionKeymap,
+  { key: "Ctrl-Space", run: openCompletions, preventDefault: true },
 ];
 
 export const baseKeymap: readonly KeyBinding[] = [

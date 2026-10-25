@@ -10,6 +10,11 @@ import {
 } from "./prefs";
 
 describe("sanitizePrefs", () => {
+  it("enables code completion by default", () => {
+    expect(DEFAULT_PREFS.codeCompletion).toBe(true);
+    expect(sanitizePrefs({}).codeCompletion).toBe(true);
+  });
+
   it("returns the defaults for anything that is not an object", () => {
     for (const input of [null, undefined, "text", 5, []]) {
       expect(sanitizePrefs(input)).toEqual(DEFAULT_PREFS);
@@ -31,12 +36,14 @@ describe("sanitizePrefs", () => {
       wrap: "yes",
       lineNumbers: 0,
       smoothTyping: "off",
+      codeCompletion: "off",
     });
     expect(result.keymap).toBe("default");
     expect(result.editorTheme).toBe("auto");
     expect(result.wrap).toBe(DEFAULT_PREFS.wrap);
     expect(result.lineNumbers).toBe(DEFAULT_PREFS.lineNumbers);
     expect(result.smoothTyping).toBe(true);
+    expect(result.codeCompletion).toBe(true);
   });
 
   it("keeps valid values", () => {
@@ -47,6 +54,7 @@ describe("sanitizePrefs", () => {
       fontSize: 18,
       tabSize: 4,
       smoothTyping: false,
+      codeCompletion: false,
     };
     expect(sanitizePrefs(stored)).toEqual(stored);
   });

@@ -13,6 +13,8 @@ import { usePrefs } from "../../lib/prefs";
 import type { Store } from "../../lib/store";
 import { awarenessBridge } from "./cm/awareness-bridge";
 import { commentsExtension } from "./cm/comments-ext";
+import { completionExtension } from "./cm/completion";
+import "./cm/completion.css";
 import {
   baseExtensions,
   EDITOR_HINT_ID,
@@ -39,6 +41,8 @@ export interface EditorPaneProps {
   info: Store<EditorInfo>;
   /** Text just pasted into the editor, and whether the file was empty before. */
   onPaste: (text: string, wasEmpty: boolean) => void;
+  /** A local, non-composition text input (not paste or remote Yjs content). */
+  onType: () => void;
   onOpenComments: (ids: string[]) => void;
   onDropFiles: (files: DataTransfer) => void;
 }
@@ -51,6 +55,7 @@ interface Compartments {
   language: Compartment;
   keymap: Compartment;
   readOnly: Compartment;
+  completion: Compartment;
 }
 
 function hasFiles(transfer: DataTransfer | null): boolean {
@@ -90,6 +95,7 @@ export function EditorPane(props: EditorPaneProps) {
       language: new Compartment(),
       keymap: new Compartment(),
       readOnly: new Compartment(),
+      completion: new Compartment(),
     };
     compartments.current = parts;
     const current = latest.current;
@@ -118,6 +124,14 @@ export function EditorPane(props: EditorPaneProps) {
           parts.gutters.of(gutterExtension(initialPrefs.lineNumbers)),
           parts.language.of(languageExtension(null)),
           parts.readOnly.of(readOnlyExtension(current.readOnly)),
+          parts.completion.of(
+            completionExtension(
+              current.languageId,
+              initialPrefs.codeCompletion,
+              current.readOnly,
+              theme,
+            ),
+          ),
           remoteCursors(session, ytext, fileId),
           awarenessBridge(session, fileId),
           commentsExtension({
@@ -143,6 +157,14 @@ export function EditorPane(props: EditorPaneProps) {
               });
             }
             if (update.docChanged) measureSize(update.view);
+            if (
+              update.docChanged &&
+              !update.view.composing &&
+              !latest.current.readOnly &&
+              update.transactions.some((transaction) => transaction.isUserEvent("input.type"))
+            ) {
+              latest.current.onType();
+            }
           }),
           EditorView.domEventHandlers({
             paste(event, view) {
@@ -195,6 +217,17 @@ export function EditorPane(props: EditorPaneProps) {
       ],
     });
   }, [ready, themeId, prefs, viewRef]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    const parts = compartments.current;
+    if (!ready || !view || !parts) return;
+    view.dispatch({
+      effects: parts.completion.reconfigure(
+        completionExtension(languageId, prefs.codeCompletion, readOnly, theme),
+      ),
+    });
+  }, [ready, languageId, prefs.codeCompletion, readOnly, theme, viewRef]);
 
   useEffect(() => {
     const view = viewRef.current;
