@@ -76,3 +76,15 @@ export const MonitorIcon = (props: IconProps) => (
     <path d="M8 20h8M12 16v4" />
   </Icon>
 );
+
+export const MenuIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M4 7h16M4 12h16M4 17h16" />
+  </Icon>
+);
+
+export const CloseIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </Icon>
+);

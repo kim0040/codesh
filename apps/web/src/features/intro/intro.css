@@ -304,6 +304,95 @@
 .ix-nav a:active {
   color: var(--fg-2);
 }
+.ix-nav a[aria-current="page"] {
+  color: var(--fg);
+  text-decoration-color: var(--accent-text);
+}
+
+/* Brand on the left; the links and switches are one group that becomes a menu on narrow screens. */
+.ix-menu {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: inherit;
+  min-width: 0;
+}
+.ix-menu-btn {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--rad-md);
+  background: var(--fill-hover);
+  font-size: var(--ix-small);
+  font-weight: 600;
+  transition:
+    background-color 140ms var(--ix-ease),
+    transform 140ms var(--ix-ease);
+}
+.ix-menu-btn:hover {
+  background: var(--fill-active);
+}
+.ix-menu-btn:active {
+  transform: scale(0.96);
+}
+@media (max-width: 959px) {
+  .ix-header-row {
+    justify-content: space-between;
+  }
+  .ix-menu-btn {
+    display: inline-flex;
+  }
+  .ix-header[data-menu] {
+    transform: none;
+  }
+  .ix-menu {
+    display: none;
+    position: absolute;
+    inset-inline: 0;
+    inset-block-start: 100%;
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+    max-height: calc(100dvh - var(--ix-header-h));
+    padding: 8px var(--ix-gutter) 28px;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+  .ix-header[data-menu] .ix-menu {
+    display: flex;
+  }
+  .ix-nav {
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    font-size: 1.125rem;
+  }
+  .ix-nav a {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding-block: 6px;
+  }
+  .ix-header-controls {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+@media (max-width: 959px) and (prefers-reduced-motion: no-preference) {
+  .ix-header[data-menu] .ix-menu {
+    animation: ix-menu-in 220ms var(--ix-ease) both;
+  }
+  @keyframes ix-menu-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, -8px, 0);
+    }
+  }
+}
 
 :where(.ix) fieldset {
   min-width: 0;
@@ -721,6 +810,7 @@ button.ix-ed-tab:hover {
  * and when printing.
  */
 @media (prefers-reduced-motion: no-preference) {
+  [data-reveal-ready] [data-reveal],
   .ix[data-reveal-ready] [data-reveal] {
     opacity: 0;
     transform: translate3d(0, 22px, 0);
@@ -729,6 +819,7 @@ button.ix-ed-tab:hover {
       transform 640ms var(--ix-ease);
     transition-delay: var(--d, 0ms);
   }
+  [data-reveal-ready] [data-reveal][data-in],
   .ix[data-reveal-ready] [data-reveal][data-in] {
     opacity: 1;
     transform: none;
@@ -1046,7 +1137,7 @@ button.ix-ed-tab:hover {
 }
 .ix-screens {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   width: 100%;
 }
@@ -1055,7 +1146,9 @@ button.ix-ed-tab:hover {
   align-content: center;
   gap: 8px;
   aspect-ratio: 16 / 10;
+  min-width: 0;
   padding: 12px;
+  overflow: hidden;
   border-radius: 8px;
   background: var(--ed-bg);
 }
@@ -1334,6 +1427,31 @@ button.ix-ed-tab:hover {
   font-weight: 700;
 }
 
+/* "Read more" under a home section. */
+.ix-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--accent-text);
+  font-weight: 650;
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 6px;
+  transition: text-decoration-color 140ms var(--ix-ease);
+}
+.ix-more svg {
+  transition: transform 180ms var(--ix-ease);
+}
+.ix-more:hover {
+  text-decoration-color: currentColor;
+}
+.ix-more:hover svg {
+  transform: translateX(3px);
+}
+.ix-diff-head .ix-more {
+  color: inherit;
+}
+
 /* ── Difference ── */
 
 .ix-diff {
@@ -1417,10 +1535,15 @@ button.ix-ed-tab:hover {
   .ix-faq {
     grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
   }
-  .ix-faq-title {
+  .ix-faq-head {
     position: sticky;
     top: 24px;
   }
+}
+.ix-faq-head {
+  display: grid;
+  gap: 20px;
+  justify-items: start;
 }
 .ix-faq-list {
   display: grid;
@@ -1438,6 +1561,9 @@ button.ix-ed-tab:hover {
   .ix-faq-item:not([data-open]):hover {
     background: var(--raised);
   }
+}
+.ix-faq-item {
+  scroll-margin-top: calc(var(--ix-header-h) + 16px);
 }
 .ix-faq-item h3 {
   margin: 0;
@@ -1648,38 +1774,9 @@ button.ix-ed-tab:hover {
   }
 }
 
-/* Too narrow for brand, links and both switches in one row: the footer repeats the links. */
-@media (max-width: 479px) {
-  .ix-nav {
-    display: none;
-  }
-  .ix-header-controls {
-    margin-inline-start: auto;
-  }
-}
-
 @media (max-width: 639px) {
   .ix {
     --ix-code-size: 12px;
-  }
-  .ix-nav-how {
-    display: none;
-  }
-  .ix-header-row {
-    gap: 12px;
-  }
-  .ix-header-controls {
-    gap: 6px;
-  }
-  .ix-header .ix-seg-control {
-    padding: 2px;
-  }
-  .ix-header .ix-seg-control button {
-    padding-inline: 8px;
-  }
-  .ix-header .ix-seg-icons button {
-    width: 30px;
-    padding: 0;
   }
   .ix-ed-person-name {
     display: none;
@@ -1696,18 +1793,6 @@ button.ix-ed-tab:hover {
 @media (max-width: 479px) {
   .ix-brand {
     font-size: 1.125rem;
-  }
-  .ix-header-row {
-    gap: 8px;
-  }
-  .ix-header-controls {
-    gap: 4px;
-  }
-  .ix-header .ix-seg-control button {
-    padding-inline: 6px;
-  }
-  .ix-header .ix-seg-icons button {
-    width: 28px;
   }
 }
 @media (max-width: 399px) {

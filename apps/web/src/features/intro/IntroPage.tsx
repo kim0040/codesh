@@ -11,6 +11,7 @@ import { Header } from "./sections/Header";
 import { Hero } from "./sections/Hero";
 import { HowSection } from "./sections/HowSection";
 import { editorVars } from "./static-data";
+import { buildVersion } from "./version";
 
 /** Values the admin controls; the route passes them in once the settings endpoint exists. */
 export interface IntroSettings {
@@ -26,11 +27,6 @@ export interface IntroPageProps {
 }
 
 const DEFAULT_TTL_HOURS = 24;
-
-function buildVersion(): string {
-  const value: unknown = import.meta.env.VITE_APP_VERSION;
-  return typeof value === "string" && value ? value : "0.0.0";
-}
 
 export function IntroPage({ settings, version = buildVersion() }: IntroPageProps) {
   const t = useT();

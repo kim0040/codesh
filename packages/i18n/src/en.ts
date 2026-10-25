@@ -59,6 +59,11 @@ export const en = {
   "intro.nav.how": "How it works",
   "intro.nav.features": "Features",
   "intro.nav.faq": "Questions",
+  "intro.nav.network": "Network",
+  "intro.nav.security": "Privacy",
+  "intro.nav.menuAction": "Menu",
+  "intro.more.action": "Read more",
+  "intro.more.faqAction": "All questions",
   "intro.hero.title": "Share code and edit it together",
   "intro.hero.sub": "No sign-up. Enter the 6-digit code you were given, or start a new share.",
   "intro.hero.startAction": "Create a share",
@@ -165,6 +170,7 @@ export const en = {
   "intro.footer.noTracking":
     "No ads, trackers or outside scripts. Everything loads from this server.",
   "intro.footer.licenses": "Open-source licenses",
+  "intro.footer.navLabel": "Pages",
 
   // ── Share basics (kept from the first dictionary) ──
   "share.new": "New share",

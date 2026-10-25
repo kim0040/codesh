@@ -1,7 +1,9 @@
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useT } from "../../../lib/i18n";
 import { LICENSES_URL } from "../../../lib/licenses";
 import { NameCells } from "../art";
 import { ArrowRightIcon } from "../icons";
+import { GUIDE_PAGES } from "../nav";
 import { reveal } from "../reveal";
 import { LocaleSwitch, ThemeSwitch } from "./Header";
 
@@ -12,9 +14,14 @@ export interface FooterProps {
 
 export function Footer({ version, contact }: FooterProps) {
   const t = useT();
+  const navigate = useNavigate();
+  // The start panel lives on the home page; from a guide page the button leads there.
   const toStart = () => {
     const start = document.getElementById("start");
-    if (!start) return;
+    if (!start) {
+      void navigate({ to: "/" });
+      return;
+    }
     start.scrollIntoView({
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
       block: "center",
@@ -44,10 +51,12 @@ export function Footer({ version, contact }: FooterProps) {
               </p>
             </div>
           </div>
-          <nav className="ix-footer-links" aria-label={t("a11y.mainNavigation")}>
-            <a href="#how">{t("intro.nav.how")}</a>
-            <a href="#features">{t("intro.nav.features")}</a>
-            <a href="#faq">{t("intro.nav.faq")}</a>
+          <nav className="ix-footer-links" aria-label={t("intro.footer.navLabel")}>
+            {GUIDE_PAGES.map(({ to, navKey }) => (
+              <Link key={to} to={to}>
+                {t(navKey)}
+              </Link>
+            ))}
           </nav>
         </div>
         <div className="ix-footer-bar">
