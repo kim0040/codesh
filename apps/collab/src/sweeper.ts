@@ -50,14 +50,20 @@ export async function sweep(
       await stores.labels.deleteForShare(id);
     }
     // Labels are read before the shares, so a share saved in between keeps the label written after it.
-    for (const clientId of await stores.labels.clientIds()) {
-      const entries = await stores.labels.listForClient(clientId);
-      const mine = new Set((await stores.shares.listForClient(clientId)).map((share) => share.id));
-      for (const entry of entries) {
-        if (!mine.has(entry.shareId)) await stores.labels.delete(clientId, entry.shareId);
-      }
+    if (stores.labels.deleteInaccessible) {
+      await stores.labels.deleteInaccessible();
       await lock.renew(keys.sweeperLock);
-    }
+    } else
+      for (const clientId of await stores.labels.clientIds()) {
+        const entries = await stores.labels.listForClient(clientId);
+        const mine = new Set(
+          (await stores.shares.listForClient(clientId)).map((share) => share.id),
+        );
+        for (const entry of entries) {
+          if (!mine.has(entry.shareId)) await stores.labels.delete(clientId, entry.shareId);
+        }
+        await lock.renew(keys.sweeperLock);
+      }
     await stores.snapshots.deleteOlderThan(
       "history",
       new Date(now.getTime() - settings.historyRetentionDays * DAY_MS),

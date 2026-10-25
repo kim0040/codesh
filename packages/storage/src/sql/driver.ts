@@ -50,6 +50,35 @@ function sqliteBusy(error: unknown): boolean {
   );
 }
 
+async function retrySqliteBusy<T>(work: () => T | Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await work();
+    } catch (error) {
+      if (!sqliteBusy(error) || attempt >= 5) throw error;
+      await delay(40 * 2 ** attempt);
+    }
+  }
+}
+
+/** Only callbacks containing replayable SQL belong in transactions; never consume streams here. */
+async function retryTransaction<T>(work: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await work();
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+      if (
+        attempt >= 4 ||
+        !["40P01", "40001", "ER_LOCK_DEADLOCK", "ER_LOCK_WAIT_TIMEOUT"].includes(String(code))
+      )
+        throw error;
+      await delay(10 * 2 ** attempt + Math.random() * 10);
+    }
+  }
+}
+
 /** Opens one driver connection. Database drivers are imported only for the selected URL scheme. */
 export async function openSqlDriver(url: string): Promise<SqlDriver> {
   if (url.startsWith("sqlite:")) {
@@ -73,20 +102,11 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
     };
     return {
       dialect: "sqlite",
-      all: (sql, values) => queue.run(() => raw.all(sql, values)),
-      run: (sql, values) => queue.run(() => raw.run(sql, values)),
+      all: (sql, values) => queue.run(() => retrySqliteBusy(() => raw.all(sql, values))),
+      run: (sql, values) => queue.run(() => retrySqliteBusy(() => raw.run(sql, values))),
       async transaction<T>(work: (tx: SqlExecutor) => Promise<T>) {
         return queue.run(async () => {
-          let attempt = 0;
-          for (;;) {
-            try {
-              db.exec("BEGIN IMMEDIATE");
-              break;
-            } catch (error) {
-              if (!sqliteBusy(error) || attempt >= 5) throw error;
-              await delay(40 * 2 ** attempt++);
-            }
-          }
+          await retrySqliteBusy(() => db.exec("BEGIN IMMEDIATE"));
           try {
             const result = await work(raw);
             db.exec("COMMIT");
@@ -128,30 +148,32 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
       all,
       run,
       async transaction<T>(work: (tx: SqlExecutor) => Promise<T>) {
-        const client = await pool.connect();
-        const tx: SqlExecutor = {
-          async all<Row extends SqlRow = SqlRow>(sql: string, values: unknown[] = []) {
-            let index = 0;
-            const translated = sql.replace(/\?/g, () => `$${++index}`);
-            return (await client.query(translated, values)).rows as unknown as Row[];
-          },
-          async run(sql, values = []) {
-            let index = 0;
-            const translated = sql.replace(/\?/g, () => `$${++index}`);
-            return (await client.query(translated, values)).rowCount ?? 0;
-          },
-        };
-        try {
-          await client.query("BEGIN");
-          const result = await work(tx);
-          await client.query("COMMIT");
-          return result;
-        } catch (error) {
-          await client.query("ROLLBACK").catch(() => undefined);
-          throw error;
-        } finally {
-          client.release();
-        }
+        return retryTransaction(async () => {
+          const client = await pool.connect();
+          const tx: SqlExecutor = {
+            async all<Row extends SqlRow = SqlRow>(sql: string, values: unknown[] = []) {
+              let index = 0;
+              const translated = sql.replace(/\?/g, () => `$${++index}`);
+              return (await client.query(translated, values)).rows as unknown as Row[];
+            },
+            async run(sql, values = []) {
+              let index = 0;
+              const translated = sql.replace(/\?/g, () => `$${++index}`);
+              return (await client.query(translated, values)).rowCount ?? 0;
+            },
+          };
+          try {
+            await client.query("BEGIN");
+            const result = await work(tx);
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK").catch(() => undefined);
+            throw error;
+          } finally {
+            client.release();
+          }
+        });
       },
       async close() {
         await pool.end();
@@ -175,28 +197,30 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
       all,
       run,
       async transaction<T>(work: (tx: SqlExecutor) => Promise<T>) {
-        const connection = await pool.getConnection();
-        const tx: SqlExecutor = {
-          async all<Row extends SqlRow = SqlRow>(sql: string, values: unknown[] = []) {
-            const [rows] = await connection.query(sql, values);
-            return rows as unknown as Row[];
-          },
-          async run(sql, values = []) {
-            const [result] = await connection.query(sql, values);
-            return "affectedRows" in result ? Number(result.affectedRows) : 0;
-          },
-        };
-        try {
-          await connection.beginTransaction();
-          const result = await work(tx);
-          await connection.commit();
-          return result;
-        } catch (error) {
-          await connection.rollback().catch(() => undefined);
-          throw error;
-        } finally {
-          connection.release();
-        }
+        return retryTransaction(async () => {
+          const connection = await pool.getConnection();
+          const tx: SqlExecutor = {
+            async all<Row extends SqlRow = SqlRow>(sql: string, values: unknown[] = []) {
+              const [rows] = await connection.query(sql, values);
+              return rows as unknown as Row[];
+            },
+            async run(sql, values = []) {
+              const [result] = await connection.query(sql, values);
+              return "affectedRows" in result ? Number(result.affectedRows) : 0;
+            },
+          };
+          try {
+            await connection.beginTransaction();
+            const result = await work(tx);
+            await connection.commit();
+            return result;
+          } catch (error) {
+            await connection.rollback().catch(() => undefined);
+            throw error;
+          } finally {
+            connection.release();
+          }
+        });
       },
       async close() {
         await pool.end();

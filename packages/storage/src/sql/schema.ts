@@ -13,7 +13,7 @@ const migrations: Array<{
       const text = mysql ? "LONGTEXT" : "TEXT";
       const statements = [
         `CREATE TABLE IF NOT EXISTS shares (
-          id VARCHAR(255) PRIMARY KEY, title ${text} NOT NULL, language VARCHAR(255) NOT NULL,
+          id VARCHAR(255) PRIMARY KEY, title ${text} NOT NULL, title_search ${text} NOT NULL, language VARCHAR(255) NOT NULL,
           owner_id VARCHAR(255) NOT NULL, lab_id VARCHAR(255), fork_of VARCHAR(255),
           created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, last_active_at BIGINT NOT NULL,
           expires_at BIGINT, saved ${bool} NOT NULL, access_json ${text} NOT NULL,
@@ -39,7 +39,7 @@ const migrations: Array<{
         `CREATE TABLE IF NOT EXISTS uploads (
           id VARCHAR(64) PRIMARY KEY, name VARCHAR(1024) NOT NULL, size BIGINT NOT NULL,
           content_type VARCHAR(255), owner_id VARCHAR(255) NOT NULL, share_id VARCHAR(255),
-          expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL
+          expires_at BIGINT NOT NULL, created_at BIGINT NOT NULL, complete ${bool} NOT NULL, lease_until BIGINT NOT NULL
         )`,
         `CREATE TABLE IF NOT EXISTS upload_chunks (
           upload_id VARCHAR(64) NOT NULL, chunk_no INTEGER NOT NULL, data ${bytes} NOT NULL,
@@ -68,7 +68,17 @@ const migrations: Array<{
           slot VARCHAR(32) PRIMARY KEY, value_json ${text} NOT NULL
         )`,
       ];
-      for (const statement of statements) await tx.run(statement);
+      for (const statement of statements)
+        await tx.run(
+          mysql
+            ? statement
+                .replace(/VARCHAR\(\d+\)/g, "$& CHARACTER SET utf8mb4 COLLATE utf8mb4_bin")
+                .replace(
+                  "title_search LONGTEXT",
+                  "title_search LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+                )
+            : statement,
+        );
 
       const indexes: Array<[string, string]> = [
         ["shares_owner_id", "CREATE INDEX shares_owner_id ON shares(owner_id)"],
@@ -95,6 +105,7 @@ const migrations: Array<{
             : "CREATE INDEX uploads_name_created ON uploads(name, created_at)",
         ],
         ["uploads_expires", "CREATE INDEX uploads_expires ON uploads(expires_at)"],
+        ["uploads_lease", "CREATE INDEX uploads_lease ON uploads(complete, lease_until)"],
         ["uploads_share", "CREATE INDEX uploads_share ON uploads(share_id)"],
         ["labs_expires", "CREATE INDEX labs_expires ON labs(expires_at)"],
         ["share_labels_share", "CREATE INDEX share_labels_share ON share_labels(share_id)"],

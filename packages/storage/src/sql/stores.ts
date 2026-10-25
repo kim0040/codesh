@@ -118,15 +118,43 @@ async function readShare(
   id: string,
   lock = false,
   dialect: SqlDriver["dialect"] = "sqlite",
+  visible = false,
 ): Promise<ShareRecord | null> {
   const suffix = lock && supportsForUpdate(dialect) ? " FOR UPDATE" : "";
-  const rows = await tx.all<ShareRow>(`SELECT * FROM shares WHERE id = ?${suffix}`, [id]);
+  const rows = await tx.all<ShareRow>(
+    `SELECT * FROM shares WHERE id = ?${visible ? ` AND ${visibleShare}` : ""}${suffix}`,
+    visible ? [id, Date.now()] : [id],
+  );
   const row = rows[0];
   if (!row) return null;
-  const [savedBy, bans] = await Promise.all([
-    savedIds(tx, "share_saved_by", id),
-    savedIds(tx, "share_bans", id),
-  ]);
+  return (await hydrateShares(tx, [row]))[0] ?? null;
+}
+
+async function hydrateShares(tx: SqlExecutor, rows: ShareRow[]): Promise<ShareRecord[]> {
+  const saved = new Map<string, string[]>();
+  const banned = new Map<string, string[]>();
+  for (let i = 0; i < rows.length; i += 500) {
+    const ids = rows.slice(i, i + 500).map((row) => row.id);
+    const marks = ids.map(() => "?").join(",");
+    for (const [table, target] of [
+      ["share_saved_by", saved],
+      ["share_bans", banned],
+    ] as const) {
+      const entries = await tx.all<{ share_id: string; client_id: string }>(
+        `SELECT share_id,client_id FROM ${table} WHERE share_id IN (${marks}) ORDER BY position`,
+        ids,
+      );
+      for (const entry of entries) {
+        const values = target.get(entry.share_id) ?? [];
+        values.push(entry.client_id);
+        target.set(entry.share_id, values);
+      }
+    }
+  }
+  return rows.map((row) => shareRecord(row, saved.get(row.id) ?? [], banned.get(row.id) ?? []));
+}
+
+function shareRecord(row: ShareRow, savedBy: string[], bans: string[]): ShareRecord {
   return {
     id: row.id,
     title: row.title,
@@ -183,17 +211,33 @@ async function deleteShareChildren(
 ): Promise<void> {
   await tx.run("DELETE FROM share_updates WHERE share_id = ?", [shareId]);
   await tx.run("DELETE FROM share_snapshots WHERE share_id = ?", [shareId]);
-  if (supportsForUpdate(dialect))
-    await tx.all("SELECT used_bytes FROM upload_capacity WHERE id=1 FOR UPDATE");
-  const uploads = await tx.all<{ bytes: number | string | null }>(
-    "SELECT SUM(size) AS bytes FROM uploads WHERE share_id=?",
-    [shareId],
-  );
-  await tx.run("DELETE FROM uploads WHERE share_id = ?", [shareId]);
-  const uploadBytes = Number(uploads[0]?.bytes ?? 0);
-  if (uploadBytes)
-    await tx.run("UPDATE upload_capacity SET used_bytes=used_bytes-? WHERE id=1", [uploadBytes]);
+  await deleteUploads(tx, dialect, "share_id=?", [shareId]);
   await tx.run("DELETE FROM share_labels WHERE share_id = ?", [shareId]);
+}
+
+async function deleteUploads(
+  tx: SqlExecutor,
+  dialect: SqlDriver["dialect"],
+  where: string,
+  values: unknown[],
+) {
+  const suffix = supportsForUpdate(dialect) ? " FOR UPDATE" : "";
+  if (suffix) await tx.all("SELECT used_bytes FROM upload_capacity WHERE id=1 FOR UPDATE");
+  // Locking reads see committed rows even under MySQL REPEATABLE READ.
+  const rows = await tx.all<{ id: string; size: number | string }>(
+    `SELECT id,size FROM uploads WHERE ${where} ORDER BY id${suffix}`,
+    values,
+  );
+  let removed = 0;
+  let released = 0;
+  for (const row of rows) {
+    const count = await tx.run("DELETE FROM uploads WHERE id=?", [row.id]);
+    removed += count;
+    if (count) released += Number(row.size);
+  }
+  if (released)
+    await tx.run("UPDATE upload_capacity SET used_bytes=used_bytes-? WHERE id=1", [released]);
+  return removed;
 }
 
 class SqlShareStore implements ShareStore {
@@ -204,7 +248,7 @@ class SqlShareStore implements ShareStore {
     const values: unknown[] = [Date.now()];
     if (search) {
       const escaped = search.toLowerCase().replace(/[!%_]/g, (char) => `!${char}`);
-      conditions.push("LOWER(title) LIKE ? ESCAPE '!'");
+      conditions.push("title_search LIKE ? ESCAPE '!'");
       values.push(`%${escaped}%`);
     }
     if (before) {
@@ -236,26 +280,33 @@ class SqlShareStore implements ShareStore {
 
   async adminSummary() {
     const now = Date.now();
-    const rows = await this.driver.all<{ created_at: number | string }>(
-      `SELECT created_at FROM shares WHERE ${visibleShare}`,
-      [now],
+    const counts = Array.from(
+      { length: 24 },
+      (_, i) => `SUM(CASE WHEN created_at>? AND created_at<=? THEN 1 ELSE 0 END) AS h${i}`,
     );
-    const activity = Array<number>(24).fill(0);
-    for (const row of rows) {
-      const age = Math.floor((now - Number(row.created_at)) / 3_600_000);
-      if (age >= 0 && age < 24) activity[23 - age] = (activity[23 - age] ?? 0) + 1;
-    }
-    return { shares: rows.length, activity };
+    const values: unknown[] = [];
+    for (let i = 0; i < 24; i++)
+      values.push(now - (24 - i) * 3_600_000, now - (23 - i) * 3_600_000);
+    values.push(now);
+    const [row] = await this.driver.all(
+      `SELECT COUNT(*) AS total,${counts.join(",")} FROM shares WHERE ${visibleShare}`,
+      values,
+    );
+    return {
+      shares: Number(row?.total ?? 0),
+      activity: Array.from({ length: 24 }, (_, i) => Number(row?.[`h${i}`] ?? 0)),
+    };
   }
 
   async create(share: ShareRecord) {
     await this.driver.transaction(async (tx) => {
       await tx.run(
-        `INSERT INTO shares (id,title,language,owner_id,lab_id,fork_of,created_at,updated_at,last_active_at,expires_at,saved,access_json,join_code,locked,size_bytes,preview,preview_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO shares (id,title,title_search,language,owner_id,lab_id,fork_of,created_at,updated_at,last_active_at,expires_at,saved,access_json,join_code,locked,size_bytes,preview,preview_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           share.id,
           share.title,
+          share.title.toLowerCase(),
           share.language,
           share.ownerId,
           share.labId ?? null,
@@ -289,19 +340,26 @@ class SqlShareStore implements ShareStore {
   }
 
   get(id: string) {
-    return readShare(this.driver, id);
+    return readShare(this.driver, id, false, this.driver.dialect, true);
   }
 
   async update(id: string, patch: ShareUpdate) {
     return this.driver.transaction(async (tx) => {
       const current = await readShare(tx, id, true, this.driver.dialect);
       if (!current) return null;
+      const clean = <T extends object>(value: T) =>
+        Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined));
       const { access, ...rest } = patch;
-      const updated = { ...current, ...rest, access: { ...current.access, ...access } };
+      const updated = {
+        ...current,
+        ...clean(rest),
+        access: { ...current.access, ...clean(access ?? {}) },
+      };
       await tx.run(
-        `UPDATE shares SET title=?, language=?, updated_at=?, last_active_at=?, expires_at=?, join_code=?, locked=?, size_bytes=?, preview=?, preview_at=?, access_json=? WHERE id=?`,
+        `UPDATE shares SET title=?, title_search=?, language=?, updated_at=?, last_active_at=?, expires_at=?, join_code=?, locked=?, size_bytes=?, preview=?, preview_at=?, access_json=? WHERE id=?`,
         [
           updated.title,
+          updated.title.toLowerCase(),
           updated.language,
           updated.updatedAt.getTime(),
           updated.lastActiveAt.getTime(),
@@ -321,7 +379,10 @@ class SqlShareStore implements ShareStore {
 
   async delete(id: string) {
     return this.driver.transaction(async (tx) => {
-      const rows = await tx.all<{ id: string }>("SELECT id FROM shares WHERE id = ?", [id]);
+      const rows = await tx.all<{ id: string }>(
+        `SELECT id FROM shares WHERE id = ?${supportsForUpdate(this.driver.dialect) ? " FOR UPDATE" : ""}`,
+        [id],
+      );
       if (!rows.length) return false;
       await deleteShareChildren(tx, id, this.driver.dialect);
       await tx.run("DELETE FROM shares WHERE id = ?", [id]);
@@ -332,28 +393,19 @@ class SqlShareStore implements ShareStore {
   async listForClient(clientId: string) {
     const rows = await this.driver.all<ShareRow>(
       `SELECT DISTINCT s.* FROM shares s LEFT JOIN share_saved_by b ON b.share_id=s.id
-       WHERE (s.owner_id=? OR b.client_id=?)
+       WHERE (s.owner_id=? OR b.client_id=?) AND (s.expires_at IS NULL OR s.expires_at>?)
        ORDER BY s.updated_at DESC,s.id ASC`,
-      [clientId, clientId],
+      [clientId, clientId, Date.now()],
     );
-    const result: ShareRecord[] = [];
-    for (const row of rows) {
-      const share = await readShare(this.driver, row.id);
-      if (share) result.push(share);
-    }
-    return result;
+    return hydrateShares(this.driver, rows);
   }
 
   async listByLab(labId: string) {
-    const rows = await this.driver.all<{ id: string }>("SELECT id FROM shares WHERE lab_id=?", [
-      labId,
-    ]);
-    const result: ShareRecord[] = [];
-    for (const row of rows) {
-      const share = await readShare(this.driver, row.id);
-      if (share) result.push(share);
-    }
-    return result;
+    const rows = await this.driver.all<ShareRow>(
+      `SELECT * FROM shares WHERE lab_id=? AND ${visibleShare}`,
+      [labId, Date.now()],
+    );
+    return hydrateShares(this.driver, rows);
   }
 
   async existing(ids: string[]) {
@@ -408,10 +460,10 @@ class SqlShareStore implements ShareStore {
   async touch(id: string, at: Date, expiresAtIfUnsaved: Date, sizeBytes?: number) {
     const rows = await this.driver.run(
       `UPDATE shares SET last_active_at=?,updated_at=?,expires_at=CASE WHEN saved=TRUE THEN expires_at ELSE ? END${sizeBytes === undefined ? "" : ",size_bytes=?"}
-       WHERE id=?`,
+       WHERE id=? AND ${visibleShare}`,
       sizeBytes === undefined
-        ? [at.getTime(), at.getTime(), expiresAtIfUnsaved.getTime(), id]
-        : [at.getTime(), at.getTime(), expiresAtIfUnsaved.getTime(), sizeBytes, id],
+        ? [at.getTime(), at.getTime(), expiresAtIfUnsaved.getTime(), id, Date.now()]
+        : [at.getTime(), at.getTime(), expiresAtIfUnsaved.getTime(), sizeBytes, id, Date.now()],
     );
     return rows > 0;
   }
@@ -436,17 +488,31 @@ class SqlShareStore implements ShareStore {
   }
 
   async deleteExpired(now: Date) {
-    return this.driver.transaction(async (tx) => {
-      const rows = await tx.all<{ id: string }>(
-        "SELECT id FROM shares WHERE expires_at IS NOT NULL AND expires_at < ?",
-        [now.getTime()],
-      );
-      for (const row of rows) {
+    const rows = await this.driver.all<{ id: string }>(
+      "SELECT id FROM shares WHERE expires_at IS NOT NULL AND expires_at < ? ORDER BY id",
+      [now.getTime()],
+    );
+    const removed: string[] = [];
+    for (const row of rows) {
+      const deleted = await this.driver.transaction(async (tx) => {
+        const suffix = supportsForUpdate(this.driver.dialect) ? " FOR UPDATE" : "";
+        const [current] = await tx.all<{ expires_at: number | string | null }>(
+          `SELECT expires_at FROM shares WHERE id=?${suffix}`,
+          [row.id],
+        );
+        if (!current || current.expires_at === null || Number(current.expires_at) >= now.getTime())
+          return false;
         await deleteShareChildren(tx, row.id, this.driver.dialect);
-        await tx.run("DELETE FROM shares WHERE id=?", [row.id]);
-      }
-      return rows.map((row) => row.id);
-    });
+        return (
+          (await tx.run(
+            "DELETE FROM shares WHERE id=? AND expires_at IS NOT NULL AND expires_at<?",
+            [row.id, now.getTime()],
+          )) > 0
+        );
+      });
+      if (deleted) removed.push(row.id);
+    }
+    return removed;
   }
 }
 
@@ -457,7 +523,7 @@ class SqlUpdateLog implements UpdateLog {
     if (!entries.length) return;
     try {
       await this.driver.transaction(async (tx) => {
-        for (const entry of entries)
+        for (const entry of [...entries].sort((a, b) => a.seq - b.seq))
           await tx.run("INSERT INTO share_updates (share_id,seq,data,at) VALUES (?,?,?,?)", [
             shareId,
             entry.seq,
@@ -647,50 +713,74 @@ class SqlFileStore implements FileStore {
     const id = randomBytes(12).toString("hex");
     const { stream, name, ...metadata } = upload;
     let size = 0;
-    await this.driver.transaction(async (tx) => {
-      if (supportsForUpdate(this.driver.dialect))
-        await tx.all("SELECT used_bytes FROM upload_capacity WHERE id=1 FOR UPDATE");
-      await tx.run(
-        "INSERT INTO uploads (id,name,size,content_type,owner_id,share_id,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)",
-        [
-          id,
-          name,
-          0,
-          metadata.contentType,
-          metadata.ownerId,
-          metadata.shareId ?? null,
-          metadata.expiresAt.getTime(),
-          Date.now(),
-        ],
-      );
-      let chunkNo = 0;
+    let chunkNo = 0;
+    const lease = () => Date.now() + 5 * 60_000;
+    await this.driver.run(
+      "INSERT INTO uploads (id,name,size,content_type,owner_id,share_id,expires_at,created_at,complete,lease_until) VALUES (?,?,?,?,?,?,?,?,FALSE,?)",
+      [
+        id,
+        name,
+        0,
+        metadata.contentType,
+        metadata.ownerId,
+        metadata.shareId ?? null,
+        metadata.expiresAt.getTime(),
+        Date.now(),
+        lease(),
+      ],
+    );
+    let iterator: AsyncIterator<Uint8Array> | undefined;
+    try {
+      iterator = stream[Symbol.asyncIterator]();
       let filled = 0;
       const pending = Buffer.allocUnsafe(FILE_CHUNK_BYTES);
       const insertChunk = async (chunk: Uint8Array) => {
         const length = chunk.byteLength;
-        const changed =
-          maxTotalBytes === undefined
-            ? await tx.run("UPDATE upload_capacity SET used_bytes=used_bytes+? WHERE id=1", [
-                length,
-              ])
-            : await tx.run(
-                "UPDATE upload_capacity SET used_bytes=used_bytes+? WHERE id=1 AND used_bytes+?<=?",
-                [length, length, maxTotalBytes],
-              );
-        if (changed !== 1) throw new StorageCapacityError();
-        await tx.run("INSERT INTO upload_chunks (upload_id,chunk_no,data) VALUES (?,?,?)", [
-          id,
-          chunkNo++,
-          blob(chunk),
-        ]);
+        const number = chunkNo++;
+        // The client is awaited outside this replayable, short transaction.
+        await this.driver.transaction(async (tx) => {
+          if (supportsForUpdate(this.driver.dialect))
+            await tx.all("SELECT used_bytes FROM upload_capacity WHERE id=1 FOR UPDATE");
+          const changed =
+            maxTotalBytes === undefined
+              ? await tx.run("UPDATE upload_capacity SET used_bytes=used_bytes+? WHERE id=1", [
+                  length,
+                ])
+              : await tx.run(
+                  "UPDATE upload_capacity SET used_bytes=used_bytes+? WHERE id=1 AND used_bytes+?<=?",
+                  [length, length, maxTotalBytes],
+                );
+          if (changed !== 1) throw new StorageCapacityError();
+          if (
+            (await tx.run(
+              "UPDATE uploads SET size=size+?,lease_until=? WHERE id=? AND complete=FALSE AND lease_until>?",
+              [length, lease(), id, Date.now()],
+            )) !== 1
+          )
+            throw new Error("Upload is no longer active");
+          await tx.run("INSERT INTO upload_chunks (upload_id,chunk_no,data) VALUES (?,?,?)", [
+            id,
+            number,
+            blob(chunk),
+          ]);
+        });
       };
-      for await (const part of stream) {
-        size += part.byteLength;
+      for (;;) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const part = await Promise.race([
+          iterator.next(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Upload idle timeout")), 60_000);
+            timer.unref();
+          }),
+        ]).finally(() => clearTimeout(timer));
+        if (part.done) break;
+        size += part.value.byteLength;
         if (maxBytes !== undefined && size > maxBytes) throw new FileTooLargeError(maxBytes);
         let offset = 0;
-        while (offset < part.byteLength) {
-          const copied = Math.min(FILE_CHUNK_BYTES - filled, part.byteLength - offset);
-          pending.set(part.subarray(offset, offset + copied), filled);
+        while (offset < part.value.byteLength) {
+          const copied = Math.min(FILE_CHUNK_BYTES - filled, part.value.byteLength - offset);
+          pending.set(part.value.subarray(offset, offset + copied), filled);
           filled += copied;
           offset += copied;
           if (filled === FILE_CHUNK_BYTES) {
@@ -700,8 +790,22 @@ class SqlFileStore implements FileStore {
         }
       }
       if (filled) await insertChunk(pending.subarray(0, filled));
-      await tx.run("UPDATE uploads SET size=? WHERE id=?", [size, id]);
-    });
+      if (
+        (await this.driver.run(
+          "UPDATE uploads SET complete=TRUE WHERE id=? AND complete=FALSE AND lease_until>?",
+          [id, Date.now()],
+        )) !== 1
+      )
+        throw new Error("Upload is no longer active");
+    } catch (error) {
+      // return() may itself wait for a stalled generator; never retain a DB lock while cancelling.
+      void Promise.resolve()
+        .then(() => iterator?.return?.())
+        .catch(() => undefined);
+      await this.delete(id);
+      throw error;
+    }
+
     return {
       id,
       name,
@@ -718,17 +822,7 @@ class SqlFileStore implements FileStore {
     if (!meta) return null;
     const data = new Uint8Array(meta.size);
     let offset = 0;
-    const rows = await this.driver.all<{ chunk_no: number; data: Uint8Array }>(
-      "SELECT chunk_no,data FROM upload_chunks WHERE upload_id=? ORDER BY chunk_no ASC",
-      [id],
-    );
-    for (let expected = 0; expected < rows.length; expected++) {
-      const row = rows[expected];
-      if (!row || Number(row.chunk_no) !== expected)
-        throw new Error("Stored upload chunks are incomplete");
-      const chunk = bytes(row.data);
-      if (offset + chunk.byteLength > data.byteLength)
-        throw new Error("Stored upload chunks exceed metadata size");
+    for await (const chunk of this.chunks(id, meta.size)) {
       data.set(chunk, offset);
       offset += chunk.byteLength;
     }
@@ -747,7 +841,7 @@ class SqlFileStore implements FileStore {
         share_id: string | null;
         expires_at: number | string;
       }
-    >("SELECT * FROM uploads WHERE id=?", [id]);
+    >("SELECT * FROM uploads WHERE id=? AND complete=TRUE", [id]);
     const row = rows[0];
     return row
       ? ({
@@ -765,42 +859,31 @@ class SqlFileStore implements FileStore {
   async openDownload(id: string) {
     const meta = await this.meta(id);
     if (!meta) return null;
-    const driver = this.driver;
-    const stream = Readable.from(
-      (async function* () {
-        let expected = 0;
-        let total = 0;
-        for (;;) {
-          const rows = await driver.all<{ data: Uint8Array }>(
-            "SELECT data FROM upload_chunks WHERE upload_id=? AND chunk_no=?",
-            [id, expected++],
-          );
-          if (!rows.length) break;
-          const chunk = bytes(rows[0]?.data);
-          total += chunk.byteLength;
-          if (total > meta.size) throw new Error("Stored upload chunks exceed metadata size");
-          yield Buffer.from(chunk);
-        }
-        if (total !== meta.size) throw new Error("Stored upload chunks do not match metadata size");
-      })(),
-    );
-    return { meta, stream };
+    return { meta, stream: Readable.from(this.chunks(id, meta.size)) };
+  }
+
+  private async *chunks(id: string, size: number) {
+    let expected = 0;
+    let total = 0;
+    for (;;) {
+      const rows = await this.driver.all<{ chunk_no: number | string; data: Uint8Array }>(
+        "SELECT chunk_no,data FROM upload_chunks WHERE upload_id=? AND chunk_no>=? ORDER BY chunk_no LIMIT 8",
+        [id, expected],
+      );
+      if (!rows.length) break;
+      for (const row of rows) {
+        if (Number(row.chunk_no) !== expected++)
+          throw new Error("Stored upload chunks are incomplete");
+        total += row.data.byteLength;
+        if (total > size) throw new Error("Stored upload chunks exceed metadata size");
+        yield row.data;
+      }
+    }
+    if (total !== size) throw new Error("Stored upload chunks do not match metadata size");
   }
 
   async delete(id: string) {
-    return this.driver.transaction(async (tx) => {
-      if (supportsForUpdate(this.driver.dialect))
-        await tx.all("SELECT used_bytes FROM upload_capacity WHERE id=1 FOR UPDATE");
-      const rows = await tx.all<{ size: number | string }>("SELECT size FROM uploads WHERE id=?", [
-        id,
-      ]);
-      if (!rows.length) return false;
-      await tx.run("DELETE FROM uploads WHERE id=?", [id]);
-      await tx.run("UPDATE upload_capacity SET used_bytes=used_bytes-? WHERE id=1", [
-        Number(rows[0]?.size ?? 0),
-      ]);
-      return true;
-    });
+    return (await this.deleteMatching("id=?", [id])) > 0;
   }
 
   async deleteForShare(shareId: string) {
@@ -808,7 +891,10 @@ class SqlFileStore implements FileStore {
   }
 
   async deleteExpired(now: Date) {
-    return this.deleteMatching("expires_at<?", [now.getTime()]);
+    return this.deleteMatching(
+      "(complete=TRUE AND expires_at<?) OR (complete=FALSE AND lease_until<?)",
+      [now.getTime(), now.getTime()],
+    );
   }
 
   async shareIds() {
@@ -820,13 +906,7 @@ class SqlFileStore implements FileStore {
   }
 
   private async deleteMatching(where: string, values: unknown[]) {
-    const rows = await this.driver.all<{ id: string }>(
-      `SELECT id FROM uploads WHERE ${where}`,
-      values,
-    );
-    let removed = 0;
-    for (const row of rows) if (await this.delete(row.id)) removed++;
-    return removed;
+    return this.driver.transaction((tx) => deleteUploads(tx, this.driver.dialect, where, values));
   }
 }
 
@@ -948,6 +1028,17 @@ class SqlLabelStore implements LabelStore {
     return (
       await this.driver.all<{ share_id: string }>("SELECT DISTINCT share_id FROM share_labels")
     ).map((row) => row.share_id);
+  }
+
+  async deleteInaccessible() {
+    return this.driver.run(
+      `DELETE FROM share_labels WHERE NOT EXISTS (
+      SELECT 1 FROM shares s WHERE s.id=share_labels.share_id
+      AND (s.expires_at IS NULL OR s.expires_at>?)
+      AND (s.owner_id=share_labels.client_id OR EXISTS (
+        SELECT 1 FROM share_saved_by b WHERE b.share_id=s.id AND b.client_id=share_labels.client_id)))`,
+      [Date.now()],
+    );
   }
 
   async clientIds() {
