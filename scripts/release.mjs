@@ -58,7 +58,7 @@ if (command === "check") {
         "",
         "---",
         "",
-        `Online: run \`./update.sh\` in the codesh folder. Offline: download \`codesh-${v}-linux-amd64.tar.gz\` (or \`-linux-arm64\`) and its \`.sha256\`, then run \`./upgrade.sh codesh-${v}-linux-amd64.tar.gz\`.`,
+        `Online: to update gachipad, run \`./update.sh\` in the existing codesh install folder. Offline: for gachipad, download \`codesh-${v}-linux-amd64.tar.gz\` (or \`-linux-arm64\`) and its \`.sha256\`, then run \`./upgrade.sh codesh-${v}-linux-amd64.tar.gz\`.`,
         `Verify a download or an image: \`gh attestation verify <file> --repo ${repo}\`, \`gh attestation verify oci://ghcr.io/${repo.split("/")[0].toLowerCase()}/codesh-api:${v} --repo ${repo}\`.`,
         "",
       ].join("\n"),

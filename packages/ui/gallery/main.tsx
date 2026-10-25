@@ -50,7 +50,7 @@ function App() {
       <header className="sticky top-0 z-(--z-sticky) border-b border-line bg-panel/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2">
           <h1 className="text-title-sm font-semibold">
-            codesh <span className="font-normal text-fg-3">UI gallery</span>
+            gachipad <span className="font-normal text-fg-3">UI gallery</span>
           </h1>
           <Tabs value={view} onValueChange={(v) => setView(v as View)}>
             <TabsList variant="segmented" aria-label="Gallery view">

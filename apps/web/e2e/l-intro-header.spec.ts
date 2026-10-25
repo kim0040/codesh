@@ -25,6 +25,7 @@ test("the intro header hides on scroll down, returns on scroll up and when focus
   const { page } = user;
   try {
     await openIntro(page);
+    await expect(page.locator(".ix-brand")).toHaveText("gachipad");
     await expectShown(page);
 
     // Near the top it stays put, and it has no backdrop yet.

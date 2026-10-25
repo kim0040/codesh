@@ -91,7 +91,7 @@ for (const locale of ["en", "ko"] as const) {
       try {
         await openGuide(page, slug, locale);
         await expect(page.locator("main h1")).toHaveText(title[locale]);
-        await expect(page).toHaveTitle(new RegExp(`^${title[locale]} .{1,3} codesh$`));
+        await expect(page).toHaveTitle(new RegExp(`^${title[locale]} .{1,3} gachipad$`));
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
         await expect(page.locator("main .ix-lead")).not.toBeEmpty();
 

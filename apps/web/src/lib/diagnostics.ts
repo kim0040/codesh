@@ -353,7 +353,7 @@ export function clientDiagnosticExport(): string {
   return JSON.stringify(
     {
       format: 1,
-      header: `codesh client diagnostics v${version()}: local operational events, a short breadcrumb timeline, counts, redacted error categories/source frames and environment. Document text, file names, user values, URLs, credentials and share IDs are omitted; random session references are hashed anew per export. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${version()}.tar.gz. Nothing is sent automatically.`,
+      header: `gachipad client diagnostics v${version()}: local operational events, a short breadcrumb timeline, counts, redacted error categories/source frames and environment. Document text, file names, user values, URLs, credentials and share IDs are omitted; random session references are hashed anew per export. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${version()}.tar.gz. Nothing is sent automatically.`,
       exportedAt: new Date().toISOString(),
       bootId,
       caps: DIAGNOSTIC_CAPS,
@@ -369,7 +369,7 @@ export function clientDiagnosticExport(): string {
 export function diagnosticsFilename(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `codesh-diagnostics-${version()}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+  return `gachipad-diagnostics-${version()}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
 }
 export function downloadDiagnostics(text: string, name = diagnosticsFilename()): void {
   const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));

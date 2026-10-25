@@ -7,7 +7,7 @@
  */
 export const en = {
   // ── App ──
-  "app.name": "codesh",
+  "app.name": "gachipad",
   "app.tagline": "Share code in real time on your network",
   "app.update.title": "A new version is available",
   "app.update.body": "Reload to use it. Your edits stay as they are.",
@@ -286,7 +286,7 @@ export const en = {
   "share.dialog.send.noteMax": "Up to {max} characters",
   "share.dialog.send.action": "Send",
   "share.dialog.send.empty": "No one else is online on your network",
-  "share.dialog.send.emptyHint": "People appear here once they open codesh.",
+  "share.dialog.send.emptyHint": "People appear here once they open gachipad.",
   "share.dialog.broadcast.title": "Show to the whole room",
   "share.dialog.broadcast.room": "Everyone in {room} gets this share right away.",
   "share.dialog.broadcast.net": "Everyone on this network gets this share right away.",
@@ -389,11 +389,11 @@ export const en = {
   "settings.codeLanguage.auto": "Detect automatically",
   "settings.uiLanguage.label": "Display language",
   "settings.notifications.label": "Show invites as system notifications",
-  "settings.notifications.hint": "Works while codesh is open in a tab or window.",
+  "settings.notifications.hint": "Works while gachipad is open in a tab or window.",
   "settings.notifications.blocked":
     "Notifications are blocked for this site. Allow them in the browser’s site settings and in the system’s notification settings (turn off Focus or Do Not Disturb).",
   "settings.notifications.unsupported":
-    "This browser cannot show system notifications. On iPhone and iPad, add codesh to the Home Screen first.",
+    "This browser cannot show system notifications. On iPhone and iPad, add gachipad to the Home Screen first.",
   "settings.licenses.link": "Open-source licenses",
   "settings.install.action": "Install app",
   "settings.resetAction": "Reset to defaults",
@@ -769,7 +769,7 @@ export const en = {
   "admin.setting.maxUploadMB.label": "Maximum upload size",
   "admin.setting.maxUploadMB.hint": "Applies to each file, folder or .zip upload.",
   "admin.setting.guestAllowed.label": "Allow guests",
-  "admin.setting.guestAllowed.hint": "People can use codesh without signing in.",
+  "admin.setting.guestAllowed.hint": "People can use gachipad without signing in.",
   "admin.setting.rooms.label": "Rooms",
   "admin.setting.rooms.hint":
     "Group networks into rooms such as classrooms. Nearby shares and broadcasts stay inside a room.",
@@ -894,7 +894,7 @@ export const en = {
   "admin.update.upToDate": "You're on the latest version",
   "admin.update.unreachable": "Cannot check: no internet connection",
   "admin.update.unreachableHint":
-    "codesh keeps working as usual. The server will try again in about 12 hours.",
+    "gachipad keeps working as usual. The server will try again in about 12 hours.",
   "admin.update.disabled": "The update check is off",
   "admin.update.disabledHint": "Set UPDATE_CHECK=on in .env and restart to see new releases here.",
   "admin.update.pending": "Not checked yet",

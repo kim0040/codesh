@@ -11,6 +11,22 @@ it("exports the package name", () => {
   expect(PACKAGE_NAME).toBe("@gachipad/cli");
 });
 
+it("names gachipad in CLI help and keeps the executable name", async () => {
+  const stdout: string[] = [];
+  const code = await run(["--help"], {
+    stdout: (text) => stdout.push(text),
+    stderr: () => {},
+    env: {},
+    cwd: "/",
+    readStdin: async () => Buffer.alloc(0),
+    stdinIsTTY: true,
+    openBrowser: async () => {},
+  });
+  expect(code).toBe(0);
+  expect(stdout.join("")).toContain("gachipad CLI (command: codesh)");
+  expect(stdout.join("")).toContain("codesh push");
+});
+
 describe("server url", () => {
   it("prefers the flag, then CODESH_URL, then the config file", () => {
     expect(resolveUrl("http://a/", { CODESH_URL: "http://b" }, { url: "http://c" })).toBe(

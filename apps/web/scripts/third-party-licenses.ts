@@ -191,9 +191,9 @@ const THIN = "-".repeat(80);
 /** The text of dist/THIRD-PARTY-LICENSES.txt. */
 export function renderLicenses(packages: ClosurePackage[], linguist: string): string {
   const out: string[] = [
-    "codesh third-party licences",
+    "gachipad third-party licences",
     "",
-    "codesh itself is MIT-licensed (Copyright (c) 2026 Hyunmin Kim). This file reproduces the licence",
+    "gachipad itself is MIT-licensed (Copyright (c) 2026 Hyunmin Kim). This file reproduces the licence",
     "texts and notices of the open-source software in this web app: the npm packages of its",
     "production dependency tree, the GitHub Linguist language colours, and the notices Prettier ships",
     "for the components it bundles. The two fonts have their own texts in /licenses/.",

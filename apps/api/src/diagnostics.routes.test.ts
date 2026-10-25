@@ -1,4 +1,8 @@
-import { type DiagnosticEvent, defaultSettings, type ServerDiagnosticBundle } from "@gachipad/shared";
+import {
+  type DiagnosticEvent,
+  defaultSettings,
+  type ServerDiagnosticBundle,
+} from "@gachipad/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHarness, createShare, type Harness, integration } from "./testing/harness.js";
 
@@ -137,9 +141,12 @@ describe.skipIf(!integration)("admin operational API", () => {
     const events = response.json<DiagnosticEvent[]>();
     expect(events.some((e) => e.kind === "admin_login_failed")).toBe(true);
     expect((await client.get("/api/admin/diagnostics?since=invalid", bearer)).statusCode).toBe(400);
-    const bundle = (
-      await client.get("/api/admin/diagnostics/export", bearer)
-    ).json<ServerDiagnosticBundle>();
+    const exported = await client.get("/api/admin/diagnostics/export", bearer);
+    expect(exported.headers["content-disposition"]).toMatch(
+      /^attachment; filename="gachipad-server-diagnostics-[\w.-]+\.json"$/,
+    );
+    const bundle = exported.json<ServerDiagnosticBundle>();
+    expect(bundle.header).toContain("gachipad server diagnostics");
     expect(bundle).toMatchObject({
       format: 1,
       config: { ADMIN_TOKEN_SET: true },

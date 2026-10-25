@@ -1617,7 +1617,7 @@ button.ix-ed-tab:hover {
 }
 .ix-name {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   align-items: end;
   gap: clamp(3px, 0.6vw, 8px);
   height: clamp(150px, 27vw, 380px);
@@ -1629,7 +1629,7 @@ button.ix-ed-tab:hover {
   border-radius: clamp(10px, 1.6vw, 24px);
   background: var(--c);
   color: var(--l);
-  font-size: clamp(3rem, 14.5vw, 13rem);
+  font-size: clamp(1.4rem, 9.5vw, 9rem);
   font-weight: 800;
   letter-spacing: -0.05em;
   line-height: 0.82;
@@ -1652,6 +1652,12 @@ button.ix-ed-tab:hover {
 }
 .ix-name-cell:nth-child(6) {
   height: 100%;
+}
+.ix-name-cell:nth-child(7) {
+  height: 78%;
+}
+.ix-name-cell:nth-child(8) {
+  height: 92%;
 }
 .ix-footer-grid {
   display: grid;

@@ -42,7 +42,7 @@ export const guideKo: Record<GuideKey, string> = {
     "같은 네트워크에서 열려 있는 공유가 첫 화면에 보여요. 하나를 골라 들어가면 돼요. PIN이나 입장 승인을 켠 공유는 목록에 나오지 않고, 소유자는 어떤 공유든 숨길 수 있어요.",
   "guide.how.tell.send.title": "사람에게 보내기",
   "guide.how.tell.send.body":
-    "공유 창에서 이름을 검색해 보내요. 상대 화면에 초대가 뜨고, 메모를 쓰면 최대 200자까지 함께 가요. codesh를 연 사람만 목록에 나와요.",
+    "공유 창에서 이름을 검색해 보내요. 상대 화면에 초대가 뜨고, 메모를 쓰면 최대 200자까지 함께 가요. gachipad를 연 사람만 목록에 나와요.",
   "guide.how.tell.room.title": "방 전체에 띄우기",
   "guide.how.tell.room.body":
     "버튼 한 번으로 같은 방 사람들에게 공유를 띄워요. 방을 따로 설정하지 않았다면 같은 네트워크 전체예요. 먼저 확인을 거치고, 각자 화면에 알림이 떠서 버튼으로 열어요.",
@@ -94,7 +94,7 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.how.control.mock": "공유 창의 접근 설정",
   "guide.how.control.view.title": "보기 전용 링크와 편집 링크",
   "guide.how.control.view.body":
-    "기본값을 보기 전용으로 두면 들어온 사람은 읽기만 해요. 고쳐야 하는 사람에게는 따로 복사한 편집 링크를 주세요. 편집 링크는 #key= 뒤에 키가 붙는 모양이에요. 브라우저는 그 부분을 페이지 요청에 실어 보내지 않아서 서버 로그와 주소에 남지 않고, codesh는 서버가 확인할 수 있도록 참여 요청 본문에 한 번 실어 보내요. 링크를 열면 주소창에서 키가 지워지고, 서버가 그 브라우저의 편집 권한을 기억해요.",
+    "기본값을 보기 전용으로 두면 들어온 사람은 읽기만 해요. 고쳐야 하는 사람에게는 따로 복사한 편집 링크를 주세요. 편집 링크는 #key= 뒤에 키가 붙는 모양이에요. 브라우저는 그 부분을 페이지 요청에 실어 보내지 않아서 서버 로그와 주소에 남지 않고, gachipad는 서버가 확인할 수 있도록 참여 요청 본문에 한 번 실어 보내요. 링크를 열면 주소창에서 키가 지워지고, 서버가 그 브라우저의 편집 권한을 기억해요.",
   "guide.how.control.pin.title": "PIN 잠금",
   "guide.how.control.pin.body":
     "{min}~{max}자의 PIN으로 공유를 잠그고, PIN은 링크와 따로 알려 주세요. {attempts}번 틀리면 그 사람은 {minutes}분 동안 기다려야 해요. 새 PIN을 정하면 모두 다시 입력해야 해요.",
@@ -112,14 +112,14 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.how.offline.body1":
     "연결이 끊기면 오프라인이라는 알림이 나와요. 계속 입력하세요. 변경 내용은 보관되고, 연결이 돌아오면 다른 사람의 변경과 합쳐져요.",
   "guide.how.offline.body2":
-    "탭을 닫아도 변경이 남는지는 오프라인 사본에 달려 있어요. 편집기를 처음 열 때 codesh가 그 기기에 오프라인 사본을 저장해도 되는지 물어요. 저장하지 않기로 하면 서버에 닿지 못한 변경은 열려 있는 탭에만 있고, 알림에도 그렇게 나와요.",
+    "탭을 닫아도 변경이 남는지는 오프라인 사본에 달려 있어요. 편집기를 처음 열 때 gachipad가 그 기기에 오프라인 사본을 저장해도 되는지 물어요. 저장하지 않기로 하면 서버에 닿지 못한 변경은 열려 있는 탭에만 있고, 알림에도 그렇게 나와요.",
   "guide.how.offline.body3":
     "자리를 비운 사이 소유자가 내보냈거나 공유가 PIN이나 승인을 다시 요구하면 다시 입장해야 하고, 보내지 못한 변경은 남지 않아요.",
 
   // ── 기능 ──
   "guide.features.title": "기능",
   "guide.features.lead":
-    "공유 안에서 codesh가 해 주는 일이에요. 코드를 나누는 데 필요한 기능만 담았어요.",
+    "공유 안에서 gachipad가 해 주는 일이에요. 코드를 나누는 데 필요한 기능만 담았어요.",
   "guide.features.toc.languages": "문법 강조",
   "guide.features.toc.merge": "충돌 없는 편집",
   "guide.features.toc.files": "파일과 폴더",
@@ -146,7 +146,7 @@ export const guideKo: Record<GuideKey, string> = {
 
   "guide.features.merge.title": "충돌 없는 편집",
   "guide.features.merge.body1":
-    "codesh는 충돌 없는 복제 데이터를 다루는 라이브러리인 Yjs를 써요. 어느 기기에서든 동시에 한 편집은 모두에게 같은 결과로 합쳐져요. 누가 누구를 덮어쓰지 않고, 충돌을 직접 풀 필요도 없어요.",
+    "gachipad는 충돌 없는 복제 데이터를 다루는 라이브러리인 Yjs를 써요. 어느 기기에서든 동시에 한 편집은 모두에게 같은 결과로 합쳐져요. 누가 누구를 덮어쓰지 않고, 충돌을 직접 풀 필요도 없어요.",
   "guide.features.merge.body2":
     "실행 취소는 내가 한 변경만 되돌리고, 다른 사람이 입력한 내용은 건드리지 않아요.",
 
@@ -185,7 +185,7 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.features.shortcuts.group.editing": "편집",
   "guide.features.shortcuts.group.navigation": "이동",
   "guide.features.shortcuts.note1":
-    "입력 칸 밖에서 ?를 누르면 codesh 안에서 이 목록을 볼 수 있어요.",
+    "입력 칸 밖에서 ?를 누르면 gachipad 안에서 이 목록을 볼 수 있어요.",
   "guide.features.shortcuts.note2":
     "Mac에서는 Command와 Option 조합을 브라우저와 macOS가 쓰기 때문에 앱 단축키에 Control과 Command를 써요. Windows와 Linux에서는 Ctrl과 Alt를 써요.",
   "guide.features.shortcuts.note3":
@@ -212,7 +212,7 @@ export const guideKo: Record<GuideKey, string> = {
     "입력할 때 커서가 미끄러지듯 움직여요. 기본값은 켜짐이고, 시스템에서 동작 줄이기를 켜 두면 움직이지 않아요.",
   "guide.features.settings.notify.title": "초대 알림",
   "guide.features.settings.notify.body":
-    "codesh가 백그라운드 탭에 있을 때 초대를 시스템 알림으로 보여줘요. 기본값은 꺼짐이고, 브라우저의 허용이 필요해요.",
+    "gachipad가 백그라운드 탭에 있을 때 초대를 시스템 알림으로 보여줘요. 기본값은 꺼짐이고, 브라우저의 허용이 필요해요.",
   "guide.features.settings.language.title": "화면 언어",
   "guide.features.settings.language.body":
     "한국어와 English 중에서 골라요. 어느 페이지에서든 바꿀 수 있고, 선택은 이 브라우저에 남아요.",
@@ -260,7 +260,7 @@ export const guideKo: Record<GuideKey, string> = {
   // ── 네트워크 ──
   "guide.network.title": "같은 네트워크라서 더 빠르게",
   "guide.network.lead":
-    "codesh는 내 네트워크 안의 서버에서 돌아가요. 같은 네트워크의 모든 기기가 서버에 바로 닿고, 입장 방법도 모두 그 점을 이용해요.",
+    "gachipad는 내 네트워크 안의 서버에서 돌아가요. 같은 네트워크의 모든 기기가 서버에 바로 닿고, 입장 방법도 모두 그 점을 이용해요.",
   "guide.network.toc.why": "더 빠른 이유",
   "guide.network.toc.ways": "입장 방법 다섯 가지",
   "guide.network.toc.groups": "근처의 기준",
@@ -270,7 +270,7 @@ export const guideKo: Record<GuideKey, string> = {
 
   "guide.network.why.title": "더 빠른 이유",
   "guide.network.why.body1":
-    "보통은 링크를 찾아 복사하고 메시지에 붙여넣어야 들어올 수 있어요. codesh에서는 옆에 있는 사람이 이미 서버와 같은 네트워크에 있으니, 열려 있는 공유를 바로 보여 주고 상대 화면으로 보낼 수 있어요.",
+    "보통은 링크를 찾아 복사하고 메시지에 붙여넣어야 들어올 수 있어요. gachipad에서는 옆에 있는 사람이 이미 서버와 같은 네트워크에 있으니, 열려 있는 공유를 바로 보여 주고 상대 화면으로 보낼 수 있어요.",
   "guide.network.why.body2": "내 코드는 서버와 같은 공유에 있는 사람들하고만 오가요.",
 
   "guide.network.ways.title": "입장 방법 다섯 가지",
@@ -286,7 +286,7 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.network.ways.nearby.who":
     "같은 네트워크나 같은 방에 있는 사람. 공유에 PIN이나 승인이 있거나 소유자가 숨겼다면 제외예요",
   "guide.network.ways.send.how": "이름을 고르면 그 화면에 초대가 떠요",
-  "guide.network.ways.send.who": "codesh를 연 사람 한 명",
+  "guide.network.ways.send.who": "gachipad를 연 사람 한 명",
   "guide.network.ways.room.how": "버튼을 누르고 확인해요",
   "guide.network.ways.room.who": "같은 방의 모든 사람. 방이 없으면 네트워크 전체예요",
 
@@ -323,7 +323,7 @@ export const guideKo: Record<GuideKey, string> = {
   // ── 개인정보와 안전 ──
   "guide.security.title": "개인정보와 안전",
   "guide.security.lead":
-    "codesh가 무엇을 얼마나 보관하는지, 누가 볼 수 있는지, 무엇을 지울 수 있는지 알려드려요.",
+    "gachipad가 무엇을 얼마나 보관하는지, 누가 볼 수 있는지, 무엇을 지울 수 있는지 알려드려요.",
   "guide.security.toc.stored": "저장되는 것",
   "guide.security.toc.deleted": "지운 내용",
   "guide.security.toc.history": "이력",
@@ -364,7 +364,7 @@ export const guideKo: Record<GuideKey, string> = {
 
   "guide.security.device.title": "내 기기의 사본",
   "guide.security.device.body1":
-    "연결이 끊겨도 변경이 남도록 codesh는 이 브라우저에 공유의 오프라인 사본을 저장할 수 있어요. 편집기를 처음 열 때 물어보고, 허락하기 전에는 아무것도 저장하지 않아요.",
+    "연결이 끊겨도 변경이 남도록 gachipad는 이 브라우저에 공유의 오프라인 사본을 저장할 수 있어요. 편집기를 처음 열 때 물어보고, 허락하기 전에는 아무것도 저장하지 않아요.",
   "guide.security.device.body2":
     "여럿이 쓰는 컴퓨터에서는 이 기기에는 저장 안 함을 고르거나 따로 만든 브라우저 프로필을 쓰세요.",
   "guide.security.device.remove": "사본을 지우려면",
@@ -384,11 +384,11 @@ export const guideKo: Record<GuideKey, string> = {
 
   "guide.security.external.title": "외부 요청이 없어요",
   "guide.security.external.body1":
-    "페이지, 스크립트, 글꼴, 아이콘, 이미지가 모두 내 codesh 서버에서 와요. 분석 도구, 광고, 추적기, 콘텐츠 전송 네트워크를 쓰지 않아요. 기본 설정에서 브라우저는 codesh 서버 말고는 어디에도 연결하지 않아요.",
+    "페이지, 스크립트, 글꼴, 아이콘, 이미지가 모두 내 gachipad 서버에서 와요. 분석 도구, 광고, 추적기, 콘텐츠 전송 네트워크를 쓰지 않아요. 기본 설정에서 브라우저는 gachipad 서버 말고는 어디에도 연결하지 않아요.",
   "guide.security.external.body2":
     "관리자가 어떻게 설정하느냐에 따라 예외가 두 가지 있어요. 로그인에 인증 제공자(OIDC)를 쓰면 브라우저가 로그인하러 그 제공자로 이동하고, LDAP을 쓰면 서버가 디렉터리 서버에 로그인을 확인해요. 나머지 하나는 서버에서 일어나요. 관리자가 끄지 않았다면 서버가 약 12시간마다 GitHub에 새 버전이 있는지 묻는 요청을 보내요. 공유 내용은 담기지 않고, 인터넷이 없으면 조용히 실패해요.",
   "guide.security.external.body3":
-    "편집 링크의 키는 # 뒤에 있어서 브라우저가 페이지 요청에 실어 보내지 않아요. 그래서 서버 로그와 주소에 남지 않고, codesh는 확인을 위해 참여 요청 본문에 한 번 실어 보내요. PIN은 해시값으로만 저장해요.",
+    "편집 링크의 키는 # 뒤에 있어서 브라우저가 페이지 요청에 실어 보내지 않아요. 그래서 서버 로그와 주소에 남지 않고, gachipad는 확인을 위해 참여 요청 본문에 한 번 실어 보내요. PIN은 해시값으로만 저장해요.",
 
   "guide.security.controls.title": "관리자가 정하는 것",
   "guide.security.controls.lead": "아래는 이 서버의 관리자가 정해요.",
@@ -405,7 +405,7 @@ export const guideKo: Record<GuideKey, string> = {
 
   "guide.security.host.title": "직접 운영하기",
   "guide.security.host.body1":
-    "codesh는 MIT 라이선스의 오픈소스예요. Docker Compose로 내 서버에서 돌려요. 웹 서버, API, 편집 서비스, MongoDB, Valkey로 이루어져 있고, 선택 서비스로 codesh.local 이름을 추가할 수 있어요.",
+    "gachipad는 MIT 라이선스의 오픈소스예요. Docker Compose로 내 서버에서 돌려요. 웹 서버, API, 편집 서비스, MongoDB, Valkey로 이루어져 있고, 선택 서비스로 codesh.local 이름을 추가할 수 있어요.",
   "guide.security.host.body2":
     "외부 서비스에 기대는 곳이 없고, 릴리스마다 인터넷이 없는 네트워크용 오프라인 번들이 함께 나와요.",
 
@@ -419,9 +419,9 @@ export const guideKo: Record<GuideKey, string> = {
   "guide.faq.account.q": "계정이 있어야 하나요?",
   "guide.faq.account.a":
     "아니요. 이름을 정하고 바로 시작하면 돼요. 관리자가 로그인을 켰다면 로그인할 수 있고, 게스트를 막지 않았다면 게스트도 계속 쓸 수 있어요.",
-  "guide.faq.run.q": "codesh에서 코드를 실행할 수 있나요?",
+  "guide.faq.run.q": "gachipad에서 코드를 실행할 수 있나요?",
   "guide.faq.run.a":
-    "아니요. codesh는 텍스트를 공유하고 같이 고치는 도구이고, 코드를 실행하지는 않아요.",
+    "아니요. gachipad는 텍스트를 공유하고 같이 고치는 도구이고, 코드를 실행하지는 않아요.",
   "guide.faq.cantEdit.q": "왜 고칠 수 없나요?",
   "guide.faq.cantEdit.a":
     "소유자가 공유를 보기 전용으로 정했거나 잠시 편집을 잠갔을 수 있어요. 소유자에게 편집 링크를 달라고 하거나 편집 잠금을 풀어 달라고 하세요.",
@@ -451,7 +451,7 @@ export const guideKo: Record<GuideKey, string> = {
     "아니요. 모든 것이 네트워크 안의 서버에서 와요. 서버는 새 버전을 확인할 수 있고, 관리자가 이 기능을 끌 수 있어요.",
   "guide.faq.tracking.q": "추적하나요?",
   "guide.faq.tracking.a":
-    "분석 도구, 광고, 추적기가 없고 기본 설정에서 브라우저는 codesh 서버에만 연결해요(관리자가 설정한 로그인 제공자는 예외예요). 관리자가 감사 로그를 켰다면 누가 공유를 만들고, 열고, 내려받고, 지웠는지는 기록돼요.",
+    "분석 도구, 광고, 추적기가 없고 기본 설정에서 브라우저는 gachipad 서버에만 연결해요(관리자가 설정한 로그인 제공자는 예외예요). 관리자가 감사 로그를 켰다면 누가 공유를 만들고, 열고, 내려받고, 지웠는지는 기록돼요.",
   "guide.faq.shared.q": "여럿이 쓰는 컴퓨터에 흔적을 남기지 않으려면요?",
   "guide.faq.shared.a":
     "오프라인 사본을 물을 때 이 기기에는 저장 안 함을 고르거나, 다 쓴 뒤 편집기 설정의 이 기기에서 지우기를 누르세요.",

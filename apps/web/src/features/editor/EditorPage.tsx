@@ -201,7 +201,7 @@ function Connected({ session, share, refetchShare, me, onLeft }: ConnectedProps)
   // The tab title follows the share title.
   useEffect(() => {
     const previous = document.title;
-    document.title = meta.title ? `${meta.title} · codesh` : "codesh";
+    document.title = meta.title ? `${meta.title} · gachipad` : "gachipad";
     return () => {
       document.title = previous;
     };

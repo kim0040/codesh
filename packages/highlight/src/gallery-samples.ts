@@ -40,7 +40,7 @@ ORDER BY orders DESC;`,
 </article>`,
   markdown: `# Hello, **Mina**
 
-Use [codesh](https://example.com) to share code.
+Use [gachipad](https://example.com) to share code.
 
 - Edit together
 - Keep history private`,

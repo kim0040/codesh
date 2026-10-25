@@ -82,11 +82,11 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
       const settings = ctx.settingsSnapshot();
       reply.header(
         "Content-Disposition",
-        `attachment; filename="codesh-server-diagnostics-${ctx.version.replace(/[^\w.-]/g, "_")}.json"`,
+        `attachment; filename="gachipad-server-diagnostics-${ctx.version.replace(/[^\w.-]/g, "_")}.json"`,
       );
       return {
         format: 1,
-        header: `codesh server diagnostics v${ctx.version}: operational categories, short per-process breadcrumb timelines, redacted source frames and counts. No document content, credentials, URLs or client addresses. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${ctx.version}.tar.gz.`,
+        header: `gachipad server diagnostics v${ctx.version}: operational categories, short per-process breadcrumb timelines, redacted source frames and counts. No document content, credentials, URLs or client addresses. Source maps for this version are on the GitHub release page as codesh-web-sourcemaps-${ctx.version}.tar.gz.`,
         exportedAt: new Date().toISOString(),
         version: ctx.version,
         uptimeSeconds: Math.floor((Date.now() - ctx.startedAt) / 1000),

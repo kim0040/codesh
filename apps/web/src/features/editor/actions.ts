@@ -45,7 +45,7 @@ export function downloadZip(doc: Y.Doc, files: readonly FileEntry[], title: stri
   });
   const zipped = zipSync(entries, { level: 6 });
   const blob = new Blob([zipped as BlobPart], { type: "application/zip" });
-  downloadBlob(blob, `${safeFileName(title, "codesh")}.zip`);
+  downloadBlob(blob, `${safeFileName(title, "gachipad")}.zip`);
 }
 
 const SECRET_PATTERNS: readonly RegExp[] = [

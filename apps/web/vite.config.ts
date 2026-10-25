@@ -30,8 +30,8 @@ export default defineConfig({
       registerType: "prompt",
       injectRegister: false,
       manifest: {
-        name: "codesh",
-        short_name: "codesh",
+        name: "gachipad",
+        short_name: "gachipad",
         description: "Real-time code sharing on your network",
         start_url: "/",
         scope: "/",

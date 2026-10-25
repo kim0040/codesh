@@ -20,7 +20,7 @@ export interface Io {
   platform?: NodeJS.Platform;
 }
 
-export const HELP = `codesh - share code from the terminal
+export const HELP = `gachipad CLI (command: codesh) - share code from the terminal
 
 usage:
   codesh push <file|folder...> [--title <t>] [--language <id>] [--view-only] [--no-qr] [--name <file>] [--url <u>]
@@ -28,7 +28,7 @@ usage:
   codesh open <code|id> [--print] [--url <u>]
   codesh pull <code|id> [-o <dir>] [--zip] [--pin <pin>] [--url <u>]
 
-The server comes from --url, CODESH_URL or the codesh config file (%APPDATA%\\codesh\\codesh.json on Windows, ~/.config/codesh.json elsewhere).`;
+The server comes from --url, CODESH_URL or the gachipad CLI config file (%APPDATA%\\codesh\\codesh.json on Windows, ~/.config/codesh.json elsewhere).`;
 
 interface CreateResponse {
   id: string;

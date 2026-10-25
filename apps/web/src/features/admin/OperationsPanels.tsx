@@ -202,7 +202,7 @@ export function DiagnosticsPanel({ token }: { token: string }) {
       setExportError(false);
       downloadDiagnostics(
         JSON.stringify(data, null, 2),
-        `codesh-server-diagnostics-${data.version.replace(/[^\w.-]/g, "_")}.json`,
+        `gachipad-server-diagnostics-${data.version.replace(/[^\w.-]/g, "_")}.json`,
       );
     },
     onError: () => setExportError(true),

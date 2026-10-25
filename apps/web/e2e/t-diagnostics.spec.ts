@@ -59,12 +59,13 @@ test("client diagnostics export contains real failures without document text, PI
     const download = page.waitForEvent("download");
     await page.getByTestId("diagnostics-export").click();
     const file = await download;
-    expect(file.suggestedFilename()).toMatch(/^codesh-diagnostics-[\w.-]+-\d{8}-\d{4}\.json$/);
+    expect(file.suggestedFilename()).toMatch(/^gachipad-diagnostics-[\w.-]+-\d{8}-\d{4}\.json$/);
     const path = await file.path();
     expect(path).toBeTruthy();
     const raw = await readFile(path as string, "utf8");
     const data = JSON.parse(raw);
     expect(data.format).toBe(1);
+    expect(data.header).toContain("gachipad client diagnostics");
     expect(data.bootId).toMatch(/^[a-f0-9]{16}$/);
     expect(data.breadcrumbs.some((entry: { kind: string }) => entry.kind === "disconnect")).toBe(
       true,
@@ -147,6 +148,7 @@ test("admin operations tabs show live data and fit 320px; tokens stay out of que
     const download = page.waitForEvent("download");
     await page.getByTestId("server-diagnostics-export").click();
     const file = await download;
+    expect(file.suggestedFilename()).toMatch(/^gachipad-server-diagnostics-[\w.-]+\.json$/);
     const path = await file.path();
     const raw = await readFile(path as string, "utf8");
     expect(JSON.parse(raw)).toMatchObject({ format: 1, config: { ADMIN_TOKEN_SET: true } });

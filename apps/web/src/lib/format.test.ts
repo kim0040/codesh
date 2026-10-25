@@ -66,7 +66,7 @@ describe("safeFileName", () => {
     expect(safeFileName('a<b>:c"d|e?f*.ts')).toBe("a_b__c_d_e_f_.ts");
     expect(safeFileName("draft. . ")).toBe("draft");
     expect(safeFileName("...")).toBe("file.txt");
-    expect(safeFileName("", "codesh")).toBe("codesh");
+    expect(safeFileName("", "gachipad")).toBe("gachipad");
   });
 
   it("renames device names, with or without an extension", () => {

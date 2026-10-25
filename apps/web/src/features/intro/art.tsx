@@ -536,15 +536,15 @@ export function KeysArt() {
 export function NameCells({ children }: { children?: ReactNode }) {
   return (
     <div className="ix-name" aria-hidden="true">
-      {[..."codesh"].map((letter, index) => (
+      {[..."gachipad"].map((letter, index) => (
         <span
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed six letters
           key={index}
           className="ix-name-cell"
           style={
             {
-              "--c": `var(--participant-${CELL_COLORS[index]})`,
-              "--l": `var(--participant-${CELL_COLORS[index]}-fg)`,
+              "--c": `var(--participant-${CELL_COLORS[index % CELL_COLORS.length]})`,
+              "--l": `var(--participant-${CELL_COLORS[index % CELL_COLORS.length]}-fg)`,
               "--i": index,
             } as CSSProperties
           }

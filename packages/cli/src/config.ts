@@ -45,7 +45,7 @@ export function resolveUrl(
   const url = flag || env.CODESH_URL || config.url;
   if (!url) {
     throw new CliError(
-      'No server URL. Pass --url, set CODESH_URL or put {"url": "http://..."} in the codesh config file (%APPDATA%\\codesh\\codesh.json on Windows, ~/.config/codesh.json elsewhere)',
+      'No server URL. Pass --url, set CODESH_URL or put {"url": "http://..."} in the gachipad CLI config file (%APPDATA%\\codesh\\codesh.json on Windows, ~/.config/codesh.json elsewhere)',
     );
   }
   if (!/^https?:\/\//.test(url)) throw new CliError(`Invalid server URL: ${url}`);

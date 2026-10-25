@@ -35,7 +35,7 @@ export type KoDictionary = Record<Exclude<DictionaryKey, OneKey>, string> &
 
 export const ko: KoDictionary = {
   // ── App ──
-  "app.name": "codesh",
+  "app.name": "gachipad",
   "app.tagline": "같은 네트워크에서 실시간으로 코드를 공유하세요",
   "app.update.title": "새 버전이 있어요",
   "app.update.body": "새로고침하면 새 버전을 쓸 수 있어요. 편집한 내용은 그대로 남아요.",
@@ -308,7 +308,7 @@ export const ko: KoDictionary = {
   "share.dialog.send.noteMax": "최대 {max}자까지 쓸 수 있어요",
   "share.dialog.send.action": "보내기",
   "share.dialog.send.empty": "지금 같은 네트워크에 접속한 사람이 없어요",
-  "share.dialog.send.emptyHint": "codesh를 연 사람이 여기에 나타나요.",
+  "share.dialog.send.emptyHint": "gachipad를 연 사람이 여기에 나타나요.",
   "share.dialog.broadcast.title": "방 전체에 띄우기",
   "share.dialog.broadcast.room": "{room}에 있는 모든 사람에게 이 공유를 바로 띄워요.",
   "share.dialog.broadcast.net": "이 네트워크의 모든 사람에게 이 공유를 바로 띄워요.",
@@ -409,11 +409,11 @@ export const ko: KoDictionary = {
   "settings.codeLanguage.auto": "자동 감지",
   "settings.uiLanguage.label": "화면 언어",
   "settings.notifications.label": "초대를 시스템 알림으로 받기",
-  "settings.notifications.hint": "codesh가 탭이나 창에 열려 있는 동안 동작해요.",
+  "settings.notifications.hint": "gachipad가 탭이나 창에 열려 있는 동안 동작해요.",
   "settings.notifications.blocked":
     "이 사이트의 알림이 막혀 있어요. 브라우저의 사이트 설정과 시스템 알림 설정에서 허용하고, 집중 모드나 방해 금지를 꺼 주세요.",
   "settings.notifications.unsupported":
-    "이 브라우저는 시스템 알림을 지원하지 않아요. iPhone과 iPad에서는 먼저 홈 화면에 codesh를 추가해 주세요.",
+    "이 브라우저는 시스템 알림을 지원하지 않아요. iPhone과 iPad에서는 먼저 홈 화면에 gachipad를 추가해 주세요.",
   "settings.licenses.link": "오픈소스 라이선스",
   "settings.install.action": "앱 설치",
   "settings.resetAction": "기본값으로 되돌리기",
@@ -772,7 +772,7 @@ export const ko: KoDictionary = {
   "admin.setting.maxUploadMB.label": "업로드 최대 크기",
   "admin.setting.maxUploadMB.hint": "파일, 폴더, .zip을 올릴 때마다 적용돼요.",
   "admin.setting.guestAllowed.label": "게스트 허용",
-  "admin.setting.guestAllowed.hint": "로그인하지 않아도 codesh를 쓸 수 있어요.",
+  "admin.setting.guestAllowed.hint": "로그인하지 않아도 gachipad를 쓸 수 있어요.",
   "admin.setting.rooms.label": "방",
   "admin.setting.rooms.hint":
     "네트워크를 교실 같은 방으로 묶어요. 근처 공유와 방 전체 띄우기는 같은 방 안에서만 보여요.",
@@ -895,7 +895,7 @@ export const ko: KoDictionary = {
   "admin.update.upToDate": "최신 버전을 쓰고 있어요",
   "admin.update.unreachable": "인터넷에 연결되지 않아 확인할 수 없어요",
   "admin.update.unreachableHint":
-    "codesh는 평소처럼 동작해요. 서버가 약 12시간 뒤에 다시 확인해요.",
+    "gachipad는 평소처럼 동작해요. 서버가 약 12시간 뒤에 다시 확인해요.",
   "admin.update.disabled": "업데이트 확인이 꺼져 있어요",
   "admin.update.disabledHint":
     ".env에서 UPDATE_CHECK=on으로 설정하고 다시 시작하면 새 릴리스가 여기에 보여요.",

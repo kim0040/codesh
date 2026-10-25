@@ -46,7 +46,7 @@ export const guideEn = {
     "Shares that are open on your network are listed on the home page. Select one to join. A share with a PIN or with approval turned on is never listed, and the owner can hide any share.",
   "guide.how.tell.send.title": "Send to a person",
   "guide.how.tell.send.body":
-    "Search for a name in the Share window and send. An invite appears on their screen, with a note of up to 200 characters if you add one. Only people who have codesh open are in the list.",
+    "Search for a name in the Share window and send. An invite appears on their screen, with a note of up to 200 characters if you add one. Only people who have gachipad open are in the list.",
   "guide.how.tell.room.title": "Show to the whole room",
   "guide.how.tell.room.body":
     "One button puts the share in front of everyone in your room, or on the network if no rooms are set up. You confirm first, and each person gets a notification with a button to open it.",
@@ -99,7 +99,7 @@ export const guideEn = {
   "guide.how.control.mock": "The access settings in the Share window",
   "guide.how.control.view.title": "View-only link and edit link",
   "guide.how.control.view.body":
-    "Set the default to View only and people who join can read but not edit. Copy the separate edit link for the people who should edit. It ends in #key= followed by the key. Browsers don't send that part with the page request, so it stays out of server logs and addresses; codesh sends it once, in the join request, so the server can check it. After the link opens, the key is removed from the address bar and the server remembers the edit right for that browser.",
+    "Set the default to View only and people who join can read but not edit. Copy the separate edit link for the people who should edit. It ends in #key= followed by the key. Browsers don't send that part with the page request, so it stays out of server logs and addresses; gachipad sends it once, in the join request, so the server can check it. After the link opens, the key is removed from the address bar and the server remembers the edit right for that browser.",
   "guide.how.control.pin.title": "PIN lock",
   "guide.how.control.pin.body":
     "Lock a share with a PIN of {min} to {max} characters, and give the PIN to people separately from the link. After {attempts} wrong tries a person has to wait {minutes} minutes. Setting a new PIN asks everyone to enter it again.",
@@ -117,14 +117,14 @@ export const guideEn = {
   "guide.how.offline.body1":
     "If the connection drops, a banner says you are offline. Keep typing. Your changes are kept and merge with everyone else's when the connection comes back.",
   "guide.how.offline.body2":
-    "Whether changes survive closing the tab depends on the offline copy. The first time you open the editor, codesh asks if it may keep offline copies on that device. If you say no, changes that have not reached the server exist only in the open tab, and the banner says so.",
+    "Whether changes survive closing the tab depends on the offline copy. The first time you open the editor, gachipad asks if it may keep offline copies on that device. If you say no, changes that have not reached the server exist only in the open tab, and the banner says so.",
   "guide.how.offline.body3":
     "If the owner removed you, or the share asked for a PIN or approval again while you were away, you have to join again, and changes that were not sent can't be kept.",
 
   // ── Features ──
   "guide.features.title": "Features",
   "guide.features.lead":
-    "What codesh does once you are in a share. It covers what sharing code needs and nothing beyond that.",
+    "What gachipad does once you are in a share. It covers what sharing code needs and nothing beyond that.",
   "guide.features.toc.languages": "Syntax highlighting",
   "guide.features.toc.merge": "Conflict-free editing",
   "guide.features.toc.files": "Files and folders",
@@ -151,7 +151,7 @@ export const guideEn = {
 
   "guide.features.merge.title": "Conflict-free editing",
   "guide.features.merge.body1":
-    "codesh uses Yjs, a library for conflict-free replicated data. Edits made at the same time, on any device, merge the same way for everyone. Nobody overwrites anybody, and nobody has to resolve a conflict.",
+    "gachipad uses Yjs, a library for conflict-free replicated data. Edits made at the same time, on any device, merge the same way for everyone. Nobody overwrites anybody, and nobody has to resolve a conflict.",
   "guide.features.merge.body2":
     "Undo only takes back your own changes, never someone else's typing.",
 
@@ -167,7 +167,7 @@ export const guideEn = {
   "guide.features.history.body1":
     "The owner can open the history from the top bar. Nobody else can, and deleted text in it is never sent to other people.",
   "guide.features.history.body2":
-    "While people edit, codesh saves a version about every {seconds} seconds, up to {max} per share. The administrator decides how many days they are kept, {days} by default.",
+    "While people edit, gachipad saves a version about every {seconds} seconds, up to {max} per share. The administrator decides how many days they are kept, {days} by default.",
   "guide.features.history.body3":
     "Play the history back at 1x, 2x or 4x, or compare any version with the current text.",
   "guide.features.history.body4":
@@ -189,7 +189,8 @@ export const guideEn = {
   "guide.features.shortcuts.group.general": "In the app",
   "guide.features.shortcuts.group.editing": "Editing",
   "guide.features.shortcuts.group.navigation": "Moving around",
-  "guide.features.shortcuts.note1": "Press ? outside a text field to see this list inside codesh.",
+  "guide.features.shortcuts.note1":
+    "Press ? outside a text field to see this list inside gachipad.",
   "guide.features.shortcuts.note2":
     "On a Mac the app shortcuts use Control and Command, because Command with Option belongs to the browser and macOS. On Windows and Linux they use Ctrl and Alt.",
   "guide.features.shortcuts.note3":
@@ -216,7 +217,7 @@ export const guideEn = {
     "The cursor glides while you type. It is on by default and stays still when your system asks for reduced motion.",
   "guide.features.settings.notify.title": "Invite notifications",
   "guide.features.settings.notify.body":
-    "Show invites as system notifications while codesh is in a background tab. It is off by default and needs the browser's permission.",
+    "Show invites as system notifications while gachipad is in a background tab. It is off by default and needs the browser's permission.",
   "guide.features.settings.language.title": "Display language",
   "guide.features.settings.language.body":
     "Korean or English. Switch it on any page; the choice is kept in this browser.",
@@ -259,12 +260,12 @@ export const guideEn = {
   "guide.features.more.format.body": "Tidy a file with one shortcut.",
   "guide.features.more.secret.title": "Secret warning",
   "guide.features.more.secret.body":
-    "If pasted text looks like an API key or a password, codesh warns you first. The administrator can turn this off.",
+    "If pasted text looks like an API key or a password, gachipad warns you first. The administrator can turn this off.",
 
   // ── Network ──
   "guide.network.title": "Faster on the same network",
   "guide.network.lead":
-    "codesh runs on a server in your network. Everyone on that network reaches it directly, and every way of joining builds on that.",
+    "gachipad runs on a server in your network. Everyone on that network reaches it directly, and every way of joining builds on that.",
   "guide.network.toc.why": "Why it is quicker",
   "guide.network.toc.ways": "Five ways in",
   "guide.network.toc.groups": "Who counts as nearby",
@@ -274,7 +275,7 @@ export const guideEn = {
 
   "guide.network.why.title": "Why it is quicker",
   "guide.network.why.body1":
-    "Joining usually means finding a link, copying it and pasting it into a message. In codesh the people next to you are already on the same network as the server, so it can show them what is open and let you send it to them.",
+    "Joining usually means finding a link, copying it and pasting it into a message. In gachipad the people next to you are already on the same network as the server, so it can show them what is open and let you send it to them.",
   "guide.network.why.body2":
     "Your code is only exchanged with the server and with the other people in the share.",
 
@@ -291,7 +292,7 @@ export const guideEn = {
   "guide.network.ways.nearby.who":
     "People on the same network or in the same room, unless the share has a PIN or approval or the owner hid it",
   "guide.network.ways.send.how": "Pick a name, and an invite appears on that screen",
-  "guide.network.ways.send.who": "One person who has codesh open",
+  "guide.network.ways.send.who": "One person who has gachipad open",
   "guide.network.ways.room.how": "Press one button, then confirm",
   "guide.network.ways.room.who": "Everyone in the room, or on the network if there are no rooms",
 
@@ -320,7 +321,7 @@ export const guideEn = {
 
   "guide.network.offline.title": "No internet needed",
   "guide.network.offline.body1":
-    "Scripts, fonts and icons all come from the same server. Devices only need a connection to it, so codesh works on a network that is cut off from the internet.",
+    "Scripts, fonts and icons all come from the same server. Devices only need a connection to it, so gachipad works on a network that is cut off from the internet.",
   "guide.network.offline.body2":
     "Unless the administrator turns it off, the server looks for new releases by itself, and a sign-in provider (OIDC or LDAP) may be involved if one is set up. Both are explained under Privacy.",
   "guide.network.offline.link": "What the server may contact",
@@ -328,7 +329,7 @@ export const guideEn = {
   // ── Privacy and safety ──
   "guide.security.title": "Privacy and safety",
   "guide.security.lead":
-    "What codesh keeps, for how long, who can see it, and what you can remove.",
+    "What gachipad keeps, for how long, who can see it, and what you can remove.",
   "guide.security.toc.stored": "What is stored",
   "guide.security.toc.deleted": "Deleted text",
   "guide.security.toc.history": "History",
@@ -369,7 +370,7 @@ export const guideEn = {
 
   "guide.security.device.title": "Copies on your device",
   "guide.security.device.body1":
-    "To keep your changes through a lost connection, codesh can store an offline copy of a share in this browser. It asks the first time you open the editor, and nothing is saved before you agree.",
+    "To keep your changes through a lost connection, gachipad can store an offline copy of a share in this browser. It asks the first time you open the editor, and nothing is saved before you agree.",
   "guide.security.device.body2":
     "On a shared computer, choose Not on this device, or use a separate browser profile.",
   "guide.security.device.remove": "To remove copies",
@@ -386,15 +387,15 @@ export const guideEn = {
   "guide.security.device.auto.body":
     "A copy is deleted when you are removed or blocked, or when the share is deleted or expires. Shares with a PIN or approval load their copy only after you are let in again.",
   "guide.security.device.body3":
-    "The server can't reach a browser that never comes back. If codesh says some copies might remain, clear this site's data in the browser settings.",
+    "The server can't reach a browser that never comes back. If gachipad says some copies might remain, clear this site's data in the browser settings.",
 
   "guide.security.external.title": "No outside requests",
   "guide.security.external.body1":
-    "Pages, scripts, fonts, icons and images all come from your codesh server. There are no analytics, ads, trackers or content delivery networks. With the default settings your browser contacts nothing but the codesh server.",
+    "Pages, scripts, fonts, icons and images all come from your gachipad server. There are no analytics, ads, trackers or content delivery networks. With the default settings your browser contacts nothing but the gachipad server.",
   "guide.security.external.body2":
     "Two things depend on what the administrator sets up. If sign-in uses an identity provider (OIDC), your browser is sent to that provider to sign in; with LDAP, the server checks the sign-in against the directory server. The other exception happens on the server: unless the administrator turns it off, it sends a plain request to GitHub about every 12 hours to see whether a new version exists. It carries no share content and fails quietly without internet.",
   "guide.security.external.body3":
-    "Edit links keep their key after the # sign, which browsers don't send with page requests, so it stays out of server logs and addresses. codesh sends it once, in the join request, to check it. PINs are stored only as hashes.",
+    "Edit links keep their key after the # sign, which browsers don't send with page requests, so it stays out of server logs and addresses. gachipad sends it once, in the join request, to check it. PINs are stored only as hashes.",
 
   "guide.security.controls.title": "What administrators control",
   "guide.security.controls.lead": "These are set by the administrator of this server.",
@@ -411,7 +412,7 @@ export const guideEn = {
 
   "guide.security.host.title": "Run it yourself",
   "guide.security.host.body1":
-    "codesh is open source under the MIT license. It runs on your own server with Docker Compose: a web server, the API, the editing service, MongoDB and Valkey. An optional service adds the codesh.local name.",
+    "gachipad is open source under the MIT license. It runs on your own server with Docker Compose: a web server, the API, the editing service, MongoDB and Valkey. An optional service adds the codesh.local name.",
   "guide.security.host.body2":
     "Nothing depends on an outside service, and each release comes with an offline bundle for networks without internet.",
 
@@ -424,9 +425,9 @@ export const guideEn = {
   "guide.faq.group.network": "Network and privacy",
   "guide.faq.account.q": "Do I need an account?",
   "guide.faq.account.a":
-    "No. Pick a name and start. If the administrator turned on sign-in you can sign in, and guests can still use codesh unless guests are turned off.",
-  "guide.faq.run.q": "Can I run code in codesh?",
-  "guide.faq.run.a": "No. codesh shares and edits text. It doesn't run code.",
+    "No. Pick a name and start. If the administrator turned on sign-in you can sign in, and guests can still use gachipad unless guests are turned off.",
+  "guide.faq.run.q": "Can I run code in gachipad?",
+  "guide.faq.run.a": "No. gachipad shares and edits text. It doesn't run code.",
   "guide.faq.cantEdit.q": "Why can't I edit?",
   "guide.faq.cantEdit.a":
     "The owner may have set the share to view only, or locked editing for a while. Ask the owner for the edit link, or to unlock editing.",
@@ -456,10 +457,10 @@ export const guideEn = {
     "No. Everything comes from the server on your network. The server itself may check for new releases unless the administrator turns that off.",
   "guide.faq.tracking.q": "Does it track me?",
   "guide.faq.tracking.a":
-    "There are no analytics, ads or trackers, and with the default settings the browser contacts only the codesh server (a sign-in provider, if the administrator set one up, is the exception). If the administrator turned on the audit log, it records who creates, opens, downloads and deletes shares.",
+    "There are no analytics, ads or trackers, and with the default settings the browser contacts only the gachipad server (a sign-in provider, if the administrator set one up, is the exception). If the administrator turned on the audit log, it records who creates, opens, downloads and deletes shares.",
   "guide.faq.shared.q": "How do I leave nothing behind on a shared computer?",
   "guide.faq.shared.a":
-    "Answer Not on this device when codesh asks about offline copies, or use Forget on this device in the editor settings when you are done.",
+    "Answer Not on this device when gachipad asks about offline copies, or use Forget on this device in the editor settings when you are done.",
   "guide.faq.contact.q": "Who do I ask about this server?",
   "guide.faq.contact.a":
     "The footer shows a contact when the administrator has set one. Rules such as expiry and size limits are theirs to answer.",

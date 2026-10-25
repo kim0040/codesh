@@ -142,7 +142,7 @@ LIMIT 10;`,
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>codesh</title>
+  <title>gachipad</title>
   <style>
     body { font: 16px/1.5 sans-serif; margin: 2rem; }
     .btn { color: #fff; background: #5b45c8; }
@@ -389,7 +389,7 @@ func greet(_ name: String?) -> String {
 }`,
 
   json: `{
-  "name": "codesh",
+  "name": "gachipad",
   "version": "1.2.0",
   "scripts": { "dev": "vite", "test": "vitest" },
   "keywords": ["share", "code"],
@@ -399,7 +399,7 @@ func greet(_ name: String?) -> String {
   yaml: `version: "3.9"
 services:
   api:
-    image: codesh/api:latest
+    image: gachipad/api:latest
     ports:
       - "3000:3000"
     environment:
@@ -493,7 +493,7 @@ main = do
   mapM_ (print . area) shapes`,
 
   toml: `[package]
-name = "codesh"
+name = "gachipad"
 version = "0.1.0"
 edition = "2021"
 
@@ -622,7 +622,7 @@ end`,
 
   hcl: `variable "bucket_name" {
   type    = string
-  default = "codesh-assets"
+  default = "gachipad-assets"
 }
 
 resource "aws_s3_bucket" "assets" {
@@ -635,7 +635,7 @@ resource "aws_s3_bucket" "assets" {
 }
 
 resource "aws_s3_bucket" "assets" {
-  bucket = "codesh-assets"
+  bucket = "gachipad-assets"
   tags   = { Environment = "dev" }
 }`,
 
@@ -645,7 +645,7 @@ sum by (status) (
 )`,
 
   astro: `---
-const title = "Codesh";
+const title = "gachipad";
 const count = 3;
 ---
 <html lang="en">
@@ -693,7 +693,7 @@ model User {
 
   json5: `{
   // JSON5 allows bare keys and trailing commas.
-  name: 'codesh',
+  name: 'gachipad',
   enabled: true,
   retries: 3,
 }`,
@@ -712,7 +712,7 @@ model User {
   jsonnet: `local port = 8080;
 {
   service: {
-    name: "codesh",
+    name: "gachipad",
     port: port,
   },
 }`,
@@ -904,7 +904,7 @@ exit /b 0`,
     MsgBox("Opening " room)
 }`,
 
-  abap: `REPORT z_codesh_demo.
+  abap: `REPORT z_gachipad_demo.
 
 DATA lv_count TYPE i VALUE 3.
 WRITE 'Active rooms'.
@@ -951,7 +951,7 @@ clean:
     id 'java'
 }
 
-group = 'dev.codesh'
+group = 'dev.gachipad'
 version = '1.0'
 
 tasks.register('verify') {
@@ -966,10 +966,10 @@ tasks.register("verify") {
     doLast { println("ready") }
 }`,
 
-  meson: `project('codesh', 'cpp', version: '1.0')
+  meson: `project('gachipad', 'cpp', version: '1.0')
 
 source = files('main.cpp')
-executable('codesh-demo', source,
+executable('gachipad-demo', source,
   install: true,
 )`,
 
@@ -982,7 +982,7 @@ build app.o: compile app.cpp`,
 
   "docker-compose": `services:
   web:
-    image: codesh:latest
+    image: gachipad:latest
     ports:
       - "3000:3000"
     environment:
@@ -1019,16 +1019,16 @@ unit-tests:
   kubernetes: `apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: codesh
+  name: gachipad
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: codesh`,
+      app: gachipad`,
 
   openapi: `openapi: 3.1.0
 info:
-  title: Codesh API
+  title: gachipad API
   version: "1.0"
 paths:
   /health:
