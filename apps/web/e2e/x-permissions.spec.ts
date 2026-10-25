@@ -114,19 +114,87 @@ test("a forged Yjs title update is refused and DocSession converges to the serve
           () => session.getState().synced && session.doc.getMap("meta").get("title") === "Original",
         );
         const generation = session.getState().generation;
-        session.doc.getMap("meta").set("title", "FORGED_TITLE");
+        session.doc.transact(() => {
+          session.doc.getMap("meta").set("title", "FORGED_TITLE");
+          session.doc.getText("file:main").insert(0, "my refused local text");
+          session.doc.getText("file:deleted").insert(0, "my orphaned local text");
+        });
         await wait(() => session.getState().generation > generation && session.getState().synced);
         const title = session.doc.getMap("meta").get("title");
         session.doc.getText("file:main").insert(0, "after refusal");
         await wait(() => session.getState().unsynced === 0);
-        return { title, readOnly: session.getState().readOnly };
+        return {
+          title,
+          readOnly: session.getState().readOnly,
+          saved: session.getState().unsentText.map((file: { text: string }) => file.text),
+        };
       } finally {
         session.destroy();
       }
     }, id);
-    expect(result).toEqual({ title: "Original", readOnly: false });
+    expect(result).toEqual({
+      title: "Original",
+      readOnly: false,
+      saved: expect.arrayContaining(["my refused local text", "my orphaned local text"]),
+    });
     await expect(owner.page.getByTestId("title")).toHaveValue("Original");
     await expect.poll(() => editorText(owner.page)).toContain("after refusal");
+  } finally {
+    await closeAll(owner, member);
+  }
+});
+
+test("offline text refused by a lock remains available to copy after resync", async ({
+  browser,
+}) => {
+  const owner = await newUser(browser, "Owner");
+  const member = await newUser(browser, "Participant");
+  try {
+    const id = await createShare(owner.page);
+    await joinByLink(member, id);
+    await waitForEditor(member.page);
+    // Offline emulation leaves existing WebSockets open in Firefox and WebKit.
+    await member.page.evaluate(async (shareId) => {
+      const modulePath = "/src/lib/collab/socket.ts";
+      const { acquireSocket } = await import(/* @vite-ignore */ modulePath);
+      const held = acquireSocket(shareId);
+      held.socket.disconnect();
+      held.release();
+    }, id);
+    await member.context.setOffline(true);
+    await type(member.page, "TEXT_I_MUST_NOT_LOSE");
+    expect(await editorText(owner.page)).not.toContain("TEXT_I_MUST_NOT_LOSE");
+    const lock = await owner.context.request.patch(`/api/shares/${id}`, { data: { locked: true } });
+    expect(lock.ok()).toBe(true);
+    await member.context.setOffline(false);
+    await member.page.evaluate(async (shareId) => {
+      const modulePath = "/src/lib/collab/socket.ts";
+      const { acquireSocket } = await import(/* @vite-ignore */ modulePath);
+      const held = acquireSocket(shareId);
+      await held.socket.connect();
+      held.release();
+    }, id);
+    const dialog = member.page.getByTestId("unsent-text-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("textarea").first()).toHaveValue(/TEXT_I_MUST_NOT_LOSE/);
+    await member.page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            (window as unknown as { copied: string }).copied = text;
+          },
+        },
+      });
+    });
+    await dialog.getByRole("button", { name: "Copy my unsent text", exact: true }).click();
+    await expect(dialog.getByRole("status")).toHaveText("Copied");
+    expect(
+      await member.page.evaluate(() => (window as unknown as { copied: string }).copied),
+    ).toContain("TEXT_I_MUST_NOT_LOSE");
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(member.page.getByTestId("unsent-text-banner")).toBeVisible();
+    await expect.poll(() => editorText(owner.page)).not.toContain("TEXT_I_MUST_NOT_LOSE");
   } finally {
     await closeAll(owner, member);
   }

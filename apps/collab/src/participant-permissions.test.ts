@@ -106,6 +106,60 @@ describe.runIf(available)("participant document permissions", () => {
     );
     expect(owner.doc.getMap(YDOC.meta).get("title")).toBe("Allowed");
   });
+  it.each([false, true])(
+    "accepts combined main/deleted-file text edits (offline: %s)",
+    async (offline) => {
+      const { share, owner, editor } = await room();
+      owner.doc.transact(() => {
+        const file = new Y.Map();
+        owner.doc.getMap(YDOC.files).set("second", file);
+        file.set("path", "second.ts");
+        owner.doc.getText("file:second").insert(0, "old");
+      });
+      await waitFor(
+        () => editor.doc.getText("file:second").toString() === "old",
+        "second file received",
+      );
+      if (offline) editor.socket.disconnect();
+      owner.doc.getMap(YDOC.files).delete("second");
+      await waitFor(
+        () => !server.collab.docs.get(share.id)?.document.getMap(YDOC.files).has("second"),
+        "owner deletion applied",
+      );
+      if (!offline)
+        await waitFor(() => !editor.doc.getMap(YDOC.files).has("second"), "deletion received");
+      editor.doc.transact(() => {
+        editor.text.insert(0, "accepted main;");
+        editor.doc.getText("file:second").insert(0, "late edit;");
+      });
+      if (offline) await editor.socket.connect();
+      await waitFor(
+        () => owner.text.toString() === "accepted main;current",
+        "main edit reaches owner",
+      );
+      expect(owner.doc.getMap(YDOC.files).has("second")).toBe(false);
+      expect(
+        editor.stateless.some((m) => (m as { type: string }).type === "permission_refused"),
+      ).toBe(false);
+    },
+  );
+  it("allows 50 updates/s and a 256 KiB paste, but closes a sustained update flood", async () => {
+    const { owner, editor } = await room();
+    const started = Date.now();
+    for (let i = 0; i < 100; i++) {
+      editor.text.insert(editor.text.length, "x");
+      await sleep(20);
+    }
+    const paste = "p".repeat(256 * 1024);
+    editor.text.insert(editor.text.length, paste);
+    await waitFor(() => owner.text.toString().endsWith(paste), "fast typing and paste delivered");
+    expect(editor.closes).toEqual([]);
+    console.log(
+      `update budget: 100 typing updates and 256 KiB paste delivered in ${Date.now() - started}ms`,
+    );
+    for (let i = 0; i < 500; i++) editor.text.insert(editor.text.length, "f");
+    await waitFor(() => editor.closes.includes("Document update rate exceeded"), "flood closed");
+  });
   it("refuses every viewer mutation even when all participant toggles are enabled", async () => {
     const { share, owner, viewer } = await room();
     await h.stores.shares.update(share.id, {

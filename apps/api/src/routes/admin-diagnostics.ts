@@ -195,22 +195,20 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
       );
     },
   );
-  for (const action of ["lock", "expire", "delete"] as const) {
+  for (const action of ["lock", "unlock", "delete"] as const) {
     app.post(
       `/api/admin/shares/:id/${action}`,
       { schema: { params: shareParamsSchema, response: { 200: okResponseSchema } } },
       async (request) => {
         const share = await ctx.stores.shares.get(request.params.id);
         if (!share) throw notFound("Not found");
-        if (action === "lock") {
+        if (action === "lock" || action === "unlock") {
           await ctx.stores.shares.update(share.id, {
-            locked: true,
+            locked: action === "lock",
             access: { generation: randomKey() },
           });
           await ctx.publishPerm(share.id, "lock");
         } else {
-          // Expiry performs the same irreversible cleanup as the TTL sweeper, immediately.
-          // Merely shortening expiresAt lets an in-flight collab touch extend it again.
           await deleteShare(ctx, share);
         }
         await ctx.audit(request, `admin.share.${action}`, share.id);

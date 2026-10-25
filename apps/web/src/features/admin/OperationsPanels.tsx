@@ -98,12 +98,18 @@ export function OverviewPanel({
               {Object.entries(data.health).map(([name, value]) => (
                 <Badge
                   key={name}
-                  tone={value === true || value === "healthy" ? "success" : "neutral"}
+                  tone={
+                    value === true || value === "healthy"
+                      ? "success"
+                      : value === false
+                        ? "danger"
+                        : "neutral"
+                  }
                 >
                   {name}:{" "}
                   {value === true || value === "healthy"
                     ? t("admin.ops.healthy")
-                    : t("admin.ops.unknown")}
+                    : t(value === false ? "admin.ops.down" : "admin.ops.unknown")}
                 </Badge>
               ))}
             </div>
@@ -313,7 +319,7 @@ export function SharesPanel({ token }: { token: string }) {
   const [before, setBefore] = useState<{ at: string; id: string }>();
   const [confirm, setConfirm] = useState<{
     share: AdminShare;
-    action: "lock" | "expire" | "delete";
+    action: "lock" | "unlock" | "delete";
   } | null>(null);
   const query = useQuery({
     queryKey: ["admin", "shares", search, before],
@@ -378,11 +384,11 @@ export function SharesPanel({ token }: { token: string }) {
                     : t("admin.ops.participants", { count: s.participants })}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {(["lock", "expire", "delete"] as const).map((value) => (
+                  {([s.locked ? "unlock" : "lock", "delete"] as const).map((value) => (
                     <Button
                       key={value}
                       size="sm"
-                      disabled={value === "lock" && s.locked}
+                      aria-label={`${t(`admin.ops.${value}`)}: ${s.title || t("admin.ops.untitled")}`}
                       variant={value === "delete" ? "danger" : "secondary"}
                       onClick={() => {
                         action.reset();

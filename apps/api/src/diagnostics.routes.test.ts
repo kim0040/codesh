@@ -10,7 +10,7 @@ const endpoints = [
   ["GET", "/api/admin/security"],
   ["GET", "/api/admin/shares"],
   ["POST", "/api/admin/shares/Abcd1234/lock"],
-  ["POST", "/api/admin/shares/Abcd1234/expire"],
+  ["POST", "/api/admin/shares/Abcd1234/unlock"],
   ["POST", "/api/admin/shares/Abcd1234/delete"],
 ] as const;
 describe.skipIf(!integration)("admin operational API", () => {
@@ -216,7 +216,7 @@ describe.skipIf(!integration)("admin operational API", () => {
     });
     expect(mutation.statusCode).toBe(403);
   });
-  it("returns useful overview and metadata only; locking, expiry and deletion revoke access", async () => {
+  it("returns metadata only, supports lock/unlock, and only deletes through delete", async () => {
     const owner = h.client();
     const { id } = await createShare(owner, {
       title: "ops needle",
@@ -237,16 +237,21 @@ describe.skipIf(!integration)("admin operational API", () => {
     const expired = await owner.request("POST", `/api/admin/shares/${id}/expire`, {
       headers: bearer,
     });
-    expect(expired.statusCode).toBe(200);
+    expect(expired.statusCode).toBe(404);
+    expect((await h.stores.shares.get(id))?.locked).toBe(true);
+    const unlocked = await owner.request("POST", `/api/admin/shares/${id}/unlock`, {
+      headers: bearer,
+    });
+    expect(unlocked.statusCode).toBe(200);
+    expect((await h.stores.shares.get(id))?.locked).toBe(false);
+    const deleted = await owner.request("POST", `/api/admin/shares/${id}/delete`, {
+      headers: bearer,
+    });
+    expect(deleted.statusCode).toBe(200);
     expect((await owner.get(`/api/shares/${id}`)).statusCode).toBe(404);
     expect(await h.stores.shares.touch(id, new Date(), new Date(Date.now() + 86400000))).toBe(
       false,
     );
-    const { id: deleteId } = await createShare(owner);
-    const deleted = await owner.request("POST", `/api/admin/shares/${deleteId}/delete`, {
-      headers: bearer,
-    });
-    expect(deleted.statusCode).toBe(200);
     expect(await h.stores.shares.get(id)).toBeNull();
     expect(
       (await owner.request("POST", `/api/admin/shares/${id}/lock`, { headers: bearer })).statusCode,

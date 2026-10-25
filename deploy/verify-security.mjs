@@ -1,8 +1,19 @@
 // Run: node deploy/verify-security.mjs <origin>
 // Against a production Caddy image, in an isolated compose project; no external request is allowed.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+
+const example = await readFile(new URL(".env.example", import.meta.url), "utf8");
+const compose = await readFile(new URL("docker-compose.yml", import.meta.url), "utf8");
+const securityVariable =
+  /^(?:ADMIN_|TRUST_PROXY$|CADDY_TRUSTED_PROXIES$|PUBLIC_URL$|SESSION_SECRET$|COLLAB_SECRET$|MONGO_.*PASSWORD$|VALKEY_PASSWORD$|RATE_LIMIT_|QUOTA_|UPLOAD_STORAGE_MAX_BYTES$|SSE_MAX_|PRESENCE_MAX_|PENDING_MAX_|BROADCASTS_PER_MIN$|BROADCAST_FANOUT_MAX$)/;
+for (const [, name] of example.matchAll(/^#?([A-Z][A-Z0-9_]*)=/gm)) {
+  if (securityVariable.test(name))
+    assert(compose.includes("${" + name), `${name} is not referenced by docker-compose.yml`);
+}
+if (process.argv.includes("--config-only")) process.exit(0);
 
 const require = createRequire(resolve("apps/web/package.json"));
 const { chromium, expect } = require("@playwright/test");

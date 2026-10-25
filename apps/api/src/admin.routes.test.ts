@@ -1,4 +1,4 @@
-import { defaultSettings } from "@codesh/shared";
+import { defaultSettings, keys } from "@codesh/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHarness, createShare, type Harness, integration } from "./testing/harness.js";
 
@@ -14,6 +14,50 @@ describe.skipIf(!integration)("admin API", () => {
   afterAll(() => h.close());
 
   describe("authorization", () => {
+    it("pauses global token comparisons across addresses, then resumes after the cooldown", async () => {
+      const strict = await createHarness();
+      try {
+        for (let i = 0; i < 100; i++)
+          expect((await strict.client().get("/api/admin/stats", bearer("guess"))).statusCode).toBe(
+            403,
+          );
+        const paused = await strict.client().get("/api/admin/stats", bearer());
+        expect(paused.statusCode).toBe(429);
+        expect(Number(paused.headers["retry-after"])).toBeGreaterThan(0);
+        // Advance the shared bucket's clock without waiting in real time.
+        await strict.valkey.hset(
+          keys.rateLimit("global", "admin-token-budget"),
+          "pause",
+          0,
+          "at",
+          Date.now() - 30_000,
+        );
+        expect((await strict.client().get("/api/admin/stats", bearer())).statusCode).toBe(200);
+      } finally {
+        await strict.close();
+      }
+    });
+
+    it("keeps allowlisted administrators available even during a global pause", async () => {
+      const strict = await createHarness({ config: { adminAllowCidr: ["10.0.0.0/8"] } });
+      try {
+        await strict.valkey.hset(
+          keys.rateLimit("global", "admin-token-budget"),
+          "pause",
+          Date.now() + 30_000,
+          "tokens",
+          0,
+          "at",
+          Date.now(),
+        );
+        expect((await strict.client().get("/api/admin/stats", bearer())).statusCode).toBe(200);
+        expect(
+          (await strict.client({ ip: "192.0.2.1" }).get("/api/admin/stats", bearer())).statusCode,
+        ).toBe(404);
+      } finally {
+        await strict.close();
+      }
+    });
     it("rejects a missing, wrong or malformed token with forbidden", async () => {
       const client = h.client();
       for (const headers of [

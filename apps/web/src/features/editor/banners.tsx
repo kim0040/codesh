@@ -1,7 +1,8 @@
-import { Button, toast } from "@codesh/ui";
+import { Button, Dialog, DialogContent, toast } from "@codesh/ui";
 import { CloudOff, Eye, HardDrive, Presentation, ShieldAlert, Wifi, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { chooseOfflineCopy } from "../../lib/device";
+import { copyText } from "../../lib/format";
 import { useT } from "../../lib/i18n";
 import { usePrefs } from "../../lib/prefs";
 import { useEditor } from "./context";
@@ -60,6 +61,7 @@ export function EditorBanners({
 
   return (
     <>
+      <UnsentTextRecovery />
       {status === "offline" || (offline && status !== "connected") ? (
         <Banner
           tone="warning"
@@ -157,6 +159,81 @@ export function EditorBanners({
       ) : null}
 
       {prefs.offlineCopy === "undecided" ? <DeviceChoice shareId={ctx.session.shareId} /> : null}
+    </>
+  );
+}
+
+function UnsentTextRecovery() {
+  const t = useT();
+  const { session, state } = useEditor();
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (state.unsentText.length) {
+      setOpen(true);
+      setCopied(false);
+    }
+  }, [state.unsentText]);
+  if (!state.unsentText.length) return null;
+  return (
+    <>
+      <Banner
+        tone="warning"
+        icon={<ShieldAlert />}
+        title={t("perm.unsentTitle")}
+        testId="unsent-text-banner"
+        actions={
+          <Button size="sm" onClick={() => setOpen(true)}>
+            {t("perm.copyUnsent")}
+          </Button>
+        }
+      />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          title={t("perm.unsentTitle")}
+          description={t("perm.unsentBody")}
+          closeLabel={t("common.close")}
+          data-testid="unsent-text-dialog"
+          footer={
+            <>
+              <Button
+                onClick={() => {
+                  session.dismissUnsentText();
+                  setOpen(false);
+                }}
+              >
+                {t("perm.discardUnsent")}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  const text = state.unsentText
+                    .map((file) => `${file.path}\n${file.text}`)
+                    .join("\n\n");
+                  setCopied(await copyText(text));
+                }}
+              >
+                {t("perm.copyUnsent")}
+              </Button>
+            </>
+          }
+        >
+          <div className="flex min-w-0 flex-col gap-3">
+            {state.unsentText.map((file) => (
+              <label key={file.id} className="flex min-w-0 flex-col gap-1 text-body-sm">
+                <span className="break-all">{file.path}</span>
+                <textarea
+                  readOnly
+                  value={file.text}
+                  rows={4}
+                  className="w-full min-w-0 rounded-md border border-line bg-panel p-2 font-mono text-body-sm"
+                />
+              </label>
+            ))}
+            {copied && <p role="status">{t("perm.unsentCopied")}</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

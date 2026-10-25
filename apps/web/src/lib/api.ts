@@ -268,7 +268,7 @@ export const api = {
         headers: bearer(token),
         query: { search, before, beforeId },
       }),
-    shareAction: (token: string, id: string, action: "lock" | "expire" | "delete") =>
+    shareAction: (token: string, id: string, action: "lock" | "unlock" | "delete") =>
       request<{ ok: true }>("POST", `/api/admin/shares/${id}/${action}`, {
         headers: bearer(token),
       }),
