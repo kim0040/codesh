@@ -60,6 +60,44 @@ function lab(id: string, overrides: Partial<LabRecord> = {}): LabRecord {
 export function storeContract(name: string, open: () => Promise<Stores>) {
   describe(name, () => {
     describe("ShareStore", () => {
+      it("lists admin metadata without content or credentials and summarizes recent creation", async () => {
+        const { shares } = await open();
+        const now = new Date();
+        await shares.create(
+          share("admin001", {
+            title: "literal [.*]",
+            createdAt: now,
+            lastActiveAt: now,
+            expiresAt: new Date(now.getTime() + 86400000),
+            preview: "PRIVATE_PREVIEW",
+          }),
+        );
+        const rows = await shares.adminList("[.*]");
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.id).toBe("admin001");
+        expect(JSON.stringify(rows)).not.toMatch(/PRIVATE_PREVIEW|editKey|pinHash/);
+        const summary = await shares.adminSummary();
+        expect(summary.shares).toBe(1);
+        expect(summary.activity).toHaveLength(24);
+        expect(summary.activity[23]).toBe(1);
+      });
+      it("pages through equal creation timestamps without losing shares", async () => {
+        const { shares } = await open();
+        const now = new Date();
+        for (let i = 0; i < 101; i++)
+          await shares.create(
+            share(`page${String(i).padStart(4, "0")}`, {
+              createdAt: now,
+              expiresAt: new Date(now.getTime() + 86400000),
+            }),
+          );
+        const first = await shares.adminList("");
+        const cursor = first.at(-1);
+        expect(first).toHaveLength(100);
+        const next = await shares.adminList("", cursor?.createdAt, cursor?.id);
+        expect(next).toHaveLength(1);
+        expect(new Set([...first, ...next].map((s) => s.id)).size).toBe(101);
+      });
       it("creates, reads and updates copies, not references", async () => {
         const { shares } = await open();
         const original = share("abcd1234");

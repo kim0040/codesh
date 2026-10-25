@@ -1,3 +1,4 @@
+import { diagnosticError } from "@codesh/shared";
 import { connectMongo, createMongoStores, ensureIndexes } from "@codesh/storage";
 import { loadConfig } from "./config.js";
 import { createCollabServer } from "./server.js";
@@ -19,12 +20,28 @@ const server = createCollabServer({
       : { broadcastWindowMs: config.broadcastWindowMs },
 });
 
+let mongoFailed = false;
+mongo.client.on("serverHeartbeatFailed", () => {
+  mongoFailed = true;
+  server.diagnostics.record("mongo_error", {}, "error");
+});
+mongo.client.on("serverHeartbeatSucceeded", () => {
+  if (mongoFailed) {
+    mongoFailed = false;
+    server.diagnostics.record("mongo_recovered");
+  }
+});
+process.on("uncaughtExceptionMonitor", (error) => {
+  server.diagnostics.record("uncaught", diagnosticError(error), "error");
+});
+
 /** Below the usual 30 s grace period of a container stop, so the log line still gets out. */
 const SHUTDOWN_TIMEOUT_MS = 25_000;
 
 // One failed background task must not end the process and drop every open doc with it.
 process.on("unhandledRejection", (reason) => {
-  console.error("collab: unhandled rejection", reason);
+  server.diagnostics.record("rejection", diagnosticError(reason), "error");
+  console.error("collab: unhandled rejection", diagnosticError(reason));
 });
 
 let closing = false;

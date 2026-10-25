@@ -7,10 +7,12 @@ import "./index.css";
 import { startAppUpdates } from "./lib/app-update";
 import { captureKeyFromUrl, watchKeyInUrl } from "./lib/credentials";
 import { hasSeenSession, listenForForgetting } from "./lib/device";
+import { installDiagnostics } from "./lib/diagnostics";
 import { queryClient } from "./lib/query";
 import { sessionQuery } from "./lib/session";
 import { routeTree } from "./routeTree.gen";
 
+installDiagnostics();
 applyStoredTheme();
 
 // An edit key in the address (`#key=` or a legacy `?key=`) moves into memory before the router

@@ -2,7 +2,6 @@ import { getLanguage, LANGUAGES } from "@codesh/highlight";
 import {
   generateShareId,
   MAX_FILES_PER_SHARE,
-  MAX_TEMPLATE_DESCRIPTION_LENGTH,
   MAX_TEMPLATE_NAME_LENGTH,
   MAX_TEMPLATES,
   MAX_TEMPLATES_TOTAL_BYTES,

@@ -300,6 +300,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     sessionSecret: "s".repeat(40),
     collabSecret: "c".repeat(40),
     adminToken: "admin-token-for-tests",
+    adminAllowCidr: [],
     trustProxy: ["127.0.0.0/8", "::1/128"],
     publicUrl: "",
     // Tests never ask GitHub; the update tests turn this on against a local server.

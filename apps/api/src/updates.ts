@@ -117,6 +117,7 @@ export class UpdateChecker {
     readonly version: string,
     private readonly timers: UpdateTimers = DEFAULT_UPDATE_TIMERS,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly onFailure: () => void = () => {},
   ) {
     this.source = `${config.repo}|${config.channel}`;
     this.current = parseSemver(version);
@@ -134,6 +135,7 @@ export class UpdateChecker {
       try {
         await this.check(false, log);
       } catch (error) {
+        this.onFailure();
         // Valkey trouble: the next tick tries again.
         log?.warn({ err: error }, "update check failed");
       }
@@ -168,6 +170,7 @@ export class UpdateChecker {
       const last = stored?.checkedAt ? Date.parse(stored.checkedAt) : 0;
       if (!manual && now - last < this.timers.intervalMs * 0.9) return false;
       const next = await this.ask(stored);
+      if (next.status !== "ok") this.onFailure();
       await this.valkey.set(apiKeys.updateState, JSON.stringify(next), "EX", STATE_TTL_SECONDS);
       if (next.status === "ok" && next.latest !== stored?.latest)
         log?.info({ latest: next.latest, current: this.version }, "update check: latest release");

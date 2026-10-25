@@ -18,7 +18,7 @@ import { useLocale, useT } from "../../lib/i18n";
 
 /** Shared with the console's nav badge, so both read one request. */
 export const updateQuery = (token: string) => ({
-  queryKey: ["admin", "update", token],
+  queryKey: ["admin", "update"],
   queryFn: () => api.admin.update(token),
   refetchInterval: 10 * 60_000,
   retry: false,

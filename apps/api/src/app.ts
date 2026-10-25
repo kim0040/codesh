@@ -1,4 +1,4 @@
-import { type ErrorCode, errorResponse } from "@codesh/shared";
+import { diagnosticError, type ErrorCode, errorResponse } from "@codesh/shared";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import {
@@ -8,6 +8,7 @@ import {
   type ZodTypeProvider,
 } from "@fastify/type-provider-zod";
 import Fastify, { type FastifyRequest, type FastifyServerOptions } from "fastify";
+import { adminAccess } from "./admin-access.js";
 import { Ctx, type Deps } from "./ctx.js";
 import { ApiError, forbidden } from "./errors.js";
 import { rateLimit } from "./rate.js";
@@ -35,6 +36,19 @@ const OPEN_WITHOUT_LOGIN = [
   "/api/settings/public",
   "/api/version",
 ];
+
+declare module "fastify" {
+  interface FastifyRequest {
+    diagnosticCode: string;
+  }
+}
+
+const OPERATIONAL_ADMIN_READS = new Set([
+  "/api/admin/overview",
+  "/api/admin/diagnostics",
+  "/api/admin/diagnostics/export",
+  "/api/admin/security",
+]);
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -81,17 +95,31 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
     limits: { fileSize: MULTIPART_CEILING_BYTES, files: 1000, parts: 1200, fields: 50 },
   });
   app.decorateRequest("session");
+  app.decorateRequest("diagnosticCode", "unknown");
 
   app.addHook("onRequest", async (request, reply) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
-    if (!request.url.startsWith("/api/")) return;
-    if (crossSite(request, ctx.config.publicUrl)) {
-      throw forbidden("Cross-site requests are not accepted; send X-Codesh: 1");
+    const matched = request.routeOptions.url ?? request.url;
+    const admin = matched.startsWith("/api/admin/") || /^\/api\/admin(?:[/?]|$)/.test(request.url);
+    if (!admin && !matched.startsWith("/api/") && !request.url.startsWith("/api/")) return;
+    // Matched route metadata keeps encoded or absolute-form paths inside the same guard.
+    if (admin) {
+      await adminAccess(ctx, request, reply);
+      // Safe operational reads must remain usable without profile/session/settings storage.
+      if (
+        (request.method === "GET" || request.method === "HEAD") &&
+        OPERATIONAL_ADMIN_READS.has(matched)
+      )
+        return;
+    } else {
+      if (crossSite(request, ctx.config.publicUrl))
+        throw forbidden("Cross-site requests are not accepted; send X-Codesh: 1");
+      await rateLimit(ctx, clientIp(ctx, request), "api", ctx.config.rateLimit.apiPerMinute);
     }
-    await rateLimit(ctx, clientIp(ctx, request), "api", ctx.config.rateLimit.apiPerMinute);
     request.session = await loadSession(ctx, request, reply);
     const settings = await ctx.settings();
     if (
+      !admin &&
       !settings.guestAllowed &&
       !request.session.identity &&
       !OPEN_WITHOUT_LOGIN.some((prefix) => request.url.startsWith(prefix))
@@ -101,6 +129,18 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
   });
 
   app.addHook("onResponse", async (request, reply) => {
+    if (reply.statusCode >= 500)
+      ctx.diagnostics.record(
+        "response_5xx",
+        {
+          method: request.method,
+          route: request.routeOptions.url ?? "/:id",
+          status: reply.statusCode,
+          code: request.diagnosticCode,
+          durationMs: reply.elapsedTime,
+        },
+        "error",
+      );
     ctx.metrics.requests.observe(
       {
         method: request.method,
@@ -112,8 +152,18 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
   });
 
   // The update check runs in the background and never delays a request or the start.
-  app.addHook("onReady", async () => ctx.updates.start(app.log));
-  app.addHook("onClose", async () => ctx.updates.stop());
+  const onValkeyError = () => ctx.diagnostics.record("valkey_error", {}, "error");
+  const onValkeyReady = () => ctx.diagnostics.record("valkey_recovered");
+  app.addHook("onReady", async () => {
+    await ctx.diagnostics.start();
+    ctx.valkey.on("error", onValkeyError).on("ready", onValkeyReady);
+    ctx.updates.start(app.log);
+  });
+  app.addHook("onClose", async () => {
+    ctx.updates.stop();
+    ctx.valkey.off("error", onValkeyError).off("ready", onValkeyReady);
+    await ctx.diagnostics.close();
+  });
 
   // Open SSE streams never end by themselves and would keep `app.close()` waiting.
   app.addHook("preClose", async () => {
@@ -125,6 +175,7 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
   );
 
   app.setErrorHandler((error, request, reply) => {
+    request.diagnosticCode = error instanceof ApiError ? error.code : "unknown";
     if (error instanceof ApiError) {
       return reply
         .code(error.status)
@@ -159,7 +210,13 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
         .send(errorResponse(code, failure.message));
     }
     // The contract has no code for unexpected failures; do not leak details to the client.
-    request.log.error({ err: error }, "unhandled error");
+    const details = diagnosticError(error);
+    ctx.diagnostics.record(
+      "server_error",
+      { ...details, route: request.routeOptions.url ?? "/:id" },
+      "error",
+    );
+    request.log.error(details, "unhandled error");
     return reply
       .code(500)
       .send({ statusCode: 500, error: "Internal Server Error", message: "Internal Server Error" });
