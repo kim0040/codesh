@@ -7,6 +7,14 @@ text of its GitHub release (RELEASING.md).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-25
+
+### Fixed
+
+- When someone opened a share read-only and then pasted an edit link (`#key=...`) into that same
+  open tab, the editor could stay read-only with the read-only banner showing, mostly in Safari;
+  reloading fixed it. Now the editor switches to editing as soon as the key is accepted.
+
 ## [1.0.0] - 2026-10-25
 
 The first release: real-time code sharing for one network, with no outside service at runtime.
@@ -53,5 +61,6 @@ The first release: real-time code sharing for one network, with no outside servi
   edit keys in every open tab. Shares with a PIN or approval load their copy only after the server
   accepts the connection. Lab previews never keep copies.
 
-[Unreleased]: https://github.com/kim0040/codesh/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kim0040/codesh/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/kim0040/codesh/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kim0040/codesh/releases/tag/v1.0.0
