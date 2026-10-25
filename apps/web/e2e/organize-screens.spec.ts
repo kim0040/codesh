@@ -175,6 +175,8 @@ test("admin templates editor", async ({ browser }) => {
     await admin.page.goto("/admin");
     await admin.page.getByTestId("admin-token").fill(ADMIN_TOKEN);
     await admin.page.getByTestId("admin-login").click();
+    // The console opens on the overview; templates and the contact are under Settings.
+    await admin.page.getByRole("tab", { name: "Settings", exact: true }).click();
     const editor = admin.page.getByTestId("templates-editor");
     await expect(editor.getByText("Team service skeleton")).toBeVisible();
     await editor.scrollIntoViewIfNeeded();

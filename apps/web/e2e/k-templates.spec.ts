@@ -119,6 +119,8 @@ test("admin adds a template and sets the contact; both reach the picker and the 
     await admin.page.goto("/admin");
     await admin.page.getByTestId("admin-token").fill(ADMIN_TOKEN);
     await admin.page.getByTestId("admin-login").click();
+    // The console opens on the overview; templates and the contact are under Settings.
+    await admin.page.getByRole("tab", { name: "Settings", exact: true }).click();
     const editor = admin.page.getByTestId("templates-editor");
     await expect(editor).toBeVisible();
 
@@ -222,6 +224,8 @@ test("admin: templates share one size limit, and a refused save shows the reason
     await admin.page.goto("/admin");
     await admin.page.getByTestId("admin-token").fill(ADMIN_TOKEN);
     await admin.page.getByTestId("admin-login").click();
+    // The console opens on the overview; templates and the contact are under Settings.
+    await admin.page.getByRole("tab", { name: "Settings", exact: true }).click();
     const editor = admin.page.getByTestId("templates-editor");
     await expect(editor).toBeVisible();
 
