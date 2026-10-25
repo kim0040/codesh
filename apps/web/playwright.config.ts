@@ -27,6 +27,8 @@ const MOTION = /(?:p-smooth-typing|s-projector|s-remote-cursors)\.spec\.ts$/;
 const GUIDE = /(?:l-intro-header|m-intro-detail|u-guide-pages)\.spec\.ts$/;
 // The first-run tour and the motion polish: focus, placement and transitions differ per engine.
 const TOUR = /w-[a-z-]+\.spec\.ts$/;
+// Owner and participant permissions: refusals and resync go through each engine's WebSocket.
+const PERMISSIONS = /x-permissions\.spec\.ts$/;
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-0123";
 const shared = { MONGO_URL, VALKEY_URL, COLLAB_SECRET: secret, NODE_ENV: "development" };
@@ -55,7 +57,7 @@ export default defineConfig({
           {
             name: "firefox",
             use: { browserName: "firefox" as const },
-            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE, TOUR],
+            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE, TOUR, PERMISSIONS],
           },
         ]
       : []),
@@ -64,7 +66,7 @@ export default defineConfig({
           {
             name: "webkit",
             use: { browserName: "webkit" as const },
-            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE, TOUR],
+            testMatch: [CROSS_OS, DEVICE, MOTION, GUIDE, TOUR, PERMISSIONS],
           },
         ]
       : []),
