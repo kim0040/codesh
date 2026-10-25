@@ -55,41 +55,46 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 
 ### 2.3 언어와 문법 강조
 - JavaScript, TypeScript, Python, Java, C++, Go, Rust, SQL, Markdown 등 200개 이상의 프로그래밍 언어 문법 강조를 지원합니다.
-- 하단 상태 표시줄의 언어 영역을 클릭하여 언어를 직접 검색하고 변경할 수 있습니다. 언어를 변경하면 공유의 모든 참여자에게 동일하게 적용됩니다.
+- 하단 상태 표시줄의 언어 영역을 클릭하여 언어를 직접 검색하고 변경할 수 있습니다. 언어를 변경하면 공유의 모든 참여자에게 동일하게 적용됩니다(소유자 또는 언어 변경 권한을 부여받은 참여자만 가능).
 - 에디터 내 모든 문법 토큰 색상은 WCAG 2.2 AA 기준(배경 대비 4.5:1 이상)을 충족합니다.
 
-### 2.4 줄 단위 코멘트
+### 2.4 코드 자동 완성 및 부드러운 입력
+- **코드 자동 완성**: 에디터에서 단어를 입력하는 도중 `Tab` 키를 누르거나 입력을 잠시 멈추면(350ms) 현재 언어의 키워드 및 문서 내 단어를 기반으로 자동 완성 팝업이 표시됩니다. 방향키와 `Tab` 또는 `Enter`로 원하는 항목을 선택할 수 있으며, 설정에서 켜거나 끌 수 있습니다(보기 전용 상태에서는 비활성화).
+- **타이핑 중 언어 제안**: 일반 텍스트(`Plain Text`) 상태에서 코드를 작성하면 내용에 맞는 언어가 감지될 때 하단 상태 표시줄에 언어 제안 배지(`{language} 코드로 보여요`)가 나타납니다. **적용** 버튼을 누르면 즉시 해당 언어로 전환되고 **제안 닫기** 버튼으로 닫을 수 있습니다.
+- **부드러운 입력 (Smooth Caret)**: 타이핑 시 커서가 100ms 감속 곡선으로 부드럽게 글자를 따라 이동하며, 1.2초 주기의 페이드 깜빡임이 적용됩니다. 원격 참여자가 동시에 편집해도 로컬 커서의 깜빡임 리듬은 깨지지 않습니다. 운영체제의 모션 줄이기(Reduced Motion)가 켜져 있으면 움직임 없이 고정된 커서로 동작합니다.
+
+### 2.5 줄 단위 코멘트
 - 코드의 특정 줄 또는 범위를 선택한 후 단축키 Mac `⌃⌘M`, Windows·Linux `Ctrl+Alt+M`을 누르거나 상단 바의 **코멘트** 버튼을 누릅니다.
 - 코멘트 작성 창에서 내용을 입력하고 **등록**을 누릅니다(최대 2,000자).
 - 코멘트는 문서 내부의 상대 위치로 고정되므로, 다른 사용자가 문서 앞부분에 코드를 추가하거나 삭제해도 본래 위치를 유지합니다.
 - 해결된 대화는 **해결됨으로 표시** 버튼으로 정리할 수 있으며, 필요 시 **다시 열기**가 가능합니다. 패널 상단의 스위치로 해결된 코멘트를 숨기거나 볼 수 있습니다.
 
-### 2.5 이력 재생과 버전 복원
+### 2.6 이력 재생과 버전 복원
 - 공유의 **소유자**만 상단 바의 **이력** 버튼(단축키 Mac `⌃⌘H`, Windows·Linux `Ctrl+Alt+H`)을 열 수 있습니다.
 - 편집 활동 중 약 30초 간격으로 스냅샷이 자동 생성되며 최대 100개 버전까지 타임라인에 기록됩니다(기본 7일 보관).
 - **재생** 버튼을 누르면 코드가 작성되어 온 과정을 1배속, 2배속, 4배속으로 재생할 수 있습니다.
 - **현재와 비교**를 선택하면 특정 시점과 현재 문서 사이의 차이점(diff)을 한 화면에 겹쳐 보여 줍니다.
 - **버전 복원**을 누르면 문서 전체가 해당 시점의 상태로 되돌아갑니다. 복원은 기존 이력을 지우지 않고 일반 변경 사항으로 추가되므로 안전합니다.
 
-### 2.6 지운 내용 보호
+### 2.7 지운 내용 보호
 - 다른 일반 참여자에게는 항상 현재 시점의 문서 최종 내용만 전송됩니다.
 - 과거에 입력했다가 삭제한 텍스트 이력은 일반 참여자의 브라우저로 전송되지 않으며, 서버에만 보관되어 소유자만 이력 창에서 확인할 수 있습니다.
 
-### 2.7 다운로드와 ZIP 내보내기
+### 2.8 다운로드와 ZIP 내보내기
 - 단일 파일 다운로드: 상단 바 메뉴에서 **다운로드**를 선택하거나 파일 옵션 메뉴에서 **이 파일 다운로드**를 누르면 해당 언어에 맞는 확장자로 즉시 다운로드됩니다.
 - 전체 다운로드: 공유에 여러 파일이 포함된 경우 **전체 .zip 다운로드**를 선택하여 전체 폴더 구조를 압축 파일로 내려받을 수 있습니다.
 
-### 2.8 업로드 및 드래그 앤 드롭
+### 2.9 업로드 및 드래그 앤 드롭
 - 파일, 폴더, 또는 `.zip` 파일을 브라우저 창으로 끌어다 놓으면 공유에 파일이 추가됩니다.
 - 여러 파일 공유를 새로 열거나, 공유 대화상자의 접속자 목록에서 특정 사용자의 아바타 위로 파일을 끌어다 놓으면 해당 사용자에게 파일을 바로 전송할 수 있습니다.
 - 단일 요청당 최대 업로드 용량은 관리자 설정(`maxUploadMB`, 기본 200MB)에 따르며, 코드 텍스트 용량은 문서 한도(`maxDocBytes`, 기본 5MB)를 초과할 수 없습니다.
 
-### 2.9 폴더와 태그로 내 공유 정리하기
+### 2.10 폴더와 태그로 내 공유 정리하기
 - **내 공유** 화면의 각 공유 카드에서 태그 아이콘(**정리**)을 누르면 폴더 하나와 태그를 최대 10개(태그당 30자)까지 지정할 수 있습니다. 폴더 이름은 60자까지이며, 기존 폴더 중에서 고르거나 새 이름을 입력해 만듭니다. 폴더와 태그는 대소문자를 구분하지 않고 같은 것으로 취급됩니다.
 - 왼쪽 폴더 목록(좁은 화면에서는 상단 버튼 줄)에서 **모든 공유**, 폴더 이름, **폴더 없음**을 골라 목록을 좁히고, 태그 칩을 눌러 다시 좁힐 수 있습니다. 검색어와 함께 사용할 수 있습니다.
 - 폴더와 태그는 **나에게만** 보이며 공유 링크를 가진 다른 사람에게는 전달되지 않습니다. 내가 만들지 않은 공유를 **목록에서 제거**하거나, 차단되거나, 공유가 삭제·만료되면 해당 폴더와 태그도 함께 사라집니다. 내가 만든 공유는 목록에서 제거해도 정리 정보가 유지됩니다.
 
-### 2.10 템플릿으로 시작하기
+### 2.11 템플릿으로 시작하기
 - 첫 화면의 **템플릿으로 시작** 버튼 또는 명령 팔레트(`⌘K` or `Ctrl+K`)의 **템플릿으로 새 공유 만들기**로 템플릿 선택 창을 엽니다. 검색창에서 이름이나 언어로 찾고 방향키와 Enter로 고를 수 있으며, 오른쪽(좁은 화면에서는 아래)에서 파일 목록과 미리보기를 확인한 뒤 **공유 만들기**를 누릅니다.
 - 기본 제공 템플릿: Java, Python, JavaScript, TypeScript, Go, Rust, C, C++, C#, Kotlin, Swift, SQL, HTML·CSS·JS 웹 페이지, Markdown, Bash, 여러 파일로 된 Python 패키지.
 - 관리자가 등록한 추가한 템플릿은 **우리 템플릿** 그룹에 함께 표시됩니다. 템플릿을 고르지 않고 만드는 기존 **새 공유 만들기**는 그대로 동작합니다.
@@ -121,7 +126,21 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - **내보내기**: 해당 사용자의 접속을 끊습니다. 사용자는 코드나 링크로 다시 입장할 수 있습니다.
 - **내보내고 차단**: 해당 사용자를 즉시 추방하고 차단 목록에 등록합니다. 차단된 사용자는 해당 공유에 다시 입장할 수 없습니다.
 
-### 3.5 편집 잠금
+### 3.5 참여자 권한 제어 (Participant Permissions)
+- 소유자는 공유 대화상자의 **접근 설정** 탭에서 편집자에게 허용할 세부 권한을 개별적으로 설정할 수 있습니다.
+  - **참여자의 공유 이름 변경 허용 (`allowParticipantRename`)**: 참여자가 공유 제목을 수정할 수 있습니다.
+  - **참여자의 파일 추가·이름 변경·삭제 허용 (`allowParticipantFiles`)**: 참여자가 새 파일을 추가하거나 기존 파일의 이름을 변경하고 삭제할 수 있습니다.
+  - **참여자의 파일 언어 변경 허용 (`allowParticipantLanguage`)**: 참여자가 기존 파일의 프로그래밍 언어를 변경할 수 있습니다.
+- 모든 스위치는 신규 생성 공유 및 기존 공유에서 기본값이 **꺼짐**(소유자 전용)입니다.
+- Collab 및 API 서버에서 실시간으로 검증되며, 권한 없는 변경 시도는 거부되고 문서가 재동기화됩니다.
+
+### 3.6 전송 거부된 로컬 텍스트 보관
+- 소유자가 권한 설정을 변경하거나 편집을 잠가 내가 작성한 내용이 서버에서 거부된 경우, 로컬에서 작성 중이던 텍스트는 유실되지 않고 탭 메모리에 안전하게 보관됩니다.
+- 화면 상단에 "보내지 못한 텍스트를 이 탭에 보관했어요" 경고 배너가 나타납니다.
+- **보내지 못한 텍스트 복사** 버튼을 눌러 파일별 작성 내용을 확인하고 클립보드에 복사할 수 있습니다.
+- 사본은 탭 메모리에만 머무르며, 탭을 닫거나 **사본 버리기**를 선택하기 전까지 안전하게 유지됩니다.
+
+### 3.7 편집 잠금
 - **편집 잠금**을 켜면 소유자를 제외한 모든 참여자의 에디터가 읽기 전용 상태로 전환됩니다.
 - 강사나 발표자가 설명을 진행하는 동안 참여자들의 수정을 일시적으로 멈추고자 할 때 사용합니다.
 
@@ -161,30 +180,36 @@ codesh는 서버가 있는 내부 네트워크에서 동작하는 실시간 협�
 - **에디터 테마**:
   - 다크 계열: Slate, Graphite
   - 라이트 계열: Paper, Sand
-- **글꼴 크기**: 12px ~ 24px (기본값 14px)
+- **글꼴 크기**: 10px ~ 28px (기본값 14px)
 
 ### 5.2 편집 설정
+- **코드 자동 완성**: 켜기 / 끄기 (기본값: 켜짐)
+- **부드러운 입력 (Smooth typing)**: 켜기 / 끄기 (기본값: 켜짐, 시스템의 모션 줄이기 설정 시 고정 커서로 동작)
 - **탭 크기**: 공백 2칸, 4칸, 8칸
 - **들여쓰기 방식**: 공백, 탭
 - **긴 줄 바꿈**: 켜기 / 끄기
 - **줄 번호 표시**: 켜기 / 끄기
 
 ### 5.3 이 기기에 저장된 데이터
-- **이 기기에 오프라인 사본 저장**: 기본값은 켜짐입니다. 연결이 끊겨도 입력 내용이 이 브라우저(IndexedDB)에 보관되고, 연결되면 서버와 합쳐집니다. 여러 사람이 함께 쓰는 기기에서는 꺼 두세요. 끄면 이미 저장된 이 공유의 사본도 바로 지워집니다.
+- **이 기기에 오프라인 사본 저장**: 처음 에디터를 열었을 때 기기별로 사본 저장 여부를 묻는 알림이 표시됩니다. 기본값은 미결정(undecided) 상태이며, 사용자가 "이 기기에 저장"을 선택하기 전까지는 브라우저(IndexedDB)에 아무런 사본도 저장되지 않습니다. 연결이 끊겨도 입력 내용이 이 브라우저에 안전하게 보관되고, 다시 연결되면 서버와 자동으로 합쳐집니다. 공용 기기에서는 "이 기기에는 저장 안 함"을 선택하세요. 설정에서 사본 저장을 끄면 이미 저장된 모든 사본이 즉시 삭제됩니다.
 - PIN이 있거나 입장 승인이 필요한 공유는 설정과 관계없이 다시 입장이 허용된 뒤에만 사본을 불러옵니다.
 - **이 기기에서 지우기**: 지금 열려 있는 공유의 오프라인 사본과 저장된 편집 키를 이 브라우저에서 지웁니다. 같은 공유가 열려 있는 다른 탭에서도 함께 지워지고, 이후에는 사본을 다시 만들지 않습니다(설정을 껐다 켜면 다시 저장). 서버에 있는 공유는 그대로입니다.
 - **로그아웃하고 모두 지우기**: 로그인한 경우에만 보입니다. 로그인을 끊고 이 브라우저의 모든 공유 사본과 편집 키를 지우며, 열려 있는 다른 탭은 첫 화면으로 돌아갑니다. 다른 계정으로 로그인했을 때도 이전 계정의 사본은 지워집니다.
 - 공유에서 내보내지거나 차단된 경우, 입장 권한을 서버가 거부한 경우, 공유가 삭제된 경우에도 해당 사본은 자동으로 지워집니다.
 - 서버에서는 이미 닫은 브라우저의 사본을 지울 수 없습니다. 공용 기기에서는 사용 후 **이 기기에서 지우기**를 누르거나 별도의 브라우저 프로필을 사용하세요.
 
-### 5.4 키맵 설정
+### 5.4 튜토리얼 다시 보기 및 진단 정보
+- **안내 다시 보기 (Replay tutorial)**: 에디터 첫 방문 시 제공되는 스포트라이트 안내 투어를 언제든 다시 실행할 수 있습니다.
+- **진단 (Diagnostics)**: 브라우저 내부에서 발생한 오류 범주, 연결 상태 및 성능 지표를 최대 500건, 256KB(14일 보관)까지 로컬에만 보관합니다. 외부로 자동 전송되지 않으며 문서 내용과 비밀값은 철저히 제외됩니다. **진단 정보 복사** 또는 **내보내기**를 눌러 JSON 파일로 저장할 수 있습니다.
+
+### 5.5 키맵 설정
 - 선호하는 에디터 조작 방식에 따라 키맵을 변경할 수 있습니다.
   - **기본** (Default)
   - **Vim**
   - **Emacs**
   - **Sublime**
 
-### 5.5 운영체제별 단축키
+### 5.6 운영체제별 단축키
 
 codesh는 접속한 기기의 운영체제를 알아보고 단축키와 안내 표시를 그 기기에 맞춥니다. `?`를 누르면 지금 기기의 키가 담긴 단축키 안내가 열립니다. 아래 표에서 **Mod**는 Mac의 `⌘`, Windows와 Linux의 `Ctrl`입니다. `⌃`은 Mac의 Control 키입니다.
 
@@ -279,7 +304,7 @@ Mac에서 `⌘⌥`는 브라우저 개발자 도구와 macOS(다른 앱 가리�
 ## 8. English Quick Reference
 
 ### Starting and Joining
-- **Create**: Click **Create a share** on the home page (`/`) to start an instant sharing session. No account required.
+- **Create**: Click **Create a share** on the home page (`/`) to start an instant sharing session. No account required by default.
 - **Join with Code**: Enter the 6-digit code on the home page or open `/<6-digit-code>` in your browser.
 - **QR Code & Projector**: Use the **Share** dialog (`⌃⌘S` on a Mac, `Ctrl+Alt+S` elsewhere) to view the join code and QR code. Use **Projector mode** for large classroom display.
 - **Nearby Shares**: Shares open on your local network/room appear automatically on the home page.
@@ -287,6 +312,8 @@ Mac에서 `⌘⌥`는 브라우저 개발자 도구와 macOS(다른 앱 가리�
 
 ### Collaboration & Editing
 - **Real-Time Sync**: Conflict-free concurrent typing powered by Yjs CRDT with remote cursors and selection highlights.
+- **Smooth Typing & Carets**: Carets glide smoothly with a 100 ms decelerating curve; remote edits do not disrupt local cursor blinking or name tags.
+- **Completion & Suggestions**: Code completion via `Tab` or typing pause; automatic language suggestion badges appear in the status bar while typing plain text.
 - **Multiple Files**: Support for up to 100 files and folder paths. Automatic language detection by file extension.
 - **Comments**: Anchor comments to lines or selections (`⌃⌘M` on a Mac, `Ctrl+Alt+M` elsewhere). Comments track document edits using relative positions.
 - **History & Restore**: Owners can inspect timeline snapshots, play back edits at 1x/2x/4x, compare a version with the current text, and restore it.
@@ -301,13 +328,15 @@ Mac에서 `⌘⌥`는 브라우저 개발자 도구와 macOS(다른 앱 가리�
 
 ### Access Control
 - **View-Only Mode**: Default to read-only access. Share the separate edit link with collaborators who need edit rights. The edit link ends in `#key=...`, which browsers never send to a server; opening it removes the key from the address bar at once (old `?key=` links still work and are cleaned the same way), and the server remembers the edit right for reloads.
+- **Participant Permissions**: Owners control whether editors can rename the share, add or delete files, or change file languages (all default to off). Unauthorized changes are refused on the server, and unsent text is safely preserved in tab memory.
 - **PIN Lock**: Secure the share with a 4–32 character PIN (scrypt hashed). 5 invalid attempts trigger a 10-minute lockout.
 - **Waiting Room**: Require owner approval for every newcomer before granting access.
 - **Lock / Kick / Ban**: Owners can lock edits across all participants, temporarily kick users, or permanently ban them.
 
 ### Settings & Keymaps
-- **Offline copy on this device**: the first time you open the editor on a device, a bar above it asks whether to keep offline copies there: **Keep on this device** or **Not on this device**. Until you answer, nothing is saved in the browser. The answer applies to the whole browser and can be changed in Settings > *Saved on this device*; turning it off deletes every copy, also of shares you are not viewing. While you are offline, the banner says whether your changes are in a copy on this device or only in the open tab. **Forget on this device** closes the share in every tab, deletes its offline copy and saved edit key, and does not keep a copy of it again until you turn copies on while it is open. **Sign out, forget all** (shown when signed in) closes every share, signs out and deletes everything, and returns other tabs to the start page; signing in as another account does the same. Shares with a PIN or approval load their copy only after you are let in again. Removal, a ban, a refused join, an expired or deleted share and a PIN or approval asked for again also delete the copy, even if the share was not open at the time. If you have changes that have not reached the server yet, **Forget on this device** and **Sign out, forget all** ask first, because those changes would be lost; when the owner removes you or asks for a PIN or approval, the page says that such changes could not be kept. If the app says that some offline copies might remain, clear this site's data in the browser settings. Lab previews are never saved.
-- **Shortcuts per OS**: Press `?` for the keys of the device you are on. Mac uses `⌃⌘` for app shortcuts (`⌘⌥` belongs to the browser and macOS), Windows and Linux use `Ctrl+Alt`. Section 5.5 lists every key for Mac and Windows / Linux, plus notes on Option and AltGr typing, Linux window-manager grabs, Firefox and IME composition.
-- **Appearance**: Dark and Light app themes; editor themes (Slate, Graphite, Paper, Sand); font size (12–24px).
+- **Offline copy on this device**: the first time you open the editor on a device, a prompt asks whether to keep offline copies there: **Keep on this device** or **Not on this device**. The default is undecided (`undecided`), and until you answer, nothing is saved in the browser. The answer applies to the whole browser and can be changed in Settings > *Saved on this device*; turning it off deletes every copy, also of shares you are not viewing. While you are offline, the banner says whether your changes are in a copy on this device or only in the open tab. **Forget on this device** closes the share in every tab, deletes its offline copy and saved edit key, and does not keep a copy of it again until you turn copies on while it is open. **Sign out, forget all** (shown when signed in) closes every share, signs out and deletes everything, and returns other tabs to the start page; signing in as another account does the same. Shares with a PIN or approval load their copy only after you are let in again. Removal, a ban, a refused join, an expired or deleted share and a PIN or approval asked for again also delete the copy, even if the share was not open at the time. If you have changes that have not reached the server yet, **Forget on this device** and **Sign out, forget all** ask first, because those changes would be lost; when the owner removes you or asks for a PIN or approval, the page says that such changes could not be kept. If the app says that some offline copies might remain, clear this site's data in the browser settings. Lab previews are never saved.
+- **Tutorial & Diagnostics**: Replay the first-run spotlight tutorial anytime from Settings. Export local-only diagnostics (capped at 500 events / 256 KB) without automated external telemetry.
+- **Shortcuts per OS**: Press `?` for the keys of the device you are on. Mac uses `⌃⌘` for app shortcuts (`⌘⌥` belongs to the browser and macOS), Windows and Linux use `Ctrl+Alt`. Section 5.6 lists every key for Mac and Windows / Linux, plus notes on Option and AltGr typing, Linux window-manager grabs, Firefox and IME composition.
+- **Appearance**: Dark and Light app themes; editor themes (Slate, Graphite, Paper, Sand); font size (10–28px).
 - **Keymaps**: Default, Vim, Emacs, and Sublime.
 - **Language**: Switch UI between Korean (default) and English.

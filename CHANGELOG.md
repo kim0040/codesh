@@ -7,6 +7,42 @@ text of its GitHub release (RELEASING.md).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-25
+
+### Added
+
+- Code completion: optional word and keyword autocompletion in the editor (Tab or 350 ms typing pause), pulling language keywords and in-document words; disabled for viewers or when turned off in Settings.
+- Language suggestion: automatic programming language detection while typing plain text, displaying a suggestion badge in the status bar with one-click acceptance or dismissal.
+- First-run tutorial and replay: a lazy-loaded step-by-step tour with a spotlight overlay guiding new users through key controls on their first editor visit, replayable anytime from Settings.
+- Guide pages: dedicated in-app documentation under `/guide` covering workflow, features, network topology, privacy/security, and FAQs, with lazy per-language copy and redirection from legacy home-page section anchors.
+- Local diagnostics export: bounded client-side diagnostics in Settings (up to 500 event groups, 256 KB, 14-day retention) and server-side diagnostics in the admin console, with manual JSON export and zero automated external telemetry.
+- Richer admin console: new dedicated panels for Overview (real-time metrics, system health badges, 24-hour activity chart), Shares (title search, pagination, Lock/Unlock and permanent Delete actions), Diagnostics (level, source, and timeframe filters, plus server bundle export), and Security (rate limits, proxy status, and sampled failed-login audit).
+- Owner-controlled participant permissions: three new access switches in Share → Access (`allowParticipantRename`, `allowParticipantFiles`, `allowParticipantLanguage`), defaulting to off and enforced on both the API and collab server.
+- Release source maps: web source maps packaged as `codesh-web-sourcemaps-<version>.tar.gz` attached to GitHub releases alongside `scripts/symbolicate.mjs` for post-hoc symbolication, excluded from runtime container images.
+
+### Changed
+
+- Smooth caret and blinking: cursor glides with a 100 ms decelerating curve during local typing and navigation, with a 1.2 s ease-in-out blink cycle; caret stays solid when reduced motion is preferred.
+- App-wide motion polish: smooth scale and translate transitions on button presses, switches, tab switching, and dialogs, with motion-safe fallbacks for users preferring reduced motion.
+- Admin access hardening: optional `ADMIN_ALLOW_CIDR` restricts admin console and API access to trusted IPv4 and IPv6 networks before token verification, sessions, or database operations.
+- Global admin guess budget: shared Valkey token bucket (capacity 100, refilling 100 per 10 minutes) across API replicas pausing wrong token guesses for 30 seconds upon depletion, while allowing correct tokens and CIDR-allowlisted addresses to bypass lockout.
+- Admin HTTP warning: persistent banner alerting operators when accessing the admin console over unencrypted plain HTTP on non-loopback hosts.
+
+### Fixed
+
+- Live cursor stability: remote document edits no longer restart the local caret blink rhythm, and remote cursors and participant name tags retain their DOM identity through participant list changes without flashing.
+- Projector mode fullscreen: stabilized fullscreen callback handling so remote edits, participant joins/departures, and React StrictMode re-renders do not exit projector fullscreen mode.
+- iOS focus zoom: prevented automatic viewport zooming when focusing form controls across all iOS browsers (WebKit-based), while preserving pinch zoom.
+- Tab bar scrollbar: eliminated an unnecessary vertical scrollbar on horizontal file tab lists across browsers.
+- Preserved unsent text: when an edit is refused by server permissions or a lock change, unsent local changes are preserved in a tab-memory recovery dialog with a one-click copy option.
+
+### Security
+
+- Server-side participant permissions: collab update guard verifies all operation roots against document state and rejects unauthorized file additions, renames, deletions, and language changes before broadcast or persistence.
+- Diagnostics privacy scrubbing: strict field scrubber replaces property keys and exception messages with safe categories/templates, excludes document contents, file names, PINs, and auth tokens, and enforces byte and group limits.
+- Collab update rate limiting: per-connection token bucket (burst 200 updates, sustained refill of 50 updates/second) protecting collab instances against update flooding.
+- Admin token enforcement: production startup rejects nonempty admin tokens shorter than 32 characters, and documented zero-downtime token rotation via `openssl rand -hex 32`.
+
 ## [1.0.1] - 2026-10-25
 
 ### Fixed
@@ -64,6 +100,7 @@ The first release: real-time code sharing for one network, with no outside servi
   edit keys in every open tab. Shares with a PIN or approval load their copy only after the server
   accepts the connection. Lab previews never keep copies.
 
-[Unreleased]: https://github.com/kim0040/codesh/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/kim0040/codesh/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/kim0040/codesh/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/kim0040/codesh/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kim0040/codesh/releases/tag/v1.0.0

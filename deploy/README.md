@@ -20,6 +20,28 @@ curl http://localhost/healthz
 
 `.env.example` documents every variable. Secrets are random hex written by `generate-secrets.sh`; it never overwrites a value that is set. `MONGO_PASSWORD` only seeds a new volume: change it later with `mongosh`, not by editing `.env`.
 
+## Admin configuration and access hardening
+
+- **HTTPS required**: The admin console sends its bearer token with every request. Plain HTTP on non-loopback hosts triggers a persistent cleartext warning. Configure HTTPS in production.
+- **Admin token and rotation**: Generate an admin token with `openssl rand -hex 32`. In production, tokens shorter than 32 characters are rejected at startup. To rotate the token: update `ADMIN_TOKEN` in `.env`, run `docker compose up -d api`, and log in again with the new token.
+- **CIDR restriction (`ADMIN_ALLOW_CIDR`)**: Restrict `/api/admin/*` and the admin console to trusted network ranges. IPv4 and IPv6 are evaluated independently, so list both families if clients use both (e.g. `ADMIN_ALLOW_CIDR=10.0.0.0/8,fd00::/8`).
+- **`TRUST_PROXY` requirement**: When running behind Caddy or a reverse proxy, set `TRUST_PROXY` to the proxy's exact subnet. If `TRUST_PROXY` is empty or incorrect, the proxy's address is evaluated instead of the real client IP, defeating CIDR restrictions and IP rate limits.
+- **Global guess budget**: Failed admin logins share an atomic Valkey token bucket across API replicas: capacity 100, refill 100 per 10 minutes. When exhausted, token comparisons pause for 30 seconds with a `429` and `Retry-After` header. Correct tokens and addresses permitted by `ADMIN_ALLOW_CIDR` bypass the pause. Fails closed if Valkey is unavailable.
+
+## Collab rate limit and participant permissions
+
+- **Collab update rate limiting**: Each collaborative WebSocket connection is protected by a token bucket (burst 200 updates, sustained refill 50/s). Exceeding this closes the connection with code 4429 (`Document update rate exceeded`). Normal typing and large single pastes (counted as 1 update) do not exceed the limit.
+- **Participant permissions**: Owners can grant editors permission to rename the share (`allowParticipantRename`), add/rename/delete files (`allowParticipantFiles`), or change file languages (`allowParticipantLanguage`). All three default to `false` for new and existing shares. Old records omitting these fields default safely to `false` without data migration. Unauthorized operations are refused by the server, and unsent text is kept in client tab memory for recovery.
+
+## Diagnostics and symbolication
+
+- **Diagnostics export**: Bounded operational diagnostics record errors, connectivity, and performance metrics (capped at 500 groups, 256 KB, 14-day retention). No telemetry is sent automatically. Users can export client diagnostics from **Settings → Diagnostics → Export**; operators can export a server bundle from **Admin Console → Diagnostics → Export** (`GET /api/admin/diagnostics/export`).
+- **Release source maps**: Web source maps are stripped from the runtime container image and published as a GitHub release asset (`codesh-web-sourcemaps-<version>.tar.gz`). To symbolicate a client export:
+  ```sh
+  tar xzf codesh-web-sourcemaps-<version>.tar.gz -C /tmp/sourcemaps
+  node scripts/symbolicate.mjs client-diagnostics.json /tmp/sourcemaps
+  ```
+
 ## Edge (Caddy)
 
 - `/` and unknown paths serve `index.html` (SPA fallback, `no-cache`); `/assets/*` is hashed build output (`immutable`, one year).

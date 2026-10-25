@@ -20,14 +20,16 @@ codesh lets everyone on the same network share and edit code together directly i
 ## Features
 
 ### Share and join
-- **Instant shares**: Create a share in one click with an 8-character address (`/<id>`) and a 6-digit join code (`/<code>`). No sign-up required.
+- **Instant shares**: Create a share in one click with an 8-character address (`/<id>`) and a 6-digit join code (`/<code>`). No sign-up required by default.
 - **Join your way**: Enter the 6-digit code, open the direct link, or scan the in-browser QR code (includes a full-screen mode for projectors).
 - **Nearby shares**: Discover shares open on your subnet, or in a room defined by the administrator, right on the start page.
 - **Send and broadcast**: Send a share invitation with a note of up to 200 characters to an online participant, or display an invitation to the entire room.
 
 ### Collaborative editing
 - **Conflict-free sync**: Concurrent typing merges automatically with Yjs and Hocuspocus; offline edits merge cleanly when the connection returns.
-- **Presence and following**: Every cursor and selection shows a distinct colour and name; click any participant to follow their view in real time.
+- **Presence and following**: Every cursor and selection shows a distinct colour and name; click any participant to follow their view in real time. Remote edits do not disrupt local cursor blinking, and remote name tags stay stable.
+- **Smooth typing**: The caret glides with a 100 ms decelerating transition and smooth opacity blinking; it stays solid when reduced motion is preferred.
+- **Code completion & language suggestions**: Optional word and keyword autocompletion (Tab or 350 ms typing pause); automatic language detection offers one-click language assignment while typing plain text.
 - **Multi-file workspaces**: Organize up to 100 files per share in folder paths (`src/index.ts`), with automatic language detection from file names.
 - **200+ languages and accessible themes**: Syntax highlighting for 200+ languages across four editor themes (Slate, Graphite, Paper, Sand) with token colours verified for WCAG 2.2 AA contrast. Keymaps include Default, Vim, Emacs, and Sublime.
 - **Anchored comments**: Attach discussions to a line or range; comments hold their place as surrounding code moves.
@@ -48,11 +50,17 @@ codesh lets everyone on the same network share and edit code together directly i
 
 ### Control and privacy
 - **View-only by default**: Share a view-only link freely and provide the separate edit link only to trusted collaborators. The edit link carries `#key=…` in the URL fragment, which browsers never send to the server; codesh removes it from the address bar immediately. Legacy `?key=` links continue to work and are cleaned the same way.
+- **Participant permissions**: Owners control whether editors can rename the share, add or delete files, or change file languages, with server-side verification. If an edit is refused, unsent changes are kept in memory for recovery.
 - **PIN lock**: Protect shares with a 4–32 character PIN stored as a scrypt hash; 5 wrong attempts lock out the client address for 10 minutes.
 - **Waiting room**: Review and approve each newcomer before granting entry.
 - **Kick and ban**: Remove a participant immediately, or ban them by client and network address.
 - **Offline copy you control**: The browser keeps no offline copy until you answer a one-time question in the editor ("Keep on this device" / "Not on this device"; changeable in Settings). **Forget on this device** closes the share in every tab of the browser, deletes its copy and saved edit key, and keeps no copy for that share until asked again; if there are edits the server has not confirmed, it asks first. Removal, a ban, a refused authorization, a deleted share, signing out, and switching accounts delete copies automatically. Lab previews never keep copies.
+- **Local diagnostics export**: Bounded error, connection, and performance logging in Settings (up to 500 event groups, 256 KB, 14 days) and the admin console; nothing is sent automatically, and document contents and secrets are scrubbed.
 - **Nothing leaves the network at runtime**: No external fonts, CDNs, analytics, or third-party widgets. The single optional outbound request is the release check described below, which can be disabled.
+
+### Guides and tutorial
+- **First-run tour**: Interactive spotlight walk-through highlighting key controls on the first editor visit, replayable anytime from Settings.
+- **In-app guide**: Comprehensive documentation under `/guide` for workflow, features, network topology, security, and FAQs.
 
 ### Terminal CLI
 The CLI lives in `packages/cli` and is built directly from this repository (`pnpm --filter @codesh/cli build`).
@@ -61,9 +69,9 @@ The CLI lives in `packages/cli` and is built directly from this repository (`pnp
 - `codesh pull <code|id>`: Download a share as individual files or a `.zip`, with `--pin` for locked shares.
 
 ### Admin
-- **Console** (`/admin`, admin token): Manage share lifetimes, history retention, upload size limits, guest access, rooms for nearby shares, and custom templates.
+- **Console** (`/admin`, admin token): Manage share lifetimes, history retention, upload size limits, guest access, rooms for nearby shares, and custom templates. Hardened with optional `ADMIN_ALLOW_CIDR`, a global guess rate limit, and cleartext HTTP warnings.
 - **Optional sign-in**: Connect OIDC or LDAP authentication, while keeping guest access enabled if desired.
-- **Administrative views**: Dedicated tabs for audit log, people, status, and updates.
+- **Administrative panels**: Dedicated views for system overview (metrics, health, 24 h activity), shares (search, lock/unlock, delete), diagnostics and server bundle export, security audit, people, status, and updates.
 
 ## How to use
 
