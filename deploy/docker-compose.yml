@@ -140,7 +140,7 @@ services:
   mongo:
     <<: *hardening
     cap_drop: []
-    image: mongo:8.0.34
+    image: mongo:9.0.4
     command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-2}"]
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-gachipad}
@@ -169,7 +169,7 @@ services:
   mongo-users:
     <<: *hardening
     restart: "no"
-    image: mongo:8.0.34
+    image: mongo:9.0.4
     environment:
       HOME: /tmp
       MONGO_ROOT_USER: ${MONGO_ROOT_USER:-gachipad}
@@ -198,7 +198,7 @@ services:
   valkey:
     <<: *hardening
     cap_drop: []
-    image: valkey/valkey:8.1.10
+    image: valkey/valkey:9.1.2
     # The password reaches valkey-server through a private config file: the arguments of the
     # container's init process are visible to every user of the host in `ps`.
     entrypoint:
