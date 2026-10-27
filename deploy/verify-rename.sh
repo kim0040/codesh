@@ -23,6 +23,7 @@ OLD_IMAGES=(
   ghcr.io/kim0040/codesh-web:1.0.1
 )
 PREEXISTING_OLD_IMAGES=()
+PREEXISTING_IMAGE_IDS=()
 REPORT="$ROOT/.box-out/rename2-real-upgrade.log"
 mkdir -p "$ROOT/.box-out"
 [ ! -e "$WORK" ] || { echo "$WORK already exists; choose a fresh VERIFY_DIR" >&2; exit 1; }
@@ -39,7 +40,7 @@ prepare_old_bundle_images() {
   sed -i "s|^CODESH_REGISTRY=.*|CODESH_REGISTRY=$REG|" "$INSTALL/.env"
 }
 cleanup() {
-  local status=$? image saved existing
+  local status=$? image saved existing id title
   trap - EXIT
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
   if [ -f "$INSTALL/docker-compose.yml" ]; then
@@ -58,6 +59,15 @@ cleanup() {
     saved=0
     for existing in "${PREEXISTING_OLD_IMAGES[@]}"; do [ "$existing" = "$image" ] && saved=1; done
     [ "$saved" = 1 ] || docker image rm -f "$image" >/dev/null 2>&1 || true
+  done
+  # Containerd can leave the loaded legacy image's platform manifest dangling after its
+  # tags are removed. Remove only new legacy app images, never a base/pre-existing image.
+  for id in $(docker image ls -aq --filter dangling=true --filter label=org.opencontainers.image.version=1.0.1); do
+    saved=0
+    for existing in "${PREEXISTING_IMAGE_IDS[@]}"; do [ "$existing" = "$id" ] && saved=1; done
+    [ "$saved" = 0 ] || continue
+    title="$(docker image inspect "$id" --format '{{index .Config.Labels "org.opencontainers.image.title"}}')"
+    case "$title" in codesh-api | codesh-collab | codesh-web) docker image rm -f "$id" >/dev/null 2>&1 || true ;; esac
   done
   rm -rf "$WORK"
   echo "cleanup: isolated stack, volumes, registry, branch image tags and working files removed (status=$status)"
@@ -94,6 +104,7 @@ MIN_DOCKER_GIB="${VERIFY_MIN_DOCKER_GIB:-3}"
 for image in "${OLD_IMAGES[@]}"; do
   docker image inspect "$image" >/dev/null 2>&1 && PREEXISTING_OLD_IMAGES+=("$image")
 done
+mapfile -t PREEXISTING_IMAGE_IDS < <(docker image ls -aq)
 
 echo 'build: all four production Dockerfiles from a branch snapshot (synthetic next release 1.0.2)'
 mkdir -p "$WORK/source"
@@ -115,12 +126,22 @@ docker volume create --driver local --opt type=none --opt "device=$WORK/buildkit
 BUILDER_VOLUME_STARTED=1
 docker buildx create --name "$PROJECT" --node "${PROJECT}0" --driver docker-container --driver-opt default-load=true,memory=3g >/dev/null
 BUILDER_STARTED=1
-for service in api collab caddy mdns; do
-  [ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 2 ] || fail 'need 2 GiB free before the next build'
-  BUILDX_BUILDER="$PROJECT" docker compose --env-file "$WORK/build.env" --profile mdns -f "$WORK/source/deploy/docker-compose.yml" build --build-arg "GACHIPAD_VERSION=$TARGET" "$service"
+# Build each version and service serially. These are real versioned production images, so the
+# selection verifier exercises a genuine install -> update rather than an up-to-date no-op.
+for version in 1.0.1 "$TARGET"; do
+  node --input-type=module -e '
+    import { readFileSync, writeFileSync } from "node:fs";
+    const path = process.argv[1]; const data = JSON.parse(readFileSync(path));
+    data.version = process.argv[2]; writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+  ' "$WORK/source/package.json" "$version"
+  sed -i "s/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=$version/" "$WORK/source/deploy/.env.example" "$WORK/build.env"
+  for service in api collab caddy mdns; do
+    [ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 1 ] || fail 'need 1 GiB free before the next build'
+    BUILDX_BUILDER="$PROJECT" docker compose --env-file "$WORK/build.env" --profile mdns -f "$WORK/source/deploy/docker-compose.yml" build --build-arg "GACHIPAD_VERSION=$version" "$service"
+  done
+  for name in api collab web mdns; do docker push -q "$REG/gachipad-$name:$version" >/dev/null; done
+  (cd "$WORK/source/deploy" && BUNDLE_SOURCE=registry GACHIPAD_REGISTRY="$REG" BUNDLE_SUFFIX=-linux-amd64 bash bundle.sh "$version")
 done
-for name in api collab web mdns; do docker push -q "$REG/gachipad-$name:$TARGET" >/dev/null; done
-(cd "$WORK/source/deploy" && BUNDLE_SOURCE=registry GACHIPAD_REGISTRY="$REG" BUNDLE_SUFFIX=-linux-amd64 bash bundle.sh "$TARGET")
 
 echo 'install: official v1.0.1 offline bundle, unmodified updater and application images'
 base=https://github.com/kim0040/gachipad/releases/download/v1.0.1
@@ -287,4 +308,7 @@ in_install docker compose exec -T -e "VERIFY_SHARE=$ID" mongo mongosh --quiet --
   if (db.getSiblingDB("codesh").getCollectionNames().length !== 0) throw new Error("legacy database recreated on fresh install");
 '
 echo 'PASS: legacy archive restores shares, history, uploads and settings into only the fresh gachipad namespace'
+in_install docker compose down -v --remove-orphans
+bash deploy/verify-databases.sh "$WORK/source/deploy/dist/gachipad-1.0.1-linux-amd64.tar.gz" \
+  "$WORK/source/deploy/dist/gachipad-$TARGET-linux-amd64.tar.gz" "$WORK" "$PROJECT-selection"
 echo 'verify-rename: all checks passed'
