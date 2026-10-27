@@ -62,6 +62,12 @@ async function sqliteSource() {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+/** Lets real file and socket cleanup finish; only setTimeout is faked, so Date.now is real. */
+async function settle(run: { settled: () => boolean }) {
+  const until = Date.now() + 5_000;
+  while (!run.settled() && Date.now() < until) await tick();
+}
+
 /** Starts a copy; `settled()` tells whether it rejected or resolved yet. */
 function startCopy(from: string, to: string) {
   let settled = false;
@@ -74,7 +80,7 @@ function startCopy(from: string, to: string) {
 }
 
 async function expectTimedOut(run: ReturnType<typeof startCopy>) {
-  for (let wait = 0; !run.settled() && wait < 100; wait++) await tick();
+  await settle(run);
   expect(run.settled()).toBe(true);
   expect(await run.outcome).toBeInstanceOf(CopyFailureError);
   expect(await run.outcome).toMatchObject({ code: "ETIMEDOUT", destinationWritten: false });
@@ -179,7 +185,7 @@ describe("bounded preflight of a database copy", () => {
     await vi.advanceTimersByTimeAsync(OPERATION_TIMEOUT_MS - 1);
     expect(run.settled()).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    for (let wait = 0; !run.settled() && wait < 100; wait++) await tick();
+    await settle(run);
     expect(run.settled()).toBe(true);
     expect(await run.outcome).toBeInstanceOf(CopyFailureError);
     expect(await run.outcome).toMatchObject({ destinationWritten: false });
@@ -262,7 +268,7 @@ describe("deadline of the reads of a SQLite source file", () => {
     await vi.advanceTimersByTimeAsync(30_000 - 1);
     expect(run.settled()).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    for (let wait = 0; !run.settled() && wait < 100; wait++) await tick();
+    await settle(run);
     expect(run.settled()).toBe(true);
     expect(await run.outcome).toBeInstanceOf(CopyDeadlineError);
     expect(await run.outcome).toMatchObject({ destinationWritten: false });
