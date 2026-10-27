@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Real database-choice checks, invoked by verify-update.sh --rename with two built bundles.
-# Resources belong to the caller's gp-dbdeploy-* project; no shared server is modified except
-# the explicitly owned temporary PostgreSQL database, which is dropped on exit.
+# Resources, including the external PostgreSQL fixture, belong to the caller's gp-dbdeploy-* project.
 set -euo pipefail
 # shellcheck source=verify-lib.sh
 . "$(dirname "$0")/verify-lib.sh"
@@ -16,6 +15,8 @@ DB="$PROJECT-external"
 RELAY="$PROJECT-pg-relay"
 RELAY_STARTED=0
 DB_CREATED=0
+PG="$PROJECT-external-pg"
+PG_STARTED=0
 case "$PROJECT" in gp-dbdeploy-*) ;; *) echo 'verification requires a gp-dbdeploy- project' >&2; exit 1 ;; esac
 in_install() { (cd "$INSTALL" && COMPOSE_PROJECT_NAME="$PROJECT" "$@"); }
 cleanup_stack() {
@@ -40,7 +41,8 @@ cleanup() {
   trap - EXIT
   if [ "$RELAY_STARTED" = 1 ]; then docker rm -f "$RELAY" >/dev/null; fi
   cleanup_stack
-  if [ "$DB_CREATED" = 1 ]; then docker exec gp-sql-pg dropdb -U gp --if-exists --force "$DB"; fi
+  if [ "$DB_CREATED" = 1 ]; then docker exec "$PG" dropdb -U gp --if-exists --force "$DB"; fi
+  if [ "$PG_STARTED" = 1 ]; then docker rm -fv "$PG" >/dev/null; fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -193,15 +195,22 @@ for choice in sqlite postgres; do
   cleanup_stack
  done
 
-echo 'selection: external PostgreSQL on shared gp-sql-pg (owned TCP relay across isolated Docker networks)'
+echo 'selection: owned external PostgreSQL (owned TCP relay across isolated Docker networks)'
+! docker container inspect "$PG" >/dev/null 2>&1 || fail 'external PostgreSQL fixture already exists'
+docker run -d --pull never --name "$PG" --tmpfs /var/lib/postgresql/data:rw,size=512m \
+  -e POSTGRES_USER=gp -e POSTGRES_PASSWORD=gp postgres:17-alpine >/dev/null
+PG_STARTED=1
+for _ in $(seq 60); do
+  docker exec "$PG" pg_isready -U gp >/dev/null 2>&1 && break
+  sleep 1
+done
 prepare
-docker exec gp-sql-pg createdb -U gp "$DB"
+docker exec "$PG" createdb -U gp "$DB"
 DB_CREATED=1
-pg_ip="$(docker inspect gp-sql-pg --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
-# The shared server is on Docker's default bridge. Only our relay joins both bridges; the
-# shared container, its network memberships, volumes and configuration remain untouched.
+pg_ip="$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+# The owned external server stays on the default bridge; the relay joins both bridges.
 docker network create --subnet 172.29.98.0/24 --label "com.docker.compose.project=$PROJECT" --label com.docker.compose.network=default "${PROJECT}_default" >/dev/null
-docker run -d --name "$RELAY" --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node node:22.23.3-slim -e '
+docker run -d --pull never --name "$RELAY" --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node node:22.23.3-slim -e '
   const net = require("node:net");
   net.createServer(c => { const s = net.connect(5432, process.argv[1]); c.pipe(s); s.pipe(c); c.on("error", () => s.destroy()); s.on("error", () => c.destroy()); }).listen(5432, "0.0.0.0");
 ' "$pg_ip" >/dev/null
@@ -222,11 +231,11 @@ grep -q 'GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1' "$WORK/external-refusal.log" || f
 check_share
 GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 in_install ./upgrade.sh "$NEXT"
 check_share
-echo 'PASS: external shared PostgreSQL install and acknowledged update preserve API-created share; local backup refuses with guidance'
+echo 'PASS: external owned PostgreSQL install and acknowledged update preserve API-created share; local backup refuses with guidance'
 # Reuse only the owned relay and database; the earlier external fixture is discarded.
 cleanup_stack
-docker exec gp-sql-pg dropdb -U gp --if-exists --force "$DB"
-docker exec gp-sql-pg createdb -U gp "$DB"
+docker exec "$PG" dropdb -U gp --if-exists --force "$DB"
+docker exec "$PG" createdb -U gp "$DB"
 prepare
 in_install ./install.sh --db mongodb
 seed
@@ -300,10 +309,10 @@ if DATABASE_URL="$external_url" in_install ./migrate-db.sh --to external --yes >
 fi
 grep -q 'URLs are identical' "$WORK/migration-identical.log" || fail 'identical external refusal missing'
 check_migration_data
-echo 'PASS: PostgreSQL -> external shared PostgreSQL retains share/upload and old volume; identical URL refuses'
+echo 'PASS: PostgreSQL -> external owned PostgreSQL retains share/upload and old volume; identical URL refuses'
 docker rm -f "$RELAY" >/dev/null
 RELAY_STARTED=0
 cleanup_stack
-docker exec gp-sql-pg dropdb -U gp --if-exists --force "$DB"
+docker exec "$PG" dropdb -U gp --if-exists --force "$DB"
 DB_CREATED=0
 echo 'verify-databases: all checks passed'
