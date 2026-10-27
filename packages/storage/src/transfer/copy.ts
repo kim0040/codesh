@@ -422,7 +422,15 @@ function refuseClockSkew(server: MongoServer): void {
 
 /** Copy reads are only as complete as the server they reach: refuse anything but a primary. */
 async function checkMongoSource(client: MongoClient): Promise<MongoServer> {
-  const server = await mongoServer(client);
+  let server: MongoServer;
+  try {
+    server = await mongoServer(client);
+  } catch (error) {
+    // Connected, but no primary could be selected for the hello.
+    if (error instanceof Error && error.name === "MongoServerSelectionError")
+      throw new CopyRefusedError(NOT_PRIMARY);
+    throw error;
+  }
   if (!server.primary) throw new CopyRefusedError(NOT_PRIMARY);
   refuseClockSkew(server);
   return server;

@@ -959,7 +959,6 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
       const backend = transferBackend(createMongoStores(client.db()));
       const cutoff = new Date(Date.now() + margin);
       await backend.countLive(cutoff);
-      for await (const _audit of backend.exportAudit());
       for await (const item of backend.exportAll(cutoff))
         if (item.kind === "uploads") for await (const _chunk of item.chunks);
       await backend.uploadCounter();

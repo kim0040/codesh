@@ -938,22 +938,38 @@ describe("database transfer", () => {
   });
 
   it("refuses a MongoDB source that is not the primary before opening the destination", async () => {
-    const source = createMemoryStores();
-    await source.shares.create(sampleShare());
-    const open = openMemory(
-      { "memory:": source, "memory://": createMemoryStores() },
-      { "memory:": helloClient({ isWritablePrimary: false, secondary: true, setName: "rs0" }) },
-    );
-    const opened: string[] = [];
-    await expect(
-      copyDatabase("memory:", "memory://", {
-        openStores: (url) => {
-          opened.push(url);
-          return open(url);
+    const noPrimary = {
+      db: () => ({
+        databaseName: "gp",
+        command: async () => {
+          throw Object.assign(new Error("Server selection timed out"), {
+            name: "MongoServerSelectionError",
+          });
         },
       }),
-    ).rejects.toThrow(new CopyRefusedError("MongoDB source is not the primary"));
-    expect(opened).toEqual(["memory:"]);
+    } as unknown as MongoClient;
+    // A direct connection to a secondary, and a connection that finds no primary at all.
+    for (const client of [
+      helloClient({ isWritablePrimary: false, secondary: true, setName: "rs0" }),
+      noPrimary,
+    ]) {
+      const source = createMemoryStores();
+      await source.shares.create(sampleShare());
+      const open = openMemory(
+        { "memory:": source, "memory://": createMemoryStores() },
+        { "memory:": client },
+      );
+      const opened: string[] = [];
+      await expect(
+        copyDatabase("memory:", "memory://", {
+          openStores: (url) => {
+            opened.push(url);
+            return open(url);
+          },
+        }),
+      ).rejects.toThrow(new CopyRefusedError("MongoDB source is not the primary"));
+      expect(opened).toEqual(["memory:"]);
+    }
   });
 
   it("compares every advertised replica set member", async () => {
