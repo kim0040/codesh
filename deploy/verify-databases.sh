@@ -62,6 +62,18 @@ seed() {
   ID="$(call /api/shares -H 'Content-Type: application/json' -d '{"title":"Database fixture","files":[{"path":"main.txt","content":"database selection fixture"}]}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
   check_share
 }
+# Use real release images, but make only the candidate API fail its health check.
+BAD="$WORK/selection-unhealthy.tar.gz"
+mkdir -p "$WORK/selection-unhealthy"
+tar xzf "$NEXT" -C "$WORK/selection-unhealthy" --strip-components=1
+sed -i '/^  api:$/a\    command: ["node", "-e", "process.exit(1)"]' "$WORK/selection-unhealthy/docker-compose.yml"
+(
+  cd "$WORK/selection-unhealthy"
+  # shellcheck disable=SC2094 # manifest excluded from its own input
+  find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS
+)
+tar czf "$BAD" -C "$WORK" selection-unhealthy
+sha256sum "$BAD" >"$BAD.sha256"
 for choice in sqlite postgres; do
   echo "selection: real $choice install, API share, online backup, delete, restore and offline update"
   prepare
@@ -122,6 +134,37 @@ for choice in sqlite postgres; do
       psql -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT to_regclass('\''gp_deploy_after_backup'\'') IS NULL AND (SELECT count(*) FROM gp_deploy_fixture) = 10000"
     ' | grep -qx t || fail 'PostgreSQL restore did not replace the complete database'
   fi
+  if [ "$choice" = postgres ]; then
+    in_install docker compose exec -T api node -e 'require("node:fs").writeFileSync("/data/cache-fixture", "unrelated cache")'
+    # A valid archive whose policy names an absent role passes TOC validation but fails restore.
+    # shellcheck disable=SC2016 # expanded only inside the owned database container
+    in_install docker compose exec -T postgres sh -c '
+      psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE ROLE gp_deploy_restore_missing; CREATE POLICY gp_deploy_restore_policy ON gp_deploy_fixture TO gp_deploy_restore_missing USING (true)"
+    ' >/dev/null
+    in_install ./backup.sh "$WORK/selection-failed-restore" >"$WORK/selection-failed-restore-backup.log"
+    failed_backup="$(sed -n 's/^backup: \(.*\) (.*/\1/p' "$WORK/selection-failed-restore-backup.log")"
+    # shellcheck disable=SC2016 # expanded only inside the owned database container
+    in_install docker compose exec -T postgres sh -c '
+      psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DROP POLICY gp_deploy_restore_policy ON gp_deploy_fixture; DROP ROLE gp_deploy_restore_missing"
+    ' >/dev/null
+    if in_install ./restore.sh "$failed_backup" --yes >"$WORK/selection-failed-restore.log" 2>&1; then fail 'invalid PostgreSQL restore succeeded'; fi
+    grep -q 'PostgreSQL restore failed; live database unchanged; safety backup:' "$WORK/selection-failed-restore.log" || fail 'PostgreSQL safety archive guidance missing'
+    grep -q 'gp_deploy_restore_missing.*does not exist' "$WORK/selection-failed-restore.log" || fail 'restore failure was not injected'
+    in_install docker compose up -d --wait >/dev/null
+    check_share
+    # shellcheck disable=SC2016 # expanded only inside the owned database container
+    in_install docker compose exec -T postgres sh -c '
+      psql -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT (SELECT count(*) FROM gp_deploy_fixture) = 10000 AND NOT EXISTS (SELECT FROM pg_database WHERE datname LIKE '\''gp_restore_%'\'' OR datname LIKE '\''gp_previous_%'\'')"
+    ' | grep -qx t || fail 'failed PostgreSQL restore changed live rows or left temporary databases'
+    echo 'PASS: failed staged PostgreSQL restore preserves live share and rows, names safety backup and cleans temporary DB'
+  fi
+  cp "$INSTALL/state/database-kind" "$WORK/selection-kind-before"
+  if UPDATE_HEALTH_TIMEOUT=20 in_install ./upgrade.sh "$BAD" --yes >"$WORK/selection-rollback-$choice.log" 2>&1; then fail "$choice unhealthy candidate succeeded"; fi
+  grep -q 'rolling back to 1.0.1' "$WORK/selection-rollback-$choice.log" || fail "$choice rollback did not run"
+  grep -q '"result":"rolled-back"' "$INSTALL/state/update.json" || fail "$choice rollback status missing"
+  cmp "$INSTALL/state/database-kind" "$WORK/selection-kind-before" || fail "$choice rollback changed backend marker"
+  check_share
+  echo "PASS: $choice unhealthy real candidate rolls back to 1.0.1; API share and database-kind unchanged"
   in_install ./upgrade.sh "$NEXT"
   check_share
   grep -q '"result":"updated"' "$INSTALL/state/update.json" || fail 'update transaction did not run'
@@ -129,8 +172,11 @@ for choice in sqlite postgres; do
   echo "PASS: $choice fresh install, backup, restore, update preserve API-created share content"
   cp "$INSTALL/.env" "$WORK/selection-original.env"
   if [ "$choice" = sqlite ]; then other=postgres; else other=sqlite; fi
+  if in_install ./install.sh --db "$other" >"$WORK/selection-install-refusal.log" 2>&1; then fail 'install backend switch accepted'; fi
+  cmp "$INSTALL/.env" "$WORK/selection-original.env" || fail 'refused install modified .env'
+  # The generator itself now refuses a marker mismatch, so change only the raw fixture config.
   # shellcheck disable=SC2016 # expanded by the installation shell
-  in_install bash -c '. ./lib.sh; env_set GACHIPAD_DB "$1"; ./generate-secrets.sh >/dev/null' _ "$other"
+  in_install bash -c '. ./lib.sh; env_set GACHIPAD_DB "$1"' _ "$other"
   if in_install ./update.sh --version 1.0.3 --yes >"$WORK/selection-refusal.log" 2>&1; then fail 'marker backend switch accepted'; fi
   grep -q 'database backend change refused' "$WORK/selection-refusal.log" || fail 'marker refusal missing'
   rm "$INSTALL/state/database-kind"

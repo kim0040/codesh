@@ -506,6 +506,18 @@ run ./update.sh --check || fail "external --check required a backup"
 if run ./update.sh --version 1.1.0 --yes; then fail "external update without acknowledgement accepted"; fi
 grep -q 'GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1' "$F/run.log" || fail "external backup guidance missing"
 grep -q 'stop\|dump\|pull$' "$DOCKER_CALLS" && fail "external refusal mutated the stack"
+# Persisted acknowledgement must work for timers, without inherited shell variables.
+# shellcheck source=/dev/null
+(cd "$I" && source ./lib.sh; env_set GACHIPAD_EXTERNAL_BACKUP_CONFIRMED 1)
+printf 'AT=03:00\nPOLICY=minor\n' >"$I/state/auto.conf"
+cp "$FAKE_DB" "$F/external-original-db"
+if FAKE_UNHEALTHY=1.1.0 run ./update.sh --auto; then fail "unhealthy external auto-update succeeded"; fi
+grep -q 'external database was not restored' "$F/run.log" || fail "persisted acknowledgement did not reach auto-update"
+grep -qF "cd $I && docker compose up -d --wait --wait-timeout 3 && rm -f state/transaction" "$F/run.log" || fail "exact external recovery command missing"
+[ -f "$I/state/transaction" ] || fail "failed external update lost recovery marker"
+# The operator restores the external backup before clearing the marker and restarting.
+cp "$F/external-original-db" "$FAKE_DB"
+rm -f "$I/state/transaction" "$I/state/auto.conf"
 cp "$F/external-original.env" "$I/.env"
 printf 'mongodb\n' >"$I/state/database-kind"
 ok "external --check works and unacknowledged update refuses before maintenance"
@@ -778,5 +790,65 @@ grep -q '^accepted-at-ingress$' "$FAKE_DB" || fail "write accepted while ingress
 grep -q '^restored$' "$DOCKER_CALLS" && fail "restored an old DB after ingress could accept writes"
 status | grep -q 'current files and DB retained' || fail "ingress recovery state unclear"
 ok "ingress activation failure stops writers and retains current DB and files for recovery"
+
+
+step "SQLite snapshots use the data filesystem and clean up success and failure paths"
+sqlite_fixture="$F/sqlite-files"
+mkdir -p "$sqlite_fixture/data" "$sqlite_fixture/work"
+cat >"$sqlite_fixture/check-files.mjs" <<'JS'
+import fs from "node:fs";
+import { dirname } from "node:path";
+import { syncBuiltinESMExports } from "node:module";
+const root = process.env.SQLITE_DATA;
+for (const name of ["mkdtempSync", "createReadStream", "createWriteStream"]) {
+  const original = fs[name];
+  fs[name] = (path, ...args) => {
+    if (!String(path).startsWith(`${root}/`)) throw new Error("SQLite temporary file escaped data volume");
+    if (name === "mkdtempSync" && dirname(path) !== root) throw new Error("snapshot is not a sibling");
+    if (name === "createWriteStream" && process.env.SQLITE_FAIL_WRITE) throw new Error("injected write failure");
+    if (name === "createReadStream" && process.env.SQLITE_FAIL_READ) throw new Error("injected read failure");
+    if (name === "createWriteStream" && String(path).endsWith(".restore")) {
+      fs.writeFileSync(`${root}/custom.db-wal`, "stale fixture WAL");
+      fs.writeFileSync(`${root}/custom.db-shm`, "stale fixture SHM");
+    }
+    return original(path, ...args);
+  };
+}
+const rename = fs.renameSync;
+fs.renameSync = (from, to) => {
+  if (fs.existsSync(`${to}-wal`) || fs.existsSync(`${to}-shm`)) throw new Error("stale WAL before rename");
+  return rename(from, to);
+};
+syncBuiltinESMExports();
+JS
+# shellcheck disable=SC2016 # SQLite fixture paths are expanded by node
+SQLITE_DATA="$sqlite_fixture/data" node --input-type=module -e '
+  import { DatabaseSync } from "node:sqlite";
+  const db = new DatabaseSync(`${process.env.SQLITE_DATA}/custom.db`);
+  db.exec("CREATE TABLE fixture (data BLOB); INSERT INTO fixture VALUES (randomblob(1048576))");
+  db.close();
+' >/dev/null 2>&1
+(
+  cd "$sqlite_fixture/work"
+  # shellcheck source=/dev/null
+  source "$I/lib.sh"
+  export SQLITE_DATA="$sqlite_fixture/data"
+  # shellcheck disable=SC2317 # backend helpers call this process-boundary replacement
+  docker() {
+    while [ "$1" != -e ]; do shift; done
+    shift
+    DATABASE_URL="sqlite:$SQLITE_DATA/custom.db" node --import "$sqlite_fixture/check-files.mjs" --input-type=module -e "$1"
+  }
+  sqlite_backup backups >snapshot.log
+  archive="$(sed -n 's/^backup: \(.*\) (.*/\1/p' snapshot.log)"
+  sqlite_validate "$archive"
+  sqlite_restore "$archive"
+  if SQLITE_FAIL_READ=1 sqlite_backup failed-read; then exit 1; fi
+  if SQLITE_FAIL_WRITE=1 sqlite_validate "$archive"; then exit 1; fi
+  gzip -c </dev/null >empty.gz
+  if sqlite_validate empty.gz; then exit 1; fi
+  [ -z "$(find "$SQLITE_DATA" -name '.gachipad-*' -o -name '*.restore')" ]
+) >"$F/sqlite-files.log" 2>&1 || { cat "$F/sqlite-files.log" >&2; fail "SQLite data-volume temporary file checks"; }
+ok "SQLite sibling snapshots, streamed output, validation/error cleanup and WAL removal before rename"
 
 printf '\nupdate.test.sh: all checks passed\n'

@@ -117,7 +117,8 @@ sed -i '/^GACHIPAD_DB=/d; /^GACHIPAD_DATABASE_URL=/d' choices/live/.env
 cp generate-secrets.sh .env.example choices/staged/
 cp choices/live/.env choices/staged/.env
 printf 'GACHIPAD_DB=sqlite\n' >>choices/staged/.env
-(cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" ./generate-secrets.sh >/dev/null)
+(cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" ./generate-secrets.sh >pin.log 2>&1)
+grep -q 'database backend change refused' choices/staged/pin.log
 grep -qx 'GACHIPAD_DB=mongodb' choices/staged/.env
 grep -qx 'COMPOSE_PROFILES=mdns,mongodb' choices/staged/.env
 if (cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" GACHIPAD_DB=postgres ./generate-secrets.sh >refusal.log 2>&1); then

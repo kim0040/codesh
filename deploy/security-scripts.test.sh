@@ -104,13 +104,33 @@ dir="$fixture/switch"
 make_install "$dir"
 printf 'mongodb\n' >"$dir/state/database-kind"
 cp "$dir/.env.example" "$dir/.env"
-sed -i 's/^GACHIPAD_DB=sqlite/GACHIPAD_DB=postgres/' "$dir/.env"
+cp "$dir/.env" "$fixture/switch-before.env"
 : >"$DOCKER_CALLS"
-if (cd "$dir" && ./install.sh) >"$fixture/switch.log" 2>&1; then
+if (cd "$dir" && PUBLIC_URL=http://should-not-write ./install.sh --db postgres) >"$fixture/switch.log" 2>&1; then
   echo 'installer accepted a backend switch from existing data' >&2; exit 1
 fi
 grep -q 'database backend change refused (mongodb -> postgres)' "$fixture/switch.log"
 grep -q 'future copy tool' "$fixture/switch.log"
+cmp "$dir/.env" "$fixture/switch-before.env"
+# Exported selections and missing external URLs also leave every existing byte intact.
+for mode in env url external; do
+  case "$mode" in
+    env) command=(env GACHIPAD_DB=postgres ./install.sh) ;;
+    url) command=(env DATABASE_URL=postgresql://fixture:private@db.invalid/db ./install.sh) ;;
+    external) command=(./install.sh --db external) ;;
+  esac
+  if (cd "$dir" && "${command[@]}") >"$fixture/refused-$mode.log" 2>&1; then
+    echo "installer accepted refused $mode selection" >&2; exit 1
+  fi
+  cmp "$dir/.env" "$fixture/switch-before.env"
+done
+grep -q 'requires DATABASE_URL' "$fixture/refused-external.log"
+# A hand-run generator must also enforce the persisted backend marker atomically.
+if (cd "$dir" && GACHIPAD_DB=postgres ./generate-secrets.sh) >"$fixture/generate-refused.log" 2>&1; then
+  echo 'generator accepted a recorded backend switch' >&2; exit 1
+fi
+cmp "$dir/.env" "$fixture/switch-before.env"
+grep -q 'database backend change refused' "$fixture/generate-refused.log"
 if grep -q '^compose up' "$DOCKER_CALLS"; then echo 'backend switch started Compose' >&2; exit 1; fi
 echo 'L12: install selects sqlite, postgres, mongodb or external without printing URLs or secrets; backend switches are refused'
 
@@ -142,3 +162,17 @@ if (cd "$dir" && DATABASE_URL="$url" ./install.sh) >"$fixture/newline.log" 2>&1;
 fi
 if grep -q '^INJECTED=' "$dir/.env"; then echo 'DATABASE_URL injected an env setting' >&2; exit 1; fi
 echo 'L13: no-flag SQLite recommendation, literal URL roundtrip and newline rejection passed'
+
+# Compose also accepts double-quoted URLs. Both host helpers must read the scheme correctly.
+dir="$fixture/quoted"
+make_install "$dir"
+printf 'GACHIPAD_DB=external\nDATABASE_URL="postgresql://fixture:private@db.invalid/db"\n' >"$dir/.env"
+(
+  cd "$dir"
+  # shellcheck source=/dev/null
+  source ./lib.sh
+  [ "$(database_kind)" = external ]
+  ./generate-secrets.sh >/dev/null
+  [ "$(database_kind)" = external ]
+)
+echo 'L14: refused installs and secret generation preserve .env bytes; double-quoted URL schemes work'
