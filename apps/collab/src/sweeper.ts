@@ -1,6 +1,5 @@
 import { keys } from "@gachipad/shared";
-import type { Stores } from "@gachipad/storage";
-import { sqlErrorCode } from "../../../packages/storage/src/sql/driver.js";
+import { type Stores, sqlErrorCode } from "@gachipad/storage";
 import type { ValkeyLock } from "./lock.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;

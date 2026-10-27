@@ -323,6 +323,8 @@ function sqlRegressions(open: () => Fixture, other: () => Fixture) {
               await db.stores.files.delete(row?.id as string);
               clock.mockReturnValue(now + 31_000);
               yield new Uint8Array([2]);
+              // Only the renewal of the second part can end the upload: the stream never finishes.
+              await new Promise(() => undefined);
             })(),
           }),
         ).rejects.toThrow("Upload is no longer active");

@@ -40,13 +40,14 @@ class Queue {
 function sqliteBusy(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const code = "code" in error ? error.code : undefined;
-  const errcode = "errcode" in error ? error.errcode : undefined;
+  const errcode = "errcode" in error && typeof error.errcode === "number" ? error.errcode : 0;
   const message = "message" in error && typeof error.message === "string" ? error.message : "";
   return (
     code === "SQLITE_BUSY" ||
     code === "SQLITE_LOCKED" ||
-    errcode === 5 ||
-    errcode === 6 ||
+    // Extended codes (BUSY_SNAPSHOT, LOCKED_SHAREDCACHE, ...) keep the primary code in the low byte.
+    (errcode & 0xff) === 5 ||
+    (errcode & 0xff) === 6 ||
     /database is locked/i.test(message)
   );
 }
