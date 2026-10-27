@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 export type SqlDialect = "sqlite" | "postgres" | "mysql";
 export type SqlRow = Record<string, unknown>;
+export type SqlTransactionMode = "write" | "snapshot";
 
 export interface SqlExecutor {
   all<Row extends SqlRow = SqlRow>(sql: string, values?: unknown[]): Promise<Row[]>;
@@ -10,7 +11,7 @@ export interface SqlExecutor {
 
 export interface SqlDriver extends SqlExecutor {
   dialect: SqlDialect;
-  transaction<T>(work: (tx: SqlExecutor) => Promise<T>): Promise<T>;
+  transaction<T>(work: (tx: SqlExecutor) => Promise<T>, mode?: SqlTransactionMode): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -39,18 +40,19 @@ class Queue {
 function sqliteBusy(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   const code = "code" in error ? error.code : undefined;
-  const errcode = "errcode" in error ? error.errcode : undefined;
+  const errcode = "errcode" in error && typeof error.errcode === "number" ? error.errcode : 0;
   const message = "message" in error && typeof error.message === "string" ? error.message : "";
   return (
     code === "SQLITE_BUSY" ||
     code === "SQLITE_LOCKED" ||
-    errcode === 5 ||
-    errcode === 6 ||
+    // Extended codes (BUSY_SNAPSHOT, LOCKED_SHAREDCACHE, ...) keep the primary code in the low byte.
+    (errcode & 0xff) === 5 ||
+    (errcode & 0xff) === 6 ||
     /database is locked/i.test(message)
   );
 }
 
-async function retrySqliteBusy<T>(work: () => T | Promise<T>): Promise<T> {
+export async function retrySqliteBusy<T>(work: () => T | Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await work();
@@ -61,8 +63,66 @@ async function retrySqliteBusy<T>(work: () => T | Promise<T>): Promise<T> {
   }
 }
 
+const SQLITE_CODES: Record<number, string> = {
+  5: "SQLITE_BUSY",
+  6: "SQLITE_LOCKED",
+  8: "SQLITE_READONLY",
+  10: "SQLITE_IOERR",
+  11: "SQLITE_CORRUPT",
+  13: "SQLITE_FULL",
+  14: "SQLITE_CANTOPEN",
+  19: "SQLITE_CONSTRAINT",
+  26: "SQLITE_NOTADB",
+};
+
+export function sqlErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  if ("errcode" in error && typeof error.errcode === "number") {
+    const code = SQLITE_CODES[error.errcode & 0xff];
+    if (code) return code;
+  }
+  const code = "code" in error ? error.code : undefined;
+  return typeof code === "string" && /^(?:[A-Z][A-Z0-9_]{1,63}|[0-9A-Z]{5})$/.test(code)
+    ? code
+    : undefined;
+}
+
+async function mysqlOperation<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    // Server messages and SQL text can echo bound values; copy only diagnostic constants.
+    const code = sqlErrorCode(error);
+    const server =
+      typeof error === "object" && error !== null && ("sqlState" in error || "errno" in error);
+    const safe = server
+      ? new Error(`MySQL operation failed${code ? ` (${code})` : ""}`)
+      : error instanceof TypeError
+        ? new TypeError("Invalid database operation")
+        : new Error("Database driver operation failed");
+    throw Object.assign(
+      safe,
+      code ? { code } : {},
+      server
+        ? {
+            ...("errno" in error &&
+            typeof error.errno === "number" &&
+            Number.isSafeInteger(error.errno)
+              ? { errno: error.errno }
+              : {}),
+            ...("sqlState" in error &&
+            typeof error.sqlState === "string" &&
+            /^[0-9A-Z]{5}$/.test(error.sqlState)
+              ? { sqlState: error.sqlState }
+              : {}),
+          }
+        : {},
+    );
+  }
+}
+
 /** Only callbacks containing replayable SQL belong in transactions; never consume streams here. */
-async function retryTransaction<T>(work: () => Promise<T>): Promise<T> {
+export async function retryTransaction<T>(work: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await work();
@@ -86,9 +146,15 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
     // ExperimentalWarning when the first DatabaseSync connection is created.
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(sqlitePath(url));
-    db.exec(
-      "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000; PRAGMA foreign_keys=ON;",
-    );
+    try {
+      db.exec("PRAGMA busy_timeout=3000");
+      // The WAL transition can return BUSY immediately despite the busy handler.
+      await retrySqliteBusy(() => db.exec("PRAGMA journal_mode=WAL"));
+      db.exec("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;");
+    } catch (error) {
+      db.close();
+      throw error;
+    }
     const queue = new Queue();
     const normalize = (values: unknown[]) =>
       values.map((value) => (typeof value === "boolean" ? Number(value) : value));
@@ -104,9 +170,12 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
       dialect: "sqlite",
       all: (sql, values) => queue.run(() => retrySqliteBusy(() => raw.all(sql, values))),
       run: (sql, values) => queue.run(() => retrySqliteBusy(() => raw.run(sql, values))),
-      async transaction<T>(work: (tx: SqlExecutor) => Promise<T>) {
+      async transaction<T>(
+        work: (tx: SqlExecutor) => Promise<T>,
+        mode: SqlTransactionMode = "write",
+      ) {
         return queue.run(async () => {
-          await retrySqliteBusy(() => db.exec("BEGIN IMMEDIATE"));
+          await retrySqliteBusy(() => db.exec(mode === "snapshot" ? "BEGIN" : "BEGIN IMMEDIATE"));
           try {
             const result = await work(raw);
             db.exec("COMMIT");
@@ -129,7 +198,12 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
 
   if (/^(postgres|postgresql):\/\//.test(url)) {
     const { Pool } = await import("pg");
-    const pool = new Pool({ connectionString: url, max: 10 });
+    const pool = new Pool({
+      connectionString: url,
+      max: 10,
+      // Bound both connection establishment and waiting for a pooled client.
+      connectionTimeoutMillis: 10_000,
+    });
     // Idle connection errors are returned to the caller through failed queries, not process logs.
     pool.on("error", () => undefined);
     const all = async <Row extends SqlRow = SqlRow>(sql: string, values: unknown[] = []) => {
@@ -147,7 +221,10 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
       dialect: "postgres",
       all,
       run,
-      async transaction<T>(work: (tx: SqlExecutor) => Promise<T>) {
+      async transaction<T>(
+        work: (tx: SqlExecutor) => Promise<T>,
+        mode: SqlTransactionMode = "write",
+      ) {
         return retryTransaction(async () => {
           const client = await pool.connect();
           const tx: SqlExecutor = {
@@ -163,7 +240,9 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
             },
           };
           try {
-            await client.query("BEGIN");
+            await client.query(
+              mode === "snapshot" ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" : "BEGIN",
+            );
             const result = await work(tx);
             await client.query("COMMIT");
             return result;
@@ -183,36 +262,59 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
 
   if (/^(mysql|mariadb):\/\//.test(url)) {
     const mysql = await import("mysql2/promise");
-    const pool = mysql.createPool(url.replace(/^mariadb:/, "mysql:"));
+    const connectionUrl = new URL(url.replace(/^mariadb:/, "mysql:"));
+    // Keep explicit URL settings; otherwise bound stalled connection establishment.
+    if (!connectionUrl.searchParams.has("connectTimeout"))
+      connectionUrl.searchParams.set("connectTimeout", "10000");
+    const pool = mysql.createPool({
+      uri: connectionUrl.href,
+      // Bound dynamic IN-list templates per connection below the server-wide limit.
+      maxPreparedStatements: 256,
+    });
+    type BindValues = Exclude<Parameters<typeof pool.execute>[1], undefined>;
     const all = async <Row extends SqlRow = SqlRow>(sql: string, values: unknown[] = []) => {
-      const [rows] = await pool.query(sql, values);
+      const [rows] = await mysqlOperation(() => pool.execute(sql, values as BindValues));
       return rows as Row[];
     };
     const run = async (sql: string, values: unknown[] = []) => {
-      const [result] = await pool.query(sql, values);
+      const [result] = await mysqlOperation(() => pool.execute(sql, values as BindValues));
       return "affectedRows" in result ? Number(result.affectedRows) : 0;
     };
     return {
       dialect: "mysql",
       all,
       run,
-      async transaction<T>(work: (tx: SqlExecutor) => Promise<T>) {
+      async transaction<T>(
+        work: (tx: SqlExecutor) => Promise<T>,
+        mode: SqlTransactionMode = "write",
+      ) {
         return retryTransaction(async () => {
-          const connection = await pool.getConnection();
+          const connection = await mysqlOperation(() => pool.getConnection());
           const tx: SqlExecutor = {
             async all<Row extends SqlRow = SqlRow>(sql: string, values: unknown[] = []) {
-              const [rows] = await connection.query(sql, values);
+              const [rows] = await mysqlOperation(() =>
+                connection.execute(sql, values as BindValues),
+              );
               return rows as unknown as Row[];
             },
             async run(sql, values = []) {
-              const [result] = await connection.query(sql, values);
+              const [result] = await mysqlOperation(() =>
+                connection.execute(sql, values as BindValues),
+              );
               return "affectedRows" in result ? Number(result.affectedRows) : 0;
             },
           };
           try {
-            await connection.beginTransaction();
+            if (mode === "snapshot") {
+              await mysqlOperation(() =>
+                connection.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"),
+              );
+              await mysqlOperation(() =>
+                connection.query("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY"),
+              );
+            } else await mysqlOperation(() => connection.beginTransaction());
             const result = await work(tx);
-            await connection.commit();
+            await mysqlOperation(() => connection.commit());
             return result;
           } catch (error) {
             await connection.rollback().catch(() => undefined);
@@ -223,7 +325,7 @@ export async function openSqlDriver(url: string): Promise<SqlDriver> {
         });
       },
       async close() {
-        await pool.end();
+        await mysqlOperation(() => pool.end());
       },
     };
   }

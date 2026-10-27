@@ -149,7 +149,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: parsed.PORT,
     storage,
     databaseUrl,
-    databaseUrlSet: databaseUrl !== "",
+    databaseUrlSet: parsed.DATABASE_URL !== undefined,
     mongoUrl: parsed.MONGO_URL,
     valkeyUrl: parsed.VALKEY_URL,
     sessionSecret: parsed.SESSION_SECRET,

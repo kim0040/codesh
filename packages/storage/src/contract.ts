@@ -52,7 +52,7 @@ function lab(id: string, overrides: Partial<LabRecord> = {}): LabRecord {
     locked: false,
     students: [],
     createdAt: T0,
-    expiresAt: later(3600_000),
+    expiresAt: new Date(Date.now() + 3600_000),
     ...overrides,
   };
 }

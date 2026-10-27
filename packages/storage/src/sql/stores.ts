@@ -37,7 +37,7 @@ import {
   type UpdateLog,
 } from "../types.js";
 import type { SqlDriver, SqlExecutor, SqlRow } from "./driver.js";
-import { ignoreInsertSql, supportsForUpdate } from "./driver.js";
+import { ignoreInsertSql, retryTransaction, supportsForUpdate } from "./driver.js";
 
 type ShareRow = SqlRow & {
   id: string;
@@ -185,7 +185,10 @@ async function readLab(
   dialect: SqlDriver["dialect"] = "sqlite",
 ): Promise<LabRecord | null> {
   const suffix = lock && supportsForUpdate(dialect) ? " FOR UPDATE" : "";
-  const rows = await tx.all<LabRow>(`SELECT * FROM labs WHERE id = ?${suffix}`, [id]);
+  const rows = await tx.all<LabRow>(`SELECT * FROM labs WHERE id = ? AND expires_at>?${suffix}`, [
+    id,
+    Date.now(),
+  ]);
   const row = rows[0];
   if (!row) return null;
   const students = json<Array<Omit<LabStudent, "joinedAt"> & { joinedAt: string }>>(
@@ -220,12 +223,13 @@ async function deleteUploads(
   dialect: SqlDriver["dialect"],
   where: string,
   values: unknown[],
+  limit?: number,
 ) {
   const suffix = supportsForUpdate(dialect) ? " FOR UPDATE" : "";
   if (suffix) await tx.all("SELECT used_bytes FROM upload_capacity WHERE id=1 FOR UPDATE");
   // Locking reads see committed rows even under MySQL REPEATABLE READ.
   const rows = await tx.all<{ id: string; size: number | string }>(
-    `SELECT id,size FROM uploads WHERE ${where} ORDER BY id${suffix}`,
+    `SELECT id,size FROM uploads WHERE ${where} ORDER BY id${limit === undefined ? "" : ` LIMIT ${limit}`}${suffix}`,
     values,
   );
   let removed = 0;
@@ -340,7 +344,10 @@ class SqlShareStore implements ShareStore {
   }
 
   get(id: string) {
-    return readShare(this.driver, id, false, this.driver.dialect, true);
+    return this.driver.transaction(
+      (tx) => readShare(tx, id, false, this.driver.dialect, true),
+      "snapshot",
+    );
   }
 
   async update(id: string, patch: ShareUpdate) {
@@ -391,21 +398,33 @@ class SqlShareStore implements ShareStore {
   }
 
   async listForClient(clientId: string) {
-    const rows = await this.driver.all<ShareRow>(
-      `SELECT DISTINCT s.* FROM shares s LEFT JOIN share_saved_by b ON b.share_id=s.id
-       WHERE (s.owner_id=? OR b.client_id=?) AND (s.expires_at IS NULL OR s.expires_at>?)
-       ORDER BY s.updated_at DESC,s.id ASC`,
-      [clientId, clientId, Date.now()],
-    );
-    return hydrateShares(this.driver, rows);
+    return this.driver.transaction(async (tx) => {
+      const now = Date.now();
+      const owned = await tx.all<ShareRow>(
+        `SELECT * FROM shares WHERE owner_id=? AND ${visibleShare}`,
+        [clientId, now],
+      );
+      const saved = await tx.all<ShareRow>(
+        `SELECT s.* FROM share_saved_by b JOIN shares s ON s.id=b.share_id
+         WHERE b.client_id=? AND (s.expires_at IS NULL OR s.expires_at>?)`,
+        [clientId, now],
+      );
+      const rows = [...new Map([...owned, ...saved].map((row) => [row.id, row])).values()].sort(
+        (a, b) =>
+          Number(b.updated_at) - Number(a.updated_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+      return hydrateShares(tx, rows);
+    }, "snapshot");
   }
 
   async listByLab(labId: string) {
-    const rows = await this.driver.all<ShareRow>(
-      `SELECT * FROM shares WHERE lab_id=? AND ${visibleShare}`,
-      [labId, Date.now()],
-    );
-    return hydrateShares(this.driver, rows);
+    return this.driver.transaction(async (tx) => {
+      const rows = await tx.all<ShareRow>(
+        `SELECT * FROM shares WHERE lab_id=? AND ${visibleShare}`,
+        [labId, Date.now()],
+      );
+      return hydrateShares(tx, rows);
+    }, "snapshot");
   }
 
   async existing(ids: string[]) {
@@ -425,7 +444,7 @@ class SqlShareStore implements ShareStore {
 
   async addSaved(id: string, clientId: string) {
     return this.driver.transaction(async (tx) => {
-      const current = await readShare(tx, id, true, this.driver.dialect);
+      const current = await readShare(tx, id, true, this.driver.dialect, true);
       if (!current) return null;
       const position = await nextPosition(tx, "share_saved_by", id);
       await tx.run(
@@ -443,7 +462,7 @@ class SqlShareStore implements ShareStore {
 
   async removeSaved(id: string, clientId: string, expiresAtIfUnsaved: Date) {
     return this.driver.transaction(async (tx) => {
-      const current = await readShare(tx, id, true, this.driver.dialect);
+      const current = await readShare(tx, id, true, this.driver.dialect, true);
       if (!current) return null;
       await tx.run("DELETE FROM share_saved_by WHERE share_id=? AND client_id=?", [id, clientId]);
       const left = await savedIds(tx, "share_saved_by", id);
@@ -470,7 +489,7 @@ class SqlShareStore implements ShareStore {
 
   async addBan(id: string, clientId: string) {
     await this.driver.transaction(async (tx) => {
-      const current = await readShare(tx, id, true, this.driver.dialect);
+      const current = await readShare(tx, id, true, this.driver.dialect, true);
       if (!current) return;
       const position = await nextPosition(tx, "share_bans", id);
       await tx.run(
@@ -714,6 +733,7 @@ class SqlFileStore implements FileStore {
     const { stream, name, ...metadata } = upload;
     let size = 0;
     let chunkNo = 0;
+    let renewedAt = Date.now();
     const lease = () => Date.now() + 5 * 60_000;
     await this.driver.run(
       "INSERT INTO uploads (id,name,size,content_type,owner_id,share_id,expires_at,created_at,complete,lease_until) VALUES (?,?,?,?,?,?,?,?,FALSE,?)",
@@ -775,6 +795,19 @@ class SqlFileStore implements FileStore {
           }),
         ]).finally(() => clearTimeout(timer));
         if (part.done) break;
+        if (Date.now() - renewedAt >= 30_000) {
+          const now = Date.now();
+          if (
+            (await retryTransaction(() =>
+              this.driver.run(
+                "UPDATE uploads SET lease_until=? WHERE id=? AND complete=FALSE AND lease_until>?",
+                [now + 5 * 60_000, id, now],
+              ),
+            )) !== 1
+          )
+            throw new Error("Upload is no longer active");
+          renewedAt = now;
+        }
         size += part.value.byteLength;
         if (maxBytes !== undefined && size > maxBytes) throw new FileTooLargeError(maxBytes);
         let offset = 0;
@@ -802,7 +835,7 @@ class SqlFileStore implements FileStore {
       void Promise.resolve()
         .then(() => iterator?.return?.())
         .catch(() => undefined);
-      await this.delete(id);
+      await this.delete(id).catch(() => undefined);
       throw error;
     }
 
@@ -906,7 +939,14 @@ class SqlFileStore implements FileStore {
   }
 
   private async deleteMatching(where: string, values: unknown[]) {
-    return this.driver.transaction((tx) => deleteUploads(tx, this.driver.dialect, where, values));
+    let removed = 0;
+    for (;;) {
+      const count = await this.driver.transaction((tx) =>
+        deleteUploads(tx, this.driver.dialect, where, values, 100),
+      );
+      removed += count;
+      if (count < 100) return removed;
+    }
   }
 }
 
@@ -938,7 +978,10 @@ class SqlLabStore implements LabStore {
     return this.driver.transaction(async (tx) => {
       const current = await readLab(tx, id, true, this.driver.dialect);
       if (!current) return null;
-      const updated = { ...current, ...patch };
+      const updated = {
+        ...current,
+        ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+      };
       await tx.run("UPDATE labs SET title=?,locked=?,template_share_id=? WHERE id=?", [
         updated.title,
         updated.locked,

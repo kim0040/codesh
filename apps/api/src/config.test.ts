@@ -7,7 +7,7 @@ describe("config", () => {
       port: 3001,
       mongoUrl: "mongodb://localhost:27017/gachipad",
       databaseUrl: "mongodb://localhost:27017/gachipad",
-      databaseUrlSet: true,
+      databaseUrlSet: false,
       valkeyUrl: "redis://localhost:6379",
       adminToken: "",
       storage: "mongodb",
@@ -34,6 +34,16 @@ describe("config", () => {
     expect(() => loadConfig({ DATABASE_URL: "file:///tmp/db" })).toThrow(
       "Unsupported database URL scheme",
     );
+  });
+
+  it("reports only explicit DATABASE_URL while preserving backend precedence", () => {
+    for (const env of [{}, { STORAGE: "memory" }, { MONGO_URL: "sqlite::memory:" }])
+      expect(loadConfig(env).databaseUrlSet).toBe(false);
+    expect(loadConfig({ STORAGE: "memory", DATABASE_URL: "sqlite::memory:" })).toMatchObject({
+      databaseUrlSet: true,
+      storage: "sqlite",
+      databaseUrl: "sqlite::memory:",
+    });
   });
 
   it("reads env and splits TRUST_PROXY", () => {
