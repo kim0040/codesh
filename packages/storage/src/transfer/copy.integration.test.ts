@@ -19,6 +19,8 @@ const mongoBase = process.env.TEST_MONGO_URL ?? "mongodb://localhost:27017/gp_co
 // A replica set seed list and a direct connection to one of its secondaries, when available.
 const replicaSetBase = process.env.TEST_MONGO_RS_URL;
 const secondaryBase = process.env.TEST_MONGO_SECONDARY_URL;
+// The secondary accepts configureFailPoint (started with enableTestCommands=1).
+const replicaSetFailPoints = process.env.TEST_MONGO_RS_FAILPOINTS === "1";
 type Backend = "mongodb" | "mongors" | "sqlite" | "postgresql" | "mysql" | "mariadb";
 type Pair = { from: Backend; to: Backend; cli?: boolean };
 const pairs: Pair[] = [
@@ -285,7 +287,11 @@ async function seed(stores: Awaited<ReturnType<typeof openStores>>["stores"]) {
     stream: (async function* () {
       for (let offset = 0; offset < uploadSize; offset += 333 * 1024) {
         const length = Math.min(333 * 1024, uploadSize - offset);
-        yield Uint8Array.from({ length }, (_, index) => (offset + index) % 256);
+        // Bytes that do not repeat with the 256 KiB chunk size of the SQL backends.
+        yield Uint8Array.from(
+          { length },
+          (_, index) => Math.imul(offset + index, 2654435761) >>> 24,
+        );
       }
     })(),
   });
@@ -627,12 +633,14 @@ async function preloadModule(source: string): Promise<{ url: string; dir: string
   return { url: pathToFileURL(file).href, dir };
 }
 
-function runCli(from?: string, to?: string, preload?: string) {
+function runCli(from?: string, to?: string, preload?: string, window?: string) {
   const env = { ...process.env };
   delete env.GACHIPAD_COPY_FROM;
   delete env.GACHIPAD_COPY_TO;
+  delete env.GACHIPAD_COPY_WINDOW_MINUTES;
   if (from !== undefined) env.GACHIPAD_COPY_FROM = from;
   if (to !== undefined) env.GACHIPAD_COPY_TO = to;
+  if (window !== undefined) env.GACHIPAD_COPY_WINDOW_MINUTES = window;
   // A module loaded before the CLI, to move its clocks.
   if (preload) env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --import=${preload}`.trim();
   // As in the API image: npm keeps the CLI's exit code (pnpm --filter reports any failure as 1).
@@ -640,8 +648,22 @@ function runCli(from?: string, to?: string, preload?: string) {
     cwd: resolve(repoRoot, "apps/api"),
     encoding: "utf8",
     env,
+    // A hanging copy fails the test instead of the whole run.
+    timeout: 200_000,
   });
   return { status: result.status, output: result.stdout };
+}
+
+/** Stops or resumes oplog fetching on the replica set's secondary, which then lags behind. */
+async function secondaryReplication(mode: "alwaysOn" | "off"): Promise<void> {
+  const { MongoClient } = await import("mongodb");
+  const client = new MongoClient(mongoDatabaseUrl(secondaryBase ?? "", "admin"));
+  await client.connect();
+  try {
+    await client.db("admin").command({ configureFailPoint: "stopReplProducer", mode });
+  } finally {
+    await client.close();
+  }
 }
 
 describe.skipIf(!enabled)("real backend database transfer", () => {
@@ -716,6 +738,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
     try {
       await prepareDatabase("postgresql", name, url);
       await prepareDatabase("sqlite", `${name}_src`, source);
+      await (await openStores(source)).close();
       const opened = await openStores(url);
       await opened.stores.settings.put({ ...defaultSettings(), contact: "kept@example.invalid" });
       await opened.close();
@@ -748,6 +771,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
     try {
       await prepareDatabase("sqlite", `${name}_filled`, filled);
       await prepareDatabase("sqlite", `${name}_empty`, empty);
+      await (await openStores(empty)).close();
       const opened = await openStores(filled);
       await opened.stores.settings.put({ ...defaultSettings(), contact: "cli@example.invalid" });
       await opened.close();
@@ -768,6 +792,18 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         [filled, filled, 2, "Result: refused (Source and destination are the same)."],
         [empty, filled, 2, "Result: refused (Destination is not empty)."],
         [
+          filled,
+          "memory:",
+          2,
+          "Result: refused (Source and destination must be persistent databases).",
+        ],
+        [
+          filled,
+          "sqlite::memory:",
+          2,
+          "Result: refused (Source and destination must be persistent databases).",
+        ],
+        [
           mongo,
           `${mongo}${mongo.includes("?") ? "&" : "?"}appName=gp-copy-cli`,
           2,
@@ -777,13 +813,13 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
           filled,
           "sqlite:/tmp/gp_copy_cli_missing_dir/cli-secret.sqlite",
           1,
-          "Result: failed (SQLITE_CANTOPEN); drop the destination before retrying.",
+          "Result: failed (SQLITE_CANTOPEN); nothing was copied.",
         ],
         [
           filled,
           "mongodb://copy:cli-secret@localhost/gp?authMechanism=NOT-A-MECHANISM",
           1,
-          "Result: failed; drop the destination before retrying.",
+          "Result: failed; nothing was copied.",
         ],
       ] as const;
       for (const [from, to, status, result] of cases) {
@@ -791,11 +827,33 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         expect(run.output.trim().split("\n").at(-1)).toBe(result);
         expect(run.status).toBe(status);
         expect(run.output).toContain("Source must be quiescent");
+        expect(run.output).toContain("Copy window: 15 minutes.");
         expect(run.output).toContain("records that expired or expire within 15 minutes");
+        expect(run.output).toContain("The copy must finish within 10 minutes.");
         expect(run.output).not.toContain("cli-secret");
         expect(run.output).not.toContain("/tmp/");
       }
+
+      // The copy window: refused outside 15..1440 whole minutes, stated on the startup line.
+      for (const window of ["14", "1441", "15.5", "abc", " 30"]) {
+        const run = runCli(filled, `sqlite:/tmp/${name}_window.sqlite`, undefined, window);
+        expect(run.output.trim().split("\n").at(-1)).toBe(
+          "Result: refused (GACHIPAD_COPY_WINDOW_MINUTES must be a whole number from 15 to 1440).",
+        );
+        expect(run.status).toBe(2);
+        expect(run.output).not.toContain("Copy window:");
+        expect(existsSync(`/tmp/${name}_window.sqlite`)).toBe(false);
+      }
+      const wide = runCli(filled, `sqlite:/tmp/${name}_window.sqlite`, undefined, "1440");
+      expect(wide.output).toContain("Copy window: 1440 minutes.");
+      expect(wide.output).toContain("records that expired or expire within 1440 minutes");
+      expect(wide.output).toContain("The copy must finish within 1435 minutes.");
+      expect(wide.output.trim().split("\n").at(-1)).toMatch(
+        /^Result: success \(SHA-256 [0-9a-f]{64}\)\.$/,
+      );
+      expect(wide.status).toBe(0);
     } finally {
+      await dropDatabase("sqlite", `${name}_window`, `sqlite:/tmp/${name}_window.sqlite`);
       await dropDatabase("sqlite", `${name}_filled`, filled);
       await dropDatabase("sqlite", `${name}_empty`, empty);
       await dropDatabase("mongodb", `${name}_mongo`, mongo);
@@ -1023,5 +1081,88 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
       }
     },
     120_000,
+  );
+
+  it.skipIf(!replicaSetBase || !secondaryBase || !replicaSetFailPoints)(
+    "refuses a replica set source whose newest writes stay behind the majority",
+    async () => {
+      const name = "gp_copy_rs_lag";
+      const source = databaseUrl("mongors", name);
+      const destination = `sqlite:/tmp/${name}.sqlite`;
+      const { MongoClient } = await import("mongodb");
+      const client = new MongoClient(source);
+      try {
+        await prepareDatabase("mongors", name, source);
+        await prepareDatabase("sqlite", name, destination);
+        const opened = await openStores(source);
+        await opened.stores.settings.put({ ...defaultSettings(), contact: "lag@example.invalid" });
+        await opened.close();
+        await client.connect();
+        // The secondary stops replicating; a w:1 write is acknowledged by the primary alone, so
+        // majority reads would not see it.
+        await secondaryReplication("alwaysOn");
+        await client
+          .db()
+          .collection(COLLECTIONS.audit)
+          .insertOne(
+            { at: new Date(), actor: ownerId, ip: "192.0.2.9", action: "lagging" },
+            { writeConcern: { w: 1 } },
+          );
+        const started = Date.now();
+        const run = runCli(source, destination);
+        expect(run.output.trim().split("\n").at(-1)).toBe(
+          "Result: refused (MongoDB source has writes not yet replicated to a majority).",
+        );
+        expect(run.status).toBe(2);
+        // Checked repeatedly for 30 seconds before refusing; nothing was opened for writing.
+        expect(Date.now() - started).toBeGreaterThanOrEqual(30_000);
+        expect(existsSync(`/tmp/${name}.sqlite`)).toBe(false);
+
+        // A set that catches up within the checks is copied, including the late write.
+        const copy = copyDatabase(source, destination);
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await secondaryReplication("off");
+        const result = await copy;
+        expect(result.counts).toMatchObject({ settings: 1, audit: 1 });
+      } finally {
+        await secondaryReplication("off");
+        await client.close();
+        await dropDatabase("sqlite", name, destination);
+        await dropDatabase("mongors", name, source);
+      }
+    },
+    180_000,
+  );
+
+  it.skipIf(!replicaSetBase || !secondaryBase || !replicaSetFailPoints)(
+    "fails instead of hanging when a MongoDB destination cannot replicate its writes",
+    async () => {
+      const name = "gp_copy_rs_wtimeout";
+      const source = `sqlite:/tmp/${name}.sqlite`;
+      const destination = databaseUrl("mongors", name);
+      try {
+        await prepareDatabase("sqlite", name, source);
+        await prepareDatabase("mongors", name, destination);
+        const opened = await openStores(source);
+        await opened.stores.settings.put({ ...defaultSettings(), contact: "slow@example.invalid" });
+        await opened.close();
+        await secondaryReplication("alwaysOn");
+        const started = Date.now();
+        const run = runCli(source, destination);
+        const elapsed = Date.now() - started;
+        expect(run.output.trim().split("\n").at(-1)).toMatch(
+          /^Result: failed \((?:MONGO_\d+|ETIMEDOUT)\); drop the destination before retrying\.$/,
+        );
+        expect(run.status).toBe(1);
+        // The majority write waits 60 seconds, a stalled reply at most 2 minutes.
+        expect(elapsed).toBeGreaterThanOrEqual(60_000);
+        expect(elapsed).toBeLessThan(150_000);
+      } finally {
+        await secondaryReplication("off");
+        await dropDatabase("sqlite", name, source);
+        await dropDatabase("mongors", name, destination);
+      }
+    },
+    240_000,
   );
 });

@@ -18,6 +18,7 @@ export {
 export { type OpenedStores, openStores, type StorageKind, storageKindFromUrl } from "./open.js";
 export { sqlErrorCode } from "./sql/driver.js";
 export {
+  COPY_WINDOW_MINUTES,
   CopyDeadlineError,
   CopyFailureError,
   CopyRefusedError,

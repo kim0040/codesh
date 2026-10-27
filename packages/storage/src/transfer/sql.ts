@@ -6,8 +6,9 @@ import type {
   UploadRecord,
 } from "@gachipad/shared";
 import { SETTINGS_DOC_ID } from "@gachipad/shared";
-import type { SqlDriver, SqlRow } from "../sql/driver.js";
+import type { SqlDriver, SqlExecutor, SqlRow, SqlTransactionMode } from "../sql/driver.js";
 import { MEMBER_PAGE } from "./members.js";
+import { withTimeout } from "./timeout.js";
 import type {
   AuditItem,
   ShareMembers,
@@ -15,6 +16,24 @@ import type {
   TransferItem,
   TransferRecord,
 } from "./types.js";
+
+/** The schema_version rows this code reads and writes; schema.test.ts keeps it with sql/schema.ts. */
+export const SQL_SCHEMA_VERSIONS = [1];
+/** Every table that holds data. A destination must have them all empty. */
+export const SQL_DATA_TABLES = [
+  "shares",
+  "share_saved_by",
+  "share_bans",
+  "share_updates",
+  "share_snapshots",
+  "uploads",
+  "upload_chunks",
+  "labs",
+  "share_labels",
+  "settings",
+  "audit",
+  "diagnostics",
+];
 
 const PAGE_SIZE = 128;
 /** Update and snapshot bodies read at once; a single larger body is read on its own. */
@@ -285,6 +304,32 @@ async function tableExists(driver: SqlDriver, table: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** The driver with every statement and transaction bounded, so a stalled server fails the copy. */
+function boundedDriver(driver: SqlDriver): SqlDriver {
+  return {
+    dialect: driver.dialect,
+    all: <Row extends SqlRow = SqlRow>(sql: string, values?: unknown[]) =>
+      withTimeout(driver.all<Row>(sql, values)),
+    run: (sql, values) => withTimeout(driver.run(sql, values)),
+    transaction: <T>(work: (tx: SqlExecutor) => Promise<T>, mode?: SqlTransactionMode) =>
+      withTimeout(driver.transaction(work, mode)),
+    close: () => driver.close(),
+  };
+}
+
+/** Whether the database has exactly the migrations this code knows, so it can be read as is. */
+export async function supportedSqlSchema(unbounded: SqlDriver): Promise<boolean> {
+  const driver = boundedDriver(unbounded);
+  if (!(await tableExists(driver, "schema_version"))) return false;
+  const versions = await driver.all<{ version: number | string }>(
+    "SELECT version FROM schema_version ORDER BY version",
+  );
+  return (
+    versions.length === SQL_SCHEMA_VERSIONS.length &&
+    versions.every((row, index) => number(row.version) === SQL_SCHEMA_VERSIONS[index])
+  );
+}
+
 async function* auditItems(driver: SqlDriver): AsyncIterable<AuditItem> {
   for await (const batch of pages<SqlRow & { id: string }>(
     driver,
@@ -306,7 +351,8 @@ async function* auditItems(driver: SqlDriver): AsyncIterable<AuditItem> {
   }
 }
 
-export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
+export function createSqlTransferBackend(unbounded: SqlDriver): TransferBackend {
+  const driver = boundedDriver(unbounded);
   return {
     async *exportAll(cutoff: Date): AsyncIterable<TransferItem> {
       const cutoffMs = cutoff.getTime();
@@ -613,13 +659,14 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
           filled += length;
           offset += length;
           if (filled === UPLOAD_CHUNK_BYTES) {
-            await saveChunk(pending.slice());
+            // A copy: Buffer#slice is a view, and pending is refilled before the batch is written.
+            await saveChunk(Uint8Array.from(pending));
             filled = 0;
           }
         }
       }
       if (size !== record.size) throw new Error("Upload content did not match its stored size");
-      if (filled) await saveChunk(pending.slice(0, filled));
+      if (filled) await saveChunk(Uint8Array.from(pending.subarray(0, filled)));
       await driver.transaction(async (tx) => {
         for (const entry of batch)
           await tx.run("INSERT INTO upload_chunks (upload_id,chunk_no,data) VALUES (?,?,?)", [
@@ -633,21 +680,7 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
     },
 
     async isEmpty() {
-      const tables = [
-        "shares",
-        "share_saved_by",
-        "share_bans",
-        "share_updates",
-        "share_snapshots",
-        "uploads",
-        "upload_chunks",
-        "labs",
-        "share_labels",
-        "settings",
-        "audit",
-        "diagnostics",
-      ];
-      for (const table of tables) {
+      for (const table of SQL_DATA_TABLES) {
         if (!(await tableExists(driver, table))) continue;
         if ((await driver.all(`SELECT 1 AS present FROM ${table} LIMIT 1`)).length) return false;
       }
