@@ -118,13 +118,14 @@ cp generate-secrets.sh .env.example choices/staged/
 cp choices/live/.env choices/staged/.env
 printf 'GACHIPAD_DB=sqlite\n' >>choices/staged/.env
 (cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" ./generate-secrets.sh >pin.log 2>&1)
-grep -q 'database backend change refused' choices/staged/pin.log
+grep -q 'ignoring the template database default' choices/staged/pin.log
+if grep -q 'refused' choices/staged/pin.log; then exit 1; fi
 grep -qx 'GACHIPAD_DB=mongodb' choices/staged/.env
 grep -qx 'COMPOSE_PROFILES=mdns,mongodb' choices/staged/.env
 if (cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" GACHIPAD_DB=postgres ./generate-secrets.sh >refusal.log 2>&1); then
   echo 'legacy staged helper accepted a backend switch' >&2; exit 1
 fi
-grep -q 'future copy tool' choices/staged/refusal.log
+grep -q 'extract migrate-db.sh from the verified deployment bundle' choices/staged/refusal.log
 cp choices/.env.example choices/external.env
 url='mysql://user:p%40ss@db.local/gachipad?ssl=true&charset=utf8mb4'
 (cd choices && DATABASE_URL="$url" ./generate-secrets.sh external.env >external.log)

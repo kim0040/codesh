@@ -133,10 +133,17 @@ if [ -n "$live_lock" ]; then
   if [ -f "$live_env" ] && ! grep -q '^GACHIPAD_DB=' "$live_env" &&
     grep -Eq '^MONGO_[A-Z0-9_]+=' "$live_env"; then pin_mongo=1; fi
 fi
+migration_directory=.
+[ -z "$live_lock" ] || migration_directory="$(dirname "$(dirname "$live_lock")")"
+if [ -f "$migration_directory/migrate-db.sh" ]; then
+  migration_hint='use ./migrate-db.sh to copy data and switch backends.'
+else
+  migration_hint='extract migrate-db.sh from the verified deployment bundle into this installation before migrating.'
+fi
 if [ "$(tmp_get GACHIPAD_LEGACY_INSTALL)" = 1 ]; then pin_mongo=1; fi
 database_url="${DATABASE_URL:-$(tmp_get DATABASE_URL)}"
 if [ "$pin_mongo" = 1 ] && { [ -n "$database_url" ] || { [ -n "${GACHIPAD_DB:-}" ] && [ "$GACHIPAD_DB" != mongodb ]; }; }; then
-  echo "generate-secrets: database backend change refused (mongodb -> requested backend); data copy is not available yet. Keep the existing backend until the future copy tool is available." >&2
+  echo "generate-secrets: database backend change refused (mongodb -> requested backend); $migration_hint" >&2
   exit 1
 fi
 if [ -n "$database_url" ]; then
@@ -152,7 +159,7 @@ if [ -n "$database_url" ]; then
 else
   if [ "$pin_mongo" = 1 ]; then
     if [ -n "$(tmp_get GACHIPAD_DB)" ] && [ "$(tmp_get GACHIPAD_DB)" != mongodb ]; then
-      echo "generate-secrets: database backend change refused (mongodb -> requested backend); data copy is not available yet. Keep the existing backend until the future copy tool is available." >&2
+      echo "generate-secrets: ignoring the template database default; keeping the existing MongoDB backend."
     fi
     db=mongodb
   else db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"; fi
@@ -162,7 +169,7 @@ else
 fi
 marker="$(cat state/database-kind 2>/dev/null || true)"
 if [ -n "$marker" ] && [ "$marker" != "$db" ]; then
-  echo "generate-secrets: database backend change refused ($marker -> $db); data copy is not available yet. Keep the existing backend until the future copy tool is available." >&2
+  echo "generate-secrets: database backend change refused ($marker -> $db); $migration_hint" >&2
   exit 1
 fi
 case "$db" in

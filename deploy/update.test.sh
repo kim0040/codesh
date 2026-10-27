@@ -110,6 +110,9 @@ if [ "$1" = compose ]; then
   esac
   exit 0
 fi
+if [ "$1" = run ] && [[ "$*" == *readdirSync* ]]; then
+  printf nonempty; exit 0
+fi
 if [ "$1" = volume ] && [ "$2" = inspect ]; then
   [ "${FAKE_NONEMPTY_VOLUME:-}" = "${3:-}" ] && exit 0
   exit 1
@@ -149,7 +152,7 @@ digest() { printf '%s' "$1" | sha256sum | cut -c1-64; }
 release() {
   local v="$1" dir="$F/srv/dl/kim0040/gachipad/releases/download/v$1" stage="$F/stage/gachipad-$1"
   mkdir -p "$dir" "$stage/docs" "$stage/tls" "$stage/state"
-  cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml} "$stage/"
+  cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,docker-compose.yml} "$stage/"
   cp "$root/deploy/README.md" "$stage/README.md"
   printf '# doc\n' >"$stage/docs/OPERATIONS.md"
   printf '# tls\n' >"$stage/tls/tls.example"
@@ -198,7 +201,7 @@ for _ in $(seq 50); do curl -fs "$base/healthz" >/dev/null 2>&1 && break; sleep 
 
 # --- an installation of 1.0.0 --------------------------------------------------------------------
 I="$F/install"
-cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml,.env.example,README.md} "$I/"
+cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,docker-compose.yml,.env.example,README.md} "$I/"
 sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" -e 's/^GACHIPAD_DB=sqlite/GACHIPAD_DB=mongodb/' "$I/.env.example" >"$I/.env"
 (cd "$I" && ./generate-secrets.sh .env >/dev/null)
 envv() { sed -n "s/^$1=//p" "$I/.env" | tail -n 1; }
@@ -233,11 +236,14 @@ status | grep -q '"result":"failed","from":"1.0.0","to":"1.0.2"' || fail "failur
 ok "1.0.2 with a wrong checksum refused; no backup, no pull, .env unchanged"
 
 step "happy path 1.0.0 -> 1.0.1"
+# A fixed-file-list legacy updater can leave the new command absent until this update.
+rm -f "$I/migrate-db.sh"
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.1 --yes || fail "update failed"
 [ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "GACHIPAD_VERSION not 1.0.1"
 [ "$(envv NEW_IN_1_0_1)" = yes ] || fail "new setting not added"
 [ "$(cat "$I/VERSION")" = 1.0.1 ] || fail "files not installed"
+[ -x "$I/migrate-db.sh" ] || fail "new migration command not installed"
 tail -n 1 "$I/update.sh" | grep -q '^# release 1.0.1' || fail "update.sh not replaced"
 grep -q 'exec -T .*mongo sh' "$DOCKER_CALLS" || fail "no backup"
 grep -q 'exec -T -e MONGO_DATABASE=gachipad -e MONGO_INITDB_ROOT_USERNAME=gachipad mongo' "$DOCKER_CALLS" || fail "backup did not name the database and user"
@@ -814,6 +820,7 @@ for (const name of ["mkdtempSync", "createReadStream", "createWriteStream"]) {
     return original(path, ...args);
   };
 }
+if (process.env.SQLITE_NO_SPACE) fs.statfsSync = () => ({ bavail: 0n, bsize: 4096n });
 const rename = fs.renameSync;
 fs.renameSync = (from, to) => {
   if (fs.existsSync(`${to}-wal`) || fs.existsSync(`${to}-shm`)) throw new Error("stale WAL before rename");
@@ -835,14 +842,26 @@ SQLITE_DATA="$sqlite_fixture/data" node --input-type=module -e '
   export SQLITE_DATA="$sqlite_fixture/data"
   # shellcheck disable=SC2317 # backend helpers call this process-boundary replacement
   docker() {
+    while [ "$1" != --entrypoint ]; do
+      if [ "$1" = -e ]; then export "${2?}"; shift; fi
+      shift
+    done
     while [ "$1" != -e ]; do shift; done
     shift
     DATABASE_URL="sqlite:$SQLITE_DATA/custom.db" node --import "$sqlite_fixture/check-files.mjs" --input-type=module -e "$1"
   }
+  mkdir "$SQLITE_DATA/.gachipad-backup-stale" "$SQLITE_DATA/.gachipad-validate-stale"
+  touch "$SQLITE_DATA/custom.db.restore"
   sqlite_backup backups >snapshot.log
+  [ ! -e "$SQLITE_DATA/.gachipad-backup-stale" ] && [ ! -e "$SQLITE_DATA/.gachipad-validate-stale" ]
+  [ ! -e "$SQLITE_DATA/custom.db.restore" ]
   archive="$(sed -n 's/^backup: \(.*\) (.*/\1/p' snapshot.log)"
   sqlite_validate "$archive"
   sqlite_restore "$archive"
+  if SQLITE_NO_SPACE=1 sqlite_backup no-space >space.log 2>&1; then exit 1; fi
+  grep -q 'SQLite data filesystem has insufficient free space' space.log
+  if SQLITE_NO_SPACE=1 sqlite_validate "$archive" >space.log 2>&1; then exit 1; fi
+  grep -q 'SQLite data filesystem has insufficient free space' space.log
   if SQLITE_FAIL_READ=1 sqlite_backup failed-read; then exit 1; fi
   if SQLITE_FAIL_WRITE=1 sqlite_validate "$archive"; then exit 1; fi
   gzip -c </dev/null >empty.gz

@@ -74,7 +74,9 @@ validate_database_url() {
 }
 
 database_project() {
-  printf '%s' "${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME "${GACHIPAD_PROJECT:-$(env_get GACHIPAD_PROJECT gachipad)}")}"
+  local fallback=gachipad
+  [ -z "$(env_get CODESH_VERSION)" ] || fallback=codesh
+  printf '%s' "${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME "${GACHIPAD_PROJECT:-$(env_get GACHIPAD_PROJECT "$fallback")}")}"
 }
 
 database_volume_suffix() {
@@ -83,10 +85,16 @@ database_volume_suffix() {
 }
 
 database_volume_nonempty() {
-  local volume="$1" kind="${2:-}" result
+  local volume="$1" kind="${2:-}" result url image registry version
   docker volume inspect "$volume" >/dev/null 2>&1 || return 1
-  result="$(GACHIPAD_PROBE_SQLITE_URL="$(env_get GACHIPAD_DATABASE_URL)" docker compose run --rm --no-deps -T --pull never --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" -e GACHIPAD_PROBE_SQLITE_URL \
-    --entrypoint node api -e '
+  url="$(env_get GACHIPAD_DATABASE_URL)"
+  [[ "$url" == sqlite:* ]] || url=""
+  registry="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example 2>/dev/null | tail -n 1)"
+  registry="${registry:-$(env_get GACHIPAD_REGISTRY ghcr.io/kim0040)}"
+  version="$(cat VERSION 2>/dev/null || env_get GACHIPAD_VERSION)"
+  image="$registry/gachipad-api:$version"
+  result="$(GACHIPAD_PROBE_SQLITE_URL="$url" docker run --rm --pull never --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" -e GACHIPAD_PROBE_SQLITE_URL \
+    --entrypoint node "$image" -e '
       const { readdirSync, existsSync } = require("node:fs");
       const url = process.env.GACHIPAD_PROBE_SQLITE_URL ?? "";
       const path = url.startsWith("sqlite:") ? (url.startsWith("sqlite://")
@@ -100,20 +108,30 @@ database_volume_nonempty() {
   [ "$result" = nonempty ]
 }
 
+database_migration_hint() {
+  if [ -f migrate-db.sh ]; then
+    printf 'use ./migrate-db.sh to copy data and switch backends.'
+  else
+    printf 'extract migrate-db.sh from the verified deployment bundle into this installation before migrating.'
+  fi
+}
+
 # Refuse a backend switch before Compose can start a new database beside old data.
 assert_database_backend() {
   local selected marker project kind volume
   selected="$(database_kind)"
   marker="$(cat state/database-kind 2>/dev/null || true)"
   if [ -n "$marker" ] && [ "$marker" != "$selected" ]; then
-    die "database backend change refused ($marker -> $selected); data copy is not available yet. Keep the existing backend until the future copy tool is available."
+    die "database backend change refused ($marker -> $selected); $(database_migration_hint)"
   fi
+  # A successful migration deliberately retains the previous backend volumes.
+  [ "$marker" != "$selected" ] || return 0
   project="$(database_project)"
   for kind in sqlite postgres mongodb; do
     [ "$kind" = "$selected" ] && continue
     volume="${project}_$(database_volume_suffix "$kind")"
     if database_volume_nonempty "$volume" "$kind"; then
-      die "database backend change refused: non-empty $kind volume $volume exists while $selected is selected. Keep the existing backend until the future copy tool is available."
+      die "database backend change refused: non-empty $kind volume $volume exists while $selected is selected. $(database_migration_hint)"
     fi
   done
 }
@@ -327,13 +345,23 @@ sqlite_backup() (
   trap 'rm -f "$part"' EXIT
   docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    import { createReadStream, mkdtempSync, rmSync } from "node:fs";
+    import { createReadStream, mkdtempSync, rmSync, readdirSync, statSync, statfsSync } from "node:fs";
     import { dirname, join } from "node:path";
     import { pipeline } from "node:stream/promises";
     const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
     const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
-    const directory = mkdtempSync(join(dirname(source), ".gachipad-backup-"));
+    const dataDirectory = dirname(source);
+    for (const name of readdirSync(dataDirectory)) {
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name.endsWith(".restore"))
+        rmSync(join(dataDirectory, name), { recursive: true, force: true });
+    }
+    const bytes = BigInt(statSync(source).size);
+    const space = statfsSync(dataDirectory, { bigint: true });
+    const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
+    if (space.bavail * space.bsize < required)
+      throw new Error("SQLite data filesystem has insufficient free space for a snapshot or restore (database size plus 20%, at least 64 MiB extra required)");
+    const directory = mkdtempSync(join(dataDirectory, ".gachipad-backup-"));
     const path = join(directory, "snapshot.db");
     const cleanup = () => rmSync(directory, { recursive: true, force: true });
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
@@ -369,15 +397,27 @@ postgres_backup() (
 )
 
 sqlite_validate() {
-  gzip -dc -- "$1" | docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
+  local bytes
+  bytes="$(gzip -dc -- "$1" | wc -c)" || return 1
+  gzip -dc -- "$1" | docker compose run --rm --no-deps -T -e GACHIPAD_SQLITE_BYTES="$bytes" --entrypoint node api --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    import { createWriteStream, mkdtempSync, openSync, readSync, closeSync, rmSync } from "node:fs";
+    import { createWriteStream, mkdtempSync, openSync, readSync, closeSync, rmSync, readdirSync, statfsSync } from "node:fs";
     import { pipeline } from "node:stream/promises";
     import { dirname, join } from "node:path";
     const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
     const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
-    const directory = mkdtempSync(join(dirname(source), ".gachipad-validate-"));
+    const dataDirectory = dirname(source);
+    for (const name of readdirSync(dataDirectory)) {
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name.endsWith(".restore"))
+        rmSync(join(dataDirectory, name), { recursive: true, force: true });
+    }
+    const bytes = BigInt(process.env.GACHIPAD_SQLITE_BYTES);
+    const space = statfsSync(dataDirectory, { bigint: true });
+    const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
+    if (space.bavail * space.bsize < required)
+      throw new Error("SQLite data filesystem has insufficient free space for a snapshot or restore (database size plus 20%, at least 64 MiB extra required)");
+    const directory = mkdtempSync(join(dataDirectory, ".gachipad-validate-"));
     const path = join(directory, "snapshot.db");
     const cleanup = () => rmSync(directory, { recursive: true, force: true });
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
@@ -397,15 +437,28 @@ sqlite_validate() {
 }
 
 sqlite_restore() {
+  local bytes
   sqlite_validate "$1" || { echo "SQLite backup validation failed; database unchanged" >&2; return 1; }
   sqlite_backup ./backups >&2 || return 1
-  gzip -dc -- "$1" | docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
+  bytes="$(gzip -dc -- "$1" | wc -c)" || return 1
+  gzip -dc -- "$1" | docker compose run --rm --no-deps -T -e GACHIPAD_SQLITE_BYTES="$bytes" --entrypoint node api --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    import { createWriteStream, renameSync, rmSync } from "node:fs";
+    import { createWriteStream, renameSync, rmSync, readdirSync, statfsSync } from "node:fs";
     import { pipeline } from "node:stream/promises";
     const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
     const destination = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
+    import { dirname, join } from "node:path";
+    const dataDirectory = dirname(destination);
+    for (const name of readdirSync(dataDirectory)) {
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name.endsWith(".restore"))
+        rmSync(join(dataDirectory, name), { recursive: true, force: true });
+    }
+    const bytes = BigInt(process.env.GACHIPAD_SQLITE_BYTES);
+    const space = statfsSync(dataDirectory, { bigint: true });
+    const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
+    if (space.bavail * space.bsize < required)
+      throw new Error("SQLite data filesystem has insufficient free space for a snapshot or restore (database size plus 20%, at least 64 MiB extra required)");
     const path = `${destination}.restore`;
     const cleanup = () => rmSync(path, { force: true });
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])

@@ -9,7 +9,14 @@ cat >"$fixture/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$DOCKER_CALLS"
 [ "$1" = compose ] && [ "${2:-}" = version ] && exit 0
-if [ "$1" = volume ] && [ "${2:-}" = inspect ]; then exit 1; fi
+if [ "$1" = volume ] && [ "${2:-}" = inspect ]; then
+  [ "${FAKE_VOLUME:-}" = "${3:-}" ]; exit $?
+fi
+if [ "$1" = run ] && [[ "$*" == *readdirSync* ]]; then
+  [ ! -e .env ] || exit 98
+  [ -z "${GACHIPAD_PROBE_SQLITE_URL:-}" ] || exit 99
+  printf '%s' "${FAKE_VOLUME_CONTENT:-empty}"
+fi
 exit 0
 DOCKER
 cat >"$fixture/bin/curl" <<'CURL'
@@ -44,7 +51,7 @@ echo 'L11: install and upgrade rejected corrupt bundles before image loading'
 make_install() {
   local dir="$1"
   mkdir -p "$dir/state"
-  cp "$root"/deploy/{install.sh,generate-secrets.sh,lib.sh,backup.sh,restore.sh,upgrade.sh,update.sh,docker-compose.yml,.env.example} "$dir/"
+  cp "$root"/deploy/{install.sh,generate-secrets.sh,lib.sh,backup.sh,restore.sh,upgrade.sh,update.sh,migrate-db.sh,docker-compose.yml,.env.example} "$dir/"
   printf '1.2.3\n' >"$dir/VERSION"
   printf 'fixture images\n' >"$dir/images.tar"
   (cd "$dir" && sha256sum images.tar VERSION >SHA256SUMS)
@@ -110,7 +117,7 @@ if (cd "$dir" && PUBLIC_URL=http://should-not-write ./install.sh --db postgres) 
   echo 'installer accepted a backend switch from existing data' >&2; exit 1
 fi
 grep -q 'database backend change refused (mongodb -> postgres)' "$fixture/switch.log"
-grep -q 'future copy tool' "$fixture/switch.log"
+grep -q './migrate-db.sh' "$fixture/switch.log"
 cmp "$dir/.env" "$fixture/switch-before.env"
 # Exported selections and missing external URLs also leave every existing byte intact.
 for mode in env url external; do
@@ -176,3 +183,74 @@ printf 'GACHIPAD_DB=external\nDATABASE_URL="postgresql://fixture:private@db.inva
   [ "$(database_kind)" = external ]
 )
 echo 'L14: refused installs and secret generation preserve .env bytes; double-quoted URL schemes work'
+
+# Exercise the real volume guard before a fresh install has an env file.
+for content in nonempty empty; do
+  dir="$fixture/probe-$content"
+  make_install "$dir"
+  if (cd "$dir" && FAKE_VOLUME=gachipad_postgres-data FAKE_VOLUME_CONTENT="$content" ./install.sh --db sqlite) >"$fixture/probe-$content.log" 2>&1; then
+    [ "$content" = empty ] || { echo 'fresh install ignored a nonempty volume' >&2; exit 1; }
+  else
+    [ "$content" = nonempty ] || { echo 'fresh install refused an empty volume' >&2; exit 1; }
+    grep -q 'non-empty postgres volume' "$fixture/probe-$content.log"
+    if grep -q 'cannot inspect' "$fixture/probe-$content.log"; then exit 1; fi
+    [ ! -e "$dir/.env" ]
+  fi
+done
+dir="$fixture/legacy-refusal"
+make_install "$dir"
+printf 'CODESH_VERSION=1.0.1\nMONGO_PASSWORD=fixture-root\nMONGO_APP_PASSWORD=fixture-app\n' >"$dir/.env"
+cp -p "$dir/.env" "$fixture/legacy-before.env"
+if (cd "$dir" && ./install.sh --db postgres) >"$fixture/legacy-refusal.log" 2>&1; then
+  echo 'legacy install switched backends' >&2; exit 1
+fi
+cmp "$dir/.env" "$fixture/legacy-before.env"
+grep -q 'database backend change refused' "$fixture/legacy-refusal.log"
+# A late generator failure must remove a newly created .env too.
+dir="$fixture/fresh-generator-failure"
+make_install "$dir"
+printf '#!/usr/bin/env bash\nexit 1\n' >"$dir/generate-secrets.sh"
+if (cd "$dir" && ./install.sh --db sqlite) >"$fixture/fresh-generator-failure.log" 2>&1; then exit 1; fi
+[ ! -e "$dir/.env" ]
+echo 'L15: env-independent fresh volume probes, legacy byte-identical refusal and fresh env rollback passed'
+
+# A root volume probe never receives a server URL or its password.
+(
+  cd "$fixture/quoted"
+  # shellcheck source=/dev/null
+  source ./lib.sh
+  env_set GACHIPAD_DATABASE_URL 'postgresql://fixture:probe-private@db.invalid/db'
+  # shellcheck disable=SC2317 # called by the sourced volume probe
+  docker() {
+    if [ "$1" = volume ]; then return 0; fi
+    [ -z "${GACHIPAD_PROBE_SQLITE_URL:-}" ] || return 99
+    printf empty
+  }
+  if database_volume_nonempty fixture-volume postgres; then exit 1; fi
+)
+echo 'L16: root volume probes omit non-SQLite connection URLs'
+
+# Legacy updaters cannot deliver new filenames; never suggest an absent command.
+dir="$fixture/switch"
+rm "$dir/migrate-db.sh"
+if (cd "$dir" && ./install.sh --db postgres) >"$fixture/missing-migration.log" 2>&1; then exit 1; fi
+grep -q 'extract migrate-db.sh from the verified deployment bundle' "$fixture/missing-migration.log"
+if grep -q './migrate-db.sh' "$fixture/missing-migration.log"; then exit 1; fi
+cmp "$dir/.env" "$fixture/switch-before.env"
+echo 'L17: missing migration script gives verified-bundle extraction guidance'
+
+# A failed snapshot must not be restored over the untouched original env.
+dir="$fixture/snapshot-copy-failure"
+make_install "$dir"
+printf 'CODESH_VERSION=1.0.1\nMONGO_PASSWORD=fixture-root\n' >"$dir/.env"
+cp -p "$dir/.env" "$fixture/snapshot-before.env"
+cat >"$fixture/bin/cp" <<'COPY'
+#!/usr/bin/env bash
+case "${!#}" in .env.install-snapshot.*) printf partial >"${!#}"; exit 1 ;; esac
+exec /bin/cp "$@"
+COPY
+chmod +x "$fixture/bin/cp"
+if (cd "$dir" && ./install.sh --db postgres) >"$fixture/snapshot-copy-failure.log" 2>&1; then exit 1; fi
+cmp "$dir/.env" "$fixture/snapshot-before.env"
+rm "$fixture/bin/cp"
+echo 'L18: failed snapshot copy preserves original env bytes'

@@ -251,6 +251,18 @@ in_install ./restore.sh "$backup" --yes
 call "/api/shares/$ID/history/7" >"$WORK/history-restored.bin"
 cmp "$WORK/history-before.bin" "$WORK/history-restored.bin" || fail 'renamed backup/restore lost history'
 echo 'PASS: same volumes, share content, guest ownership, session, profile/identity, history bytes, settings, upload, backup/restore'
+# The published updater has a fixed whitelist and cannot deliver a new script automatically.
+[ ! -f "$INSTALL/migrate-db.sh" ] || fail 'published updater unexpectedly changed its file whitelist'
+# shellcheck disable=SC2016 # expanded in the installed directory, never contains connection data
+in_install bash -c '
+  . ./lib.sh
+  verify_archive "$1"
+  tar -xOf "$1" "gachipad-$2/migrate-db.sh" >migrate-db.sh.new
+  chmod 700 migrate-db.sh.new
+  mv migrate-db.sh.new migrate-db.sh
+  ./migrate-db.sh --help >/dev/null
+' _ "$WORK/source/deploy/dist/gachipad-deploy-$TARGET.tar.gz" "$TARGET"
+echo 'PASS: one-time verified-bundle extraction supplies migrate-db.sh after the unmodified 1.0.1 updater'
 
 echo 'offline: original 1.0.1 upgrader, with bundle images from a different registry'
 in_install docker compose down -v --remove-orphans

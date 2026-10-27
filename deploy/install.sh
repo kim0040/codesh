@@ -137,6 +137,32 @@ verify_bundle .
 
 [ -f images.tar ] || die "images.tar is missing: run this from the extracted bundle"
 VERSION="$(cat VERSION)"
+install_lock
+ENV_SNAPSHOT=""
+ENV_SNAPSHOT_READY=0
+ENV_READY=0
+install_cleanup() {
+  local status=$? restored=1
+  trap - EXIT HUP INT TERM
+  if [ "$ENV_READY" = 0 ] && [ "$ENV_SNAPSHOT_READY" = 1 ]; then
+    if [ "$FRESH" = 0 ]; then
+      cp -p "$ENV_SNAPSHOT" .env.install-recovery && mv .env.install-recovery .env || restored=0
+    else rm -f .env || restored=0; fi
+  fi
+  if [ "$restored" = 1 ]; then
+    [ -z "$ENV_SNAPSHOT" ] || rm -f "$ENV_SNAPSHOT"
+    rm -f .env.install-recovery
+  else
+    echo "install: could not restore .env; original snapshot kept at $ENV_SNAPSHOT" >&2
+    status=1
+  fi
+  install_unlock
+  exit "$status"
+}
+trap install_cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # legacy codesh name (1.0.x); remove in 2.0
 # A 1.0.x installation keeps its data in codesh_* volumes. A folder without its .env would start an
@@ -158,6 +184,9 @@ docker load -i images.tar
 assert_database_backend
 
 # Persist settings only after the backend guard has accepted the proposed selection.
+ENV_SNAPSHOT="$(mktemp .env.install-snapshot.XXXXXX)"
+[ "$FRESH" = 1 ] || cp -p .env "$ENV_SNAPSHOT"
+ENV_SNAPSHOT_READY=1
 [ "$FRESH" = 0 ] || cp .env.example .env
 for name in PUBLIC_URL HTTP_PORT HTTPS_PORT SITE_ADDRESS COLLAB_REPLICAS; do
   value="${!name:-}"
@@ -173,6 +202,7 @@ REGISTRY="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
 mkdir -p state && chmod 755 state
 
 echo "install: starting"
+ENV_READY=1
 docker compose up -d --wait
 wait_healthy 120
 record_database_backend

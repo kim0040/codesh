@@ -160,6 +160,7 @@ for choice in sqlite postgres; do
   fi
   cp "$INSTALL/state/database-kind" "$WORK/selection-kind-before"
   if UPDATE_HEALTH_TIMEOUT=20 in_install ./upgrade.sh "$BAD" --yes >"$WORK/selection-rollback-$choice.log" 2>&1; then fail "$choice unhealthy candidate succeeded"; fi
+  grep -q 'restoring the database from' "$WORK/selection-rollback-$choice.log" || fail "$choice rollback did not restore the database"
   grep -q 'rolling back to 1.0.1' "$WORK/selection-rollback-$choice.log" || fail "$choice rollback did not run"
   grep -q '"result":"rolled-back"' "$INSTALL/state/update.json" || fail "$choice rollback status missing"
   cmp "$INSTALL/state/database-kind" "$WORK/selection-kind-before" || fail "$choice rollback changed backend marker"
@@ -218,6 +219,82 @@ check_share
 GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 in_install ./upgrade.sh "$NEXT"
 check_share
 echo 'PASS: external shared PostgreSQL install and acknowledged update preserve API-created share; local backup refuses with guidance'
+# Reuse only the owned relay and database; the earlier external fixture is discarded.
+cleanup_stack
+docker exec gp-sql-pg dropdb -U gp --if-exists --force "$DB"
+docker exec gp-sql-pg createdb -U gp "$DB"
+prepare
+in_install ./install.sh --db mongodb
+seed
+UPLOAD="$(call /api/uploads -F "file=@$INSTALL/VERSION;filename=migration-fixture.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["uploadId"])')"
+call "/api/uploads/$UPLOAD" >"$WORK/migration-upload-before"
+check_migration_data() {
+  check_share
+  call "/api/uploads/$UPLOAD" >"$WORK/migration-upload-after"
+  cmp "$WORK/migration-upload-before" "$WORK/migration-upload-after" || fail 'migration lost upload bytes'
+}
+in_install ./migrate-db.sh --to sqlite --yes
+[ "$(cat "$INSTALL/state/database-kind")" = sqlite ] || fail 'MongoDB to SQLite marker missing'
+check_migration_data
+docker volume inspect "${PROJECT}_mongo-data" >/dev/null
+echo 'PASS: MongoDB -> SQLite retains API share, upload bytes and old MongoDB volume'
+
+# Make the real npm copy complete, then inject a nonzero process exit at its boundary.
+# This creates a populated new destination and exercises cleanup plus recovery of the old DB.
+mkdir -p "$WORK/migration-bin"
+REAL_DOCKER="$(command -v docker)"
+export REAL_DOCKER
+cat >"$WORK/migration-bin/docker" <<'INJECT'
+#!/usr/bin/env bash
+if [[ "$*" == *' api npm run --silent copy-db' ]]; then
+  "$REAL_DOCKER" "${@:1:$(($# - 4))}" sh -c 'npm run --silent copy-db; exit 1'
+  exit 1
+fi
+exec "$REAL_DOCKER" "$@"
+INJECT
+chmod +x "$WORK/migration-bin/docker"
+cp -p "$INSTALL/.env" "$WORK/migration-before.env"
+if PATH="$WORK/migration-bin:$PATH" in_install ./migrate-db.sh --to postgres --yes >"$WORK/migration-failed.log" 2>&1; then
+  fail 'injected copy failure succeeded'
+else status=$?; fi
+[ "$status" = 1 ] || fail 'injected copy failure lost exit 1'
+grep -q 'Result: success' "$WORK/migration-failed.log" || fail 'injected failure did not execute real copy'
+grep -q 'copy exited 1' "$WORK/migration-failed.log" || fail 'copy failure was not injected'
+grep -q 'destination may hold a partial copy' "$WORK/migration-failed.log" || fail 'partial destination guidance missing'
+cmp "$INSTALL/.env" "$WORK/migration-before.env" || fail 'copy failure changed source env'
+[ "$(cat "$INSTALL/state/database-kind")" = sqlite ] || fail 'copy failure changed source marker'
+if docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1; then fail 'failed migration retained a new partial volume'; fi
+check_migration_data
+echo 'PASS: injected copy process failure restarts old SQLite with share/upload; new populated target volume removed'
+
+in_install ./migrate-db.sh --to postgres --yes
+[ "$(cat "$INSTALL/state/database-kind")" = postgres ] || fail 'SQLite to PostgreSQL marker missing'
+check_migration_data
+docker volume inspect "${PROJECT}_gachipad-data" >/dev/null
+echo 'PASS: SQLite -> PostgreSQL retains API share, upload bytes and old SQLite volume'
+cp -p "$INSTALL/.env" "$WORK/migration-before.env"
+if in_install ./migrate-db.sh --to mongodb --yes >"$WORK/migration-refused.log" 2>&1; then
+  fail 'migration into nonempty MongoDB succeeded'
+else status=$?; fi
+[ "$status" = 2 ] || fail 'nonempty destination refusal lost exit 2'
+grep -q 'Result: refused' "$WORK/migration-refused.log" || fail 'real copy tool did not refuse'
+cmp "$INSTALL/.env" "$WORK/migration-before.env" || fail 'refusal changed source env'
+docker volume inspect "${PROJECT}_mongo-data" >/dev/null
+check_migration_data
+echo 'PASS: real nonempty destination refusal returns 2 and retains both backends and share/upload'
+# Old volumes retained by migration must not prevent later normal updates.
+in_install ./upgrade.sh "$NEXT"
+check_migration_data
+in_install ./migrate-db.sh --to external --database-url "$external_url" --yes
+[ "$(cat "$INSTALL/state/database-kind")" = external ] || fail 'PostgreSQL to external marker missing'
+check_migration_data
+docker volume inspect "${PROJECT}_postgres-data" >/dev/null
+if in_install ./migrate-db.sh --to external --database-url "$external_url" --yes >"$WORK/migration-identical.log" 2>&1; then
+  fail 'identical external migration succeeded'
+fi
+grep -q 'URLs are identical' "$WORK/migration-identical.log" || fail 'identical external refusal missing'
+check_migration_data
+echo 'PASS: PostgreSQL -> external shared PostgreSQL retains share/upload and old volume; identical URL refuses'
 docker rm -f "$RELAY" >/dev/null
 RELAY_STARTED=0
 cleanup_stack
