@@ -9,7 +9,7 @@ import {
 } from "@gachipad/storage";
 
 console.log(
-  "Source must be quiescent: stop the API and collab service first. Diagnostics are skipped.",
+  "Source must be quiescent: stop the API and collab service first. Diagnostics, expired records and records of expired or missing shares are not copied.",
 );
 
 let counts: TransferCounts = countsForCli();

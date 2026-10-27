@@ -14,8 +14,14 @@ import {
   scrubDiagnosticSnapshot,
   type UploadRecord,
 } from "@gachipad/shared";
+import { splitShare } from "./transfer/members.js";
 import { registerTransferBackend } from "./transfer/registry.js";
-import type { TransferBackend, TransferItem, TransferRecord } from "./transfer/types.js";
+import type {
+  ShareMembers,
+  TransferBackend,
+  TransferItem,
+  TransferRecord,
+} from "./transfer/types.js";
 import {
   type AuditQuery,
   type AuditStore,
@@ -100,6 +106,10 @@ class MemoryShareStore implements ShareStore {
 
   transferImport(share: ShareRecord) {
     this.shares.set(share.id, copy(share));
+  }
+
+  transferMembers({ shareId, list, offset, clientIds }: ShareMembers) {
+    this.shares.get(shareId)?.[list].splice(offset, 0, ...clientIds);
   }
 
   get transferSize() {
@@ -196,11 +206,9 @@ class MemoryShareStore implements ShareStore {
 class MemoryUpdateLog implements UpdateLog {
   private readonly logs = new Map<string, Map<number, { data: Uint8Array; at: Date }>>();
 
-  *transferRecords() {
-    for (const [shareId, log] of this.logs) {
-      for (const [seq, entry] of log)
-        yield { shareId, seq, data: entry.data.slice(), at: new Date(entry.at) };
-    }
+  *transferRecords(shareId: string) {
+    for (const [seq, entry] of this.logs.get(shareId) ?? [])
+      yield { shareId, seq, data: entry.data.slice(), at: new Date(entry.at) };
   }
 
   transferImport(record: { shareId: string; seq: number; data: Uint8Array; at: Date }) {
@@ -263,8 +271,8 @@ class MemoryUpdateLog implements UpdateLog {
 class MemorySnapshotStore implements SnapshotStore {
   private snapshots: SnapshotRecord[] = [];
 
-  *transferRecords(): Iterable<SnapshotRecord> {
-    for (const snapshot of this.snapshots) yield copy(snapshot);
+  *transferRecords(shareId: string): Iterable<SnapshotRecord> {
+    for (const snapshot of this.snapshots) if (snapshot.shareId === shareId) yield copy(snapshot);
   }
 
   transferImport(snapshot: SnapshotRecord) {
@@ -664,23 +672,48 @@ export function createMemoryStores(): Stores {
     audit,
   };
   const transfer: TransferBackend = {
-    async *exportAll(): AsyncIterable<TransferItem> {
-      for (const record of shares.transferRecords()) yield { kind: "shares", record };
-      for (const record of updates.transferRecords()) yield { kind: "updates", record };
-      for (const record of snapshots.transferRecords()) yield { kind: "snapshots", record };
-      for await (const item of files.transferRecords()) yield { kind: "uploads", ...item };
-      for (const record of labs.transferRecords()) yield { kind: "labs", record };
-      for (const record of labels.transferRecords()) yield { kind: "labels", record };
+    async *exportAll(liveAt: Date): AsyncIterable<TransferItem> {
+      const live = new Set<string>();
+      for (const record of shares.transferRecords()) {
+        if (record.expiresAt && record.expiresAt < liveAt) continue;
+        live.add(record.id);
+        yield* splitShare(record);
+        for (const update of updates.transferRecords(record.id))
+          yield { kind: "updates", record: update };
+        for (const snapshot of snapshots.transferRecords(record.id))
+          yield { kind: "snapshots", record: snapshot };
+      }
+      for await (const item of files.transferRecords())
+        if (
+          item.record.expiresAt >= liveAt &&
+          (item.record.shareId === undefined || live.has(item.record.shareId))
+        )
+          yield { kind: "uploads", ...item };
+      for (const record of labs.transferRecords())
+        if (record.expiresAt >= liveAt) yield { kind: "labs", record };
+      for (const record of labels.transferRecords())
+        if (live.has(record.shareId)) yield { kind: "labels", record };
       const setting = settings.transferRecord();
       if (setting) yield { kind: "settings", record: setting };
       for (const entry of audit.transferRecords())
         yield { kind: "audit", id: entry.id, record: entry.record };
+    },
+    async countLive(liveAt: Date) {
+      let liveShares = 0;
+      for (const record of shares.transferRecords())
+        if (!record.expiresAt || record.expiresAt >= liveAt) liveShares++;
+      let liveLabs = 0;
+      for (const record of labs.transferRecords()) if (record.expiresAt >= liveAt) liveLabs++;
+      return { shares: liveShares, labs: liveLabs };
     },
     async importBatch(items: readonly TransferRecord[]) {
       for (const item of items) {
         switch (item.kind) {
           case "shares":
             shares.transferImport(item.record);
+            break;
+          case "shareMembers":
+            shares.transferMembers(item.record);
             break;
           case "updates":
             updates.transferImport(item.record);
@@ -718,6 +751,9 @@ export function createMemoryStores(): Stores {
       );
     },
     async recomputeCounters() {},
+    async uploadCounter() {
+      return undefined;
+    },
   };
   return registerTransferBackend(stores, transfer);
 }

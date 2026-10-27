@@ -7,9 +7,12 @@ import type {
 } from "@gachipad/shared";
 import { SETTINGS_DOC_ID } from "@gachipad/shared";
 import type { SqlDriver, SqlRow } from "../sql/driver.js";
-import type { TransferBackend, TransferItem, TransferRecord } from "./types.js";
+import { MEMBER_PAGE } from "./members.js";
+import type { ShareMembers, TransferBackend, TransferItem, TransferRecord } from "./types.js";
 
 const PAGE_SIZE = 128;
+/** Update and snapshot bodies read at once; a single larger body is read on its own. */
+const PAGE_BYTES = 2 * 1024 * 1024;
 const UPLOAD_CHUNK_BYTES = 256 * 1024;
 const UPLOAD_BATCH_CHUNKS = 8;
 const blob = (value: Uint8Array) => Buffer.from(value.buffer, value.byteOffset, value.byteLength);
@@ -64,10 +67,12 @@ async function* pages<Row extends SqlRow>(
   firstSql: string,
   nextSql: string,
   nextValues: (last: Row) => unknown[],
+  values: unknown[] = [],
 ): AsyncIterable<Row[]> {
   let last: Row | undefined;
   for (;;) {
     const rows = await driver.all<Row>(last ? nextSql : firstSql, [
+      ...values,
       ...(last ? nextValues(last) : []),
       PAGE_SIZE,
     ]);
@@ -136,24 +141,158 @@ function snapshotItem(row: SnapshotRow): TransferItem {
   };
 }
 
+type MemberRow = SqlRow & { position: number | string; client_id: string };
+const MEMBER_TABLES = { savedBy: "share_saved_by", bans: "share_bans" } as const;
+
+function memberPage(
+  driver: SqlDriver,
+  list: ShareMembers["list"],
+  shareId: string,
+  after?: MemberRow,
+): Promise<MemberRow[]> {
+  const table = MEMBER_TABLES[list];
+  return after
+    ? driver.all<MemberRow>(
+        `SELECT position,client_id FROM ${table} WHERE share_id=? AND (position>? OR (position=? AND client_id>?)) ORDER BY position,client_id LIMIT ?`,
+        [shareId, after.position, after.position, after.client_id, MEMBER_PAGE],
+      )
+    : driver.all<MemberRow>(
+        `SELECT position,client_id FROM ${table} WHERE share_id=? ORDER BY position,client_id LIMIT ?`,
+        [shareId, MEMBER_PAGE],
+      );
+}
+
+/** The rest of a member list after its first page, which travels in the share record. */
+async function* moreMembers(
+  driver: SqlDriver,
+  list: ShareMembers["list"],
+  shareId: string,
+  first: MemberRow[],
+): AsyncIterable<TransferItem> {
+  let page = first;
+  let offset = page.length;
+  while (page.length === MEMBER_PAGE) {
+    page = await memberPage(driver, list, shareId, page.at(-1));
+    if (!page.length) return;
+    yield {
+      kind: "shareMembers",
+      record: { shareId, list, offset, clientIds: page.map((row) => row.client_id) },
+    };
+    offset += page.length;
+  }
+}
+
+type SizedKey = SqlRow & { bytes: number | string };
+
+/** Splits keys into runs whose bodies fit PAGE_BYTES; a larger body forms a run of its own. */
+function byteRuns<Key extends SizedKey>(keys: Key[]): Array<[Key, ...Key[]]> {
+  const runs: Array<[Key, ...Key[]]> = [];
+  let run: Key[] = [];
+  let size = 0;
+  for (const key of keys) {
+    const bytes = number(key.bytes);
+    if (run[0] && size + bytes > PAGE_BYTES) {
+      runs.push(run as [Key, ...Key[]]);
+      run = [];
+      size = 0;
+    }
+    run.push(key);
+    size += bytes;
+  }
+  if (run[0]) runs.push(run as [Key, ...Key[]]);
+  return runs;
+}
+
+/** Reads key and body size first, then bodies in byte-bounded runs. */
+async function* shareUpdates(driver: SqlDriver, shareId: string): AsyncIterable<TransferItem> {
+  type Key = SizedKey & { seq: number | string };
+  let after: number | undefined;
+  for (;;) {
+    const keys = await driver.all<Key>(
+      after === undefined
+        ? "SELECT seq,LENGTH(data) AS bytes FROM share_updates WHERE share_id=? ORDER BY seq LIMIT ?"
+        : "SELECT seq,LENGTH(data) AS bytes FROM share_updates WHERE share_id=? AND seq>? ORDER BY seq LIMIT ?",
+      after === undefined ? [shareId, PAGE_SIZE] : [shareId, after, PAGE_SIZE],
+    );
+    for (const run of byteRuns(keys)) {
+      const rows = await driver.all<UpdateRow>(
+        "SELECT share_id,seq,data,at FROM share_updates WHERE share_id=? AND seq>=? AND seq<=? ORDER BY seq LIMIT ?",
+        [shareId, number(run[0].seq), number(run[run.length - 1]?.seq ?? run[0].seq), run.length],
+      );
+      for (const row of rows) yield updateItem(row);
+    }
+    const last = keys.at(-1);
+    if (!last) return;
+    after = number(last.seq);
+  }
+}
+
+async function* shareSnapshots(driver: SqlDriver, shareId: string): AsyncIterable<TransferItem> {
+  type Key = SizedKey & { kind: string; seq: number | string };
+  let after: Key | undefined;
+  for (;;) {
+    const keys = await driver.all<Key>(
+      after === undefined
+        ? "SELECT kind,seq,LENGTH(state) AS bytes FROM share_snapshots WHERE share_id=? ORDER BY kind,seq LIMIT ?"
+        : "SELECT kind,seq,LENGTH(state) AS bytes FROM share_snapshots WHERE share_id=? AND (kind>? OR (kind=? AND seq>?)) ORDER BY kind,seq LIMIT ?",
+      after === undefined
+        ? [shareId, PAGE_SIZE]
+        : [shareId, after.kind, after.kind, number(after.seq), PAGE_SIZE],
+    );
+    for (const run of byteRuns(keys)) {
+      const first = run[0];
+      const last = run[run.length - 1] ?? first;
+      const rows = await driver.all<SnapshotRow>(
+        "SELECT share_id,kind,seq,at,state FROM share_snapshots WHERE share_id=? AND (kind>? OR (kind=? AND seq>=?)) AND (kind<? OR (kind=? AND seq<=?)) ORDER BY kind,seq LIMIT ?",
+        [
+          shareId,
+          first.kind,
+          first.kind,
+          number(first.seq),
+          last.kind,
+          last.kind,
+          number(last.seq),
+          run.length,
+        ],
+      );
+      for (const row of rows) yield snapshotItem(row);
+    }
+    after = keys.at(-1);
+    if (!after) return;
+  }
+}
+
+/** Unqualified table names resolve like the importer's statements: search_path on PostgreSQL. */
+async function tableExists(driver: SqlDriver, table: string): Promise<boolean> {
+  const rows =
+    driver.dialect === "sqlite"
+      ? await driver.all(
+          "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+          [table],
+        )
+      : driver.dialect === "postgres"
+        ? await driver.all("SELECT 1 AS present WHERE to_regclass(?) IS NOT NULL", [table])
+        : await driver.all(
+            "SELECT 1 AS present FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=? LIMIT 1",
+            [table],
+          );
+  return rows.length > 0;
+}
+
 export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
   return {
-    async *exportAll(): AsyncIterable<TransferItem> {
+    async *exportAll(liveAt: Date): AsyncIterable<TransferItem> {
+      const live = liveAt.getTime();
       for await (const batch of pages<ShareRow>(
         driver,
-        "SELECT * FROM shares ORDER BY id LIMIT ?",
-        "SELECT * FROM shares WHERE id>? ORDER BY id LIMIT ?",
+        "SELECT * FROM shares WHERE (expires_at IS NULL OR expires_at>=?) ORDER BY id LIMIT ?",
+        "SELECT * FROM shares WHERE (expires_at IS NULL OR expires_at>=?) AND id>? ORDER BY id LIMIT ?",
         (row) => [row.id],
+        [live],
       )) {
         for (const row of batch) {
-          const saved = await driver.all<{ client_id: string }>(
-            "SELECT client_id FROM share_saved_by WHERE share_id=? ORDER BY position",
-            [row.id],
-          );
-          const bans = await driver.all<{ client_id: string }>(
-            "SELECT client_id FROM share_bans WHERE share_id=? ORDER BY position",
-            [row.id],
-          );
+          const saved = await memberPage(driver, "savedBy", row.id);
+          const bans = await memberPage(driver, "bans", row.id);
           yield {
             kind: "shares",
             record: share(
@@ -162,62 +301,19 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
               bans.map((v) => v.client_id),
             ),
           };
-
-          let lastSeq: number | undefined;
-          for (;;) {
-            const updates = await driver.all<UpdateRow>(
-              lastSeq === undefined
-                ? "SELECT share_id,seq,data,at FROM share_updates WHERE share_id=? ORDER BY seq LIMIT ?"
-                : "SELECT share_id,seq,data,at FROM share_updates WHERE share_id=? AND seq>? ORDER BY seq LIMIT ?",
-              lastSeq === undefined ? [row.id, PAGE_SIZE] : [row.id, lastSeq, PAGE_SIZE],
-            );
-            if (!updates.length) break;
-            for (const update of updates) yield updateItem(update);
-            lastSeq = number(updates.at(-1)?.seq ?? 0);
-          }
-
-          let lastKind: string | undefined;
-          let lastSnapshotSeq: number | undefined;
-          for (;;) {
-            const snapshots = await driver.all<SnapshotRow>(
-              lastKind === undefined
-                ? "SELECT share_id,kind,seq,at,state FROM share_snapshots WHERE share_id=? ORDER BY kind,seq LIMIT ?"
-                : "SELECT share_id,kind,seq,at,state FROM share_snapshots WHERE share_id=? AND (kind>? OR (kind=? AND seq>?)) ORDER BY kind,seq LIMIT ?",
-              lastKind === undefined
-                ? [row.id, PAGE_SIZE]
-                : [row.id, lastKind, lastKind, lastSnapshotSeq, PAGE_SIZE],
-            );
-            if (!snapshots.length) break;
-            for (const snapshot of snapshots) yield snapshotItem(snapshot);
-            lastKind = snapshots.at(-1)?.kind;
-            lastSnapshotSeq = number(snapshots.at(-1)?.seq ?? 0);
-          }
+          yield* moreMembers(driver, "savedBy", row.id, saved);
+          yield* moreMembers(driver, "bans", row.id, bans);
+          yield* shareUpdates(driver, row.id);
+          yield* shareSnapshots(driver, row.id);
         }
-      }
-
-      for await (const batch of pages<UpdateRow>(
-        driver,
-        "SELECT u.share_id,u.seq,u.data,u.at FROM share_updates u WHERE NOT EXISTS (SELECT 1 FROM shares s WHERE s.id=u.share_id) ORDER BY u.share_id,u.seq LIMIT ?",
-        "SELECT u.share_id,u.seq,u.data,u.at FROM share_updates u WHERE NOT EXISTS (SELECT 1 FROM shares s WHERE s.id=u.share_id) AND (u.share_id>? OR (u.share_id=? AND u.seq>?)) ORDER BY u.share_id,u.seq LIMIT ?",
-        (row) => [row.share_id, row.share_id, row.seq],
-      )) {
-        for (const row of batch) yield updateItem(row);
-      }
-
-      for await (const batch of pages<SnapshotRow>(
-        driver,
-        "SELECT p.share_id,p.kind,p.seq,p.at,p.state FROM share_snapshots p WHERE NOT EXISTS (SELECT 1 FROM shares s WHERE s.id=p.share_id) ORDER BY p.share_id,p.kind,p.seq LIMIT ?",
-        "SELECT p.share_id,p.kind,p.seq,p.at,p.state FROM share_snapshots p WHERE NOT EXISTS (SELECT 1 FROM shares s WHERE s.id=p.share_id) AND (p.share_id>? OR (p.share_id=? AND p.kind>?) OR (p.share_id=? AND p.kind=? AND p.seq>?)) ORDER BY p.share_id,p.kind,p.seq LIMIT ?",
-        (row) => [row.share_id, row.share_id, row.kind, row.share_id, row.kind, row.seq],
-      )) {
-        for (const row of batch) yield snapshotItem(row);
       }
 
       for await (const batch of pages<SqlRow & { id: string }>(
         driver,
-        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs ORDER BY id LIMIT ?",
-        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs WHERE id>? ORDER BY id LIMIT ?",
+        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs WHERE expires_at>=? ORDER BY id LIMIT ?",
+        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs WHERE expires_at>=? AND id>? ORDER BY id LIMIT ?",
         (row) => [row.id],
+        [live],
       )) {
         for (const row of batch) {
           const students = (
@@ -244,9 +340,10 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
 
       for await (const batch of pages<SqlRow & { client_id: string; share_id: string }>(
         driver,
-        "SELECT client_id,share_id,folder,tags_json,updated_at FROM share_labels ORDER BY client_id,share_id LIMIT ?",
-        "SELECT client_id,share_id,folder,tags_json,updated_at FROM share_labels WHERE client_id>? OR (client_id=? AND share_id>?) ORDER BY client_id,share_id LIMIT ?",
+        "SELECT l.client_id,l.share_id,l.folder,l.tags_json,l.updated_at FROM share_labels l JOIN shares s ON s.id=l.share_id WHERE (s.expires_at IS NULL OR s.expires_at>=?) ORDER BY l.client_id,l.share_id LIMIT ?",
+        "SELECT l.client_id,l.share_id,l.folder,l.tags_json,l.updated_at FROM share_labels l JOIN shares s ON s.id=l.share_id WHERE (s.expires_at IS NULL OR s.expires_at>=?) AND (l.client_id>? OR (l.client_id=? AND l.share_id>?)) ORDER BY l.client_id,l.share_id LIMIT ?",
         (row) => [row.client_id, row.client_id, row.share_id],
+        [live],
       )) {
         for (const row of batch)
           yield {
@@ -286,11 +383,14 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
         }
       }
 
+      const liveUploads =
+        "FROM uploads u LEFT JOIN shares s ON s.id=u.share_id WHERE u.complete=TRUE AND u.expires_at>=? AND (u.share_id IS NULL OR (s.id IS NOT NULL AND (s.expires_at IS NULL OR s.expires_at>=?)))";
       for await (const batch of pages<SqlRow & { id: string }>(
         driver,
-        "SELECT id,name,size,content_type,owner_id,share_id,expires_at,created_at FROM uploads WHERE complete=TRUE ORDER BY id LIMIT ?",
-        "SELECT id,name,size,content_type,owner_id,share_id,expires_at,created_at FROM uploads WHERE complete=TRUE AND id>? ORDER BY id LIMIT ?",
+        `SELECT u.id,u.name,u.size,u.content_type,u.owner_id,u.share_id,u.expires_at,u.created_at ${liveUploads} ORDER BY u.id LIMIT ?`,
+        `SELECT u.id,u.name,u.size,u.content_type,u.owner_id,u.share_id,u.expires_at,u.created_at ${liveUploads} AND u.id>? ORDER BY u.id LIMIT ?`,
         (row) => [row.id],
+        [live, live],
       )) {
         for (const row of batch) {
           const size = number(row.size as number | string);
@@ -311,6 +411,19 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
           };
         }
       }
+    },
+
+    async countLive(liveAt: Date) {
+      const live = liveAt.getTime();
+      const [shares] = await driver.all<{ total: number | string }>(
+        "SELECT COUNT(*) AS total FROM shares WHERE expires_at IS NULL OR expires_at>=?",
+        [live],
+      );
+      const [labs] = await driver.all<{ total: number | string }>(
+        "SELECT COUNT(*) AS total FROM labs WHERE expires_at>=?",
+        [live],
+      );
+      return { shares: number(shares?.total ?? 0), labs: number(labs?.total ?? 0) };
     },
 
     async importBatch(items: readonly TransferRecord[]) {
@@ -352,6 +465,15 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
                 await tx.run(
                   "INSERT INTO share_bans (share_id,client_id,position) VALUES (?,?,?)",
                   [value.id, clientId, position],
+                );
+              break;
+            }
+            case "shareMembers": {
+              const { shareId, list, offset, clientIds } = item.record;
+              for (const [index, clientId] of clientIds.entries())
+                await tx.run(
+                  `INSERT INTO ${MEMBER_TABLES[list]} (share_id,client_id,position) VALUES (?,?,?)`,
+                  [shareId, clientId, offset + index],
                 );
               break;
             }
@@ -514,47 +636,36 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
         "diagnostics",
       ];
       for (const table of tables) {
-        const exists =
-          driver.dialect === "sqlite"
-            ? await driver.all(
-                "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
-                [table],
-              )
-            : driver.dialect === "postgres"
-              ? await driver.all(
-                  "SELECT 1 AS present FROM information_schema.tables WHERE table_schema=current_schema() AND table_name=? LIMIT 1",
-                  [table],
-                )
-              : await driver.all(
-                  "SELECT 1 AS present FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=? LIMIT 1",
-                  [table],
-                );
-        if (!exists.length) continue;
+        if (!(await tableExists(driver, table))) continue;
         if ((await driver.all(`SELECT 1 AS present FROM ${table} LIMIT 1`)).length) return false;
       }
-      const capacityExists =
-        driver.dialect === "sqlite"
-          ? await driver.all(
-              "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='upload_capacity' LIMIT 1",
-            )
-          : driver.dialect === "postgres"
-            ? await driver.all(
-                "SELECT 1 AS present FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='upload_capacity' LIMIT 1",
-              )
-            : await driver.all(
-                "SELECT 1 AS present FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='upload_capacity' LIMIT 1",
-              );
-      if (!capacityExists.length) return true;
-      const capacity = await driver.all<{ used_bytes: number | string }>(
-        "SELECT used_bytes FROM upload_capacity WHERE id=1",
-      );
-      return number(capacity[0]?.used_bytes ?? 0) === 0;
+      // Only a zero singleton counter belongs to an empty database; a missing one is recreated.
+      if (!(await tableExists(driver, "upload_capacity"))) return true;
+      return !(
+        await driver.all(
+          "SELECT 1 AS present FROM upload_capacity WHERE id<>1 OR used_bytes<>0 LIMIT 1",
+        )
+      ).length;
     },
 
     async recomputeCounters() {
-      await driver.run(
-        "UPDATE upload_capacity SET used_bytes=(SELECT COALESCE(SUM(size),0) FROM uploads WHERE complete=TRUE) WHERE id=1",
+      const [usage] = await driver.all<{ total: number | string | null }>(
+        "SELECT COALESCE(SUM(size),0) AS total FROM uploads WHERE complete=TRUE",
       );
+      await driver.run(
+        driver.dialect === "mysql"
+          ? "INSERT INTO upload_capacity (id,used_bytes) VALUES (1,?) ON DUPLICATE KEY UPDATE used_bytes=VALUES(used_bytes)"
+          : "INSERT INTO upload_capacity (id,used_bytes) VALUES (1,?) ON CONFLICT (id) DO UPDATE SET used_bytes=excluded.used_bytes",
+        [number(usage?.total ?? 0)],
+      );
+    },
+
+    async uploadCounter() {
+      const rows = await driver.all<{ id: number | string; used_bytes: number | string }>(
+        "SELECT id,used_bytes FROM upload_capacity ORDER BY id LIMIT 2",
+      );
+      const [row] = rows;
+      return rows.length === 1 && row && number(row.id) === 1 ? number(row.used_bytes) : Number.NaN;
     },
   };
 }

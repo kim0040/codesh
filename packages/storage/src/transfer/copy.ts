@@ -1,20 +1,27 @@
-import { createHash } from "node:crypto";
-import { resolve } from "node:path";
+import { createHash, type Hash } from "node:crypto";
+import { realpath } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import type { Document, MongoClient } from "mongodb";
 import type { OpenedStores } from "../open.js";
 import { openStores, storageKindFromUrl } from "../open.js";
 import { openSqlDriver, sqlErrorCode } from "../sql/driver.js";
 import { transferBackend } from "./registry.js";
 import { createSqlTransferBackend } from "./sql.js";
 import {
+  type ShareMembers,
   TRANSFER_KINDS,
   type TransferBackend,
   type TransferCounts,
+  type TransferKind,
   type TransferRecord,
   type TransferUpload,
 } from "./types.js";
 
 const BATCH_RECORDS = 64;
 const BATCH_BYTES = 2 * 1024 * 1024;
+const DIGEST_MODULUS = 1n << 256n;
+const SAME_DATABASE = "Source and destination are the same";
+const NOT_EMPTY = "Destination is not empty";
 
 export class CopyRefusedError extends Error {
   constructor(message: string) {
@@ -56,19 +63,37 @@ function emptyCounts(): TransferCounts {
   return Object.fromEntries(TRANSFER_KINDS.map((kind) => [kind, 0])) as TransferCounts;
 }
 
-function stable(value: unknown): unknown {
-  if (value instanceof Date) return { $date: value.getTime() };
-  if (value instanceof Uint8Array) return { $bytes: value.byteLength };
-  if (Array.isArray(value)) return value.map(stable);
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value)
+/**
+ * Unambiguous text for a record. JSON values print as JSON; values JSON cannot hold (dates, bytes,
+ * non-finite numbers, -0, undefined array items, BSON and other class instances) get distinct
+ * `<...>` tags, so a lossy conversion on either side changes the digest. Audit details therefore
+ * copy between different backends only when they are plain JSON, which every API caller writes.
+ */
+function canonical(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "string")
+    return JSON.stringify(value);
+  if (typeof value === "number")
+    return Number.isFinite(value) && !Object.is(value, -0)
+      ? JSON.stringify(value)
+      : `<number:${Object.is(value, -0) ? "-0" : value}>`;
+  if (value === undefined) return "<undefined>";
+  if (typeof value === "bigint") return `<bigint:${value}>`;
+  if (value instanceof Date) return `<date:${value.getTime()}>`;
+  if (value instanceof Uint8Array)
+    return `<bytes:${Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64")}>`;
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (typeof value === "object") {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype || prototype === null)
+      return `{${Object.entries(value)
         .filter(([, item]) => item !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, item]) => [key, stable(item)]),
-    );
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+        .join(",")}}`;
+    const type = "_bsontype" in value ? String(value._bsontype) : prototype?.constructor?.name;
+    return `<${type ?? "object"}:${JSON.stringify(String(value))}>`;
   }
-  return value;
+  return `<${typeof value}>`;
 }
 
 function recordBytes(item: TransferRecord): Uint8Array | undefined {
@@ -90,139 +115,286 @@ function withoutBytes(item: TransferRecord): unknown {
   return item.record;
 }
 
+/** SHA-256 of one record's keyed canonical text; binary content is appended by the caller. */
+function recordHash(kind: string, record: unknown, bytes = 0): Hash {
+  return createHash("sha256").update(`${kind}\n${canonical(record)}\n${bytes}\n`);
+}
+
+/**
+ * Order-independent digest: per kind, a count and the sum modulo 2^256 of every record's hash, so
+ * backends may return records in any order. A share's savedBy and bans entries are hashed one by
+ * one with their list index, whichever way the lists were paged.
+ */
 class TransferDigest {
   readonly counts = emptyCounts();
-  private readonly hashes = new Map(TRANSFER_KINDS.map((kind) => [kind, createHash("sha256")]));
+  uploadBytes = 0;
+  private readonly sums = new Map<TransferKind, bigint>(TRANSFER_KINDS.map((kind) => [kind, 0n]));
 
   addRecord(item: TransferRecord): void {
-    this.counts[item.kind]++;
-    const data = recordBytes(item);
-    this.addHeader(item.kind, withoutBytes(item), data?.byteLength ?? 0);
-    if (data) this.hashes.get(item.kind)?.update(data);
-    this.hashes.get(item.kind)?.update("\n");
-  }
-
-  async addUpload(item: TransferUpload, chunks: AsyncIterable<Uint8Array>): Promise<void> {
-    this.counts.uploads++;
-    this.addHeader("uploads", { record: item.record, createdAt: item.createdAt }, item.record.size);
-    let size = 0;
-    for await (const chunk of chunks) {
-      size += chunk.byteLength;
-      if (size > item.record.size) throw new Error("Upload content exceeded its stored size");
-      this.hashes.get("uploads")?.update(chunk);
+    if (item.kind === "shareMembers") {
+      this.addMembers(item.record);
+      return;
     }
-    if (size !== item.record.size) throw new Error("Upload content did not match its stored size");
-    this.hashes.get("uploads")?.update("\n");
+    this.counts[item.kind]++;
+    if (item.kind === "shares") {
+      const { savedBy, bans, ...share } = item.record;
+      this.add("shares", recordHash("shares", share));
+      this.addMembers({ shareId: share.id, list: "savedBy", offset: 0, clientIds: savedBy });
+      this.addMembers({ shareId: share.id, list: "bans", offset: 0, clientIds: bans });
+      return;
+    }
+    const data = recordBytes(item);
+    const hash = recordHash(item.kind, withoutBytes(item), data?.byteLength);
+    if (data) hash.update(data);
+    this.add(item.kind, hash);
   }
 
+  /** Counts and hashes the upload while its chunks pass through. */
   trackUpload(item: TransferUpload): AsyncIterable<Uint8Array> {
     this.counts.uploads++;
-    this.addHeader("uploads", { record: item.record, createdAt: item.createdAt }, item.record.size);
-    const hash = this.hashes.get("uploads");
-    let size = 0;
+    const hash = recordHash(
+      "uploads",
+      { record: item.record, createdAt: item.createdAt },
+      item.record.size,
+    );
+    const finish = () => {
+      this.add("uploads", hash);
+      this.uploadBytes += item.record.size;
+    };
     const source = item.chunks;
     return (async function* () {
+      let size = 0;
       for await (const chunk of source) {
         size += chunk.byteLength;
         if (size > item.record.size) throw new Error("Upload content exceeded its stored size");
-        hash?.update(chunk);
+        hash.update(chunk);
         yield chunk;
       }
       if (size !== item.record.size)
         throw new Error("Upload content did not match its stored size");
-      hash?.update("\n");
+      finish();
     })();
+  }
+
+  async addUpload(item: TransferUpload): Promise<void> {
+    for await (const _chunk of this.trackUpload(item));
+  }
+
+  matches(other: TransferDigest): boolean {
+    return (
+      this.uploadBytes === other.uploadBytes &&
+      TRANSFER_KINDS.every(
+        (kind) =>
+          this.counts[kind] === other.counts[kind] && this.sums.get(kind) === other.sums.get(kind),
+      )
+    );
   }
 
   digest(): string {
     const hash = createHash("sha256");
-    for (const kind of TRANSFER_KINDS) {
-      hash.update(`${kind}:${this.counts[kind]}:${this.hashes.get(kind)?.digest("hex")}\n`);
-    }
+    for (const kind of TRANSFER_KINDS)
+      hash.update(
+        `${kind}:${this.counts[kind]}:${(this.sums.get(kind) ?? 0n).toString(16).padStart(64, "0")}\n`,
+      );
     return hash.digest("hex");
   }
 
-  private addHeader(kind: string, record: unknown, bytes: number): void {
-    this.hashes
-      .get(kind as (typeof TRANSFER_KINDS)[number])
-      ?.update(`${JSON.stringify(stable(record))}\n${bytes}\n`);
+  private addMembers({ shareId, list, offset, clientIds }: ShareMembers): void {
+    for (const [index, clientId] of clientIds.entries())
+      this.add(
+        "shares",
+        recordHash("shareMembers", { shareId, list, index: offset + index, clientId }),
+      );
+  }
+
+  private add(kind: TransferKind, hash: Hash): void {
+    const value = BigInt(`0x${hash.digest("hex")}`);
+    this.sums.set(kind, ((this.sums.get(kind) ?? 0n) + value) % DIGEST_MODULUS);
   }
 }
 
 function itemSize(item: TransferRecord): number {
-  const data = recordBytes(item);
-  return Buffer.byteLength(JSON.stringify(stable(withoutBytes(item)))) + (data?.byteLength ?? 0);
+  return Buffer.byteLength(canonical(withoutBytes(item))) + (recordBytes(item)?.byteLength ?? 0);
 }
 
-function databaseIdentity(url: string): string {
-  const kind = storageKindFromUrl(url);
-  if (kind === "memory") return `${kind}:${url}`;
-  if (kind === "sqlite") {
-    const path = url.slice("sqlite:".length);
-    if (path.includes(":memory:")) return `sqlite:${path}`;
+/** The SQLite driver's URL rules (sql/driver.ts). */
+function sqlitePath(url: string): string {
+  if (url === "sqlite::memory:" || url === "sqlite://:memory:") return ":memory:";
+  if (url.startsWith("sqlite:") && !url.startsWith("sqlite://")) return url.slice("sqlite:".length);
+  return decodeURIComponent(new URL(url).pathname);
+}
+
+/** The file behind a path, following symlinks of the file or, before it exists, its directory. */
+async function fileIdentity(path: string): Promise<string> {
+  const absolute = resolve(path);
+  try {
+    return await realpath(absolute);
+  } catch {
     try {
-      const parsed = new URL(url);
-      return `sqlite:${resolve(decodeURIComponent(parsed.pathname))}`;
+      return join(await realpath(dirname(absolute)), basename(absolute));
     } catch {
-      return `sqlite:${resolve(path)}`;
+      return absolute;
     }
   }
-  const parsed = new URL(url);
-  const dialect = kind === "mysql" ? "mysql" : kind;
-  return `${dialect}:${parsed.hostname.toLowerCase()}:${parsed.port}:${decodeURIComponent(parsed.pathname)}`;
 }
 
-function sameDatabase(fromUrl: string, toUrl: string): boolean {
-  return fromUrl === toUrl || databaseIdentity(fromUrl) === databaseIdentity(toUrl);
+/**
+ * Where a SQL URL connects, with the defaults its driver applies; undefined when that cannot be
+ * told (in-memory SQLite, or a URL the driver rejects later with its own safe error).
+ */
+async function sqlIdentity(
+  kind: ReturnType<typeof storageKindFromUrl>,
+  url: string,
+): Promise<string | undefined> {
+  try {
+    if (kind === "sqlite") {
+      // An in-memory or empty-path SQLite database is private to its connection.
+      const path = sqlitePath(url);
+      return path === ":memory:" || path === "" ? undefined : `sqlite:${await fileIdentity(path)}`;
+    }
+    const parsed = new URL(url);
+    const hostname = decodeURIComponent(parsed.hostname.replace(/^\[(.+)\]$/, "$1"));
+    if (kind === "mysql") {
+      // mysql2: host, port and database come from the URL only.
+      const port = Number.parseInt(parsed.port, 10) || 3306;
+      const database = decodeURIComponent(parsed.pathname.slice(1));
+      return `mysql:${(hostname || "localhost").toLowerCase()}:${port}:${database}`;
+    }
+    // pg: query parameters, then the URL, then PG* variables, then defaults. The database
+    // defaults to the user name.
+    const { env } = process;
+    const params = parsed.searchParams;
+    const host = params.get("host") || hostname || env.PGHOST || "localhost";
+    const port = params.get("port") || parsed.port || env.PGPORT || "5432";
+    const user =
+      params.get("user") || decodeURIComponent(parsed.username) || env.PGUSER || env.USER;
+    const path = parsed.pathname.slice(1);
+    const database = (path ? decodeURI(path) : "") || env.PGDATABASE || user;
+    return `postgresql:${host.toLowerCase()}:${Number(port)}:${database ?? ""}`;
+  } catch {
+    return undefined;
+  }
 }
 
-function mongoDestinationUrl(url: string): string {
-  const parsed = new URL(url);
-  parsed.searchParams.set("retryWrites", "false");
-  return parsed.toString();
+/** Before opening: equal strings, or SQL URLs that resolve to the same server and database. */
+async function sameDatabase(
+  fromKind: ReturnType<typeof storageKindFromUrl>,
+  fromUrl: string,
+  toKind: ReturnType<typeof storageKindFromUrl>,
+  toUrl: string,
+): Promise<boolean> {
+  if (fromUrl === toUrl) return true;
+  if (fromKind !== toKind || fromKind === "memory" || fromKind === "mongodb") return false;
+  const [from, to] = await Promise.all([
+    sqlIdentity(fromKind, fromUrl),
+    sqlIdentity(toKind, toUrl),
+  ]);
+  return from !== undefined && from === to;
 }
 
-async function destinationWasEmptyBeforeOpening(
+export interface MongoIdentity {
+  database: string;
+  /** topologyVersion.processId: one per running mongod. */
+  processId?: string;
+  setName?: string;
+  /** The primary and the answering member, as the replica set configuration names them. */
+  hosts: string[];
+}
+
+async function mongoIdentity(client: MongoClient): Promise<MongoIdentity> {
+  const hello: Document = await client.db("admin").command({ hello: 1 });
+  const processId = hello.topologyVersion?.processId;
+  return {
+    database: client.db().databaseName,
+    ...(processId ? { processId: String(processId) } : {}),
+    ...(typeof hello.setName === "string" ? { setName: hello.setName } : {}),
+    hosts: [hello.primary, hello.me]
+      .filter((host): host is string => typeof host === "string")
+      .map((host) => host.toLowerCase()),
+  };
+}
+
+/** Same database on the same server or replica set, judged by the servers' own hello replies. */
+export function sameMongoDatabase(from: MongoIdentity, to: MongoIdentity): boolean {
+  if (from.database !== to.database) return false;
+  if (from.processId !== undefined && from.processId === to.processId) return true;
+  return (
+    from.setName !== undefined &&
+    from.setName === to.setName &&
+    from.hosts.some((host) => to.hosts.includes(host))
+  );
+}
+
+async function refuseSameMongo(source: OpenedStores, destination?: MongoClient): Promise<void> {
+  if (!source.mongoClient || !destination) return;
+  const [from, to] = await Promise.all([
+    mongoIdentity(source.mongoClient),
+    mongoIdentity(destination),
+  ]);
+  if (sameMongoDatabase(from, to)) throw new CopyRefusedError(SAME_DATABASE);
+}
+
+/** Opens the destination after the same-database and emptiness checks, before any write. */
+async function openDestination(
   url: string,
   kind: ReturnType<typeof storageKindFromUrl>,
-): Promise<boolean> {
-  if (kind === "memory") return true;
+  source: OpenedStores,
+): Promise<OpenedStores> {
   if (kind === "mongodb") {
-    const { connectMongo } = await import("../mongo.js");
-    const connection = await connectMongo(url);
+    const [{ MongoClient }, { createMongoStores, ensureIndexes }, { createMongoTransferBackend }] =
+      await Promise.all([import("mongodb"), import("../mongo.js"), import("./mongo.js")]);
+    let opened: MongoClient | undefined;
     try {
-      const { createMongoTransferBackend } = await import("./mongo.js");
-      return await createMongoTransferBackend(connection.db).isEmpty();
-    } finally {
-      await connection.close();
+      // The connection string goes to the driver unchanged; only the copy disables retried writes.
+      opened = new MongoClient(url, { serverSelectionTimeoutMS: 10_000, retryWrites: false });
+      await opened.connect();
+    } catch {
+      await opened?.close().catch(() => undefined);
+      throw new Error("MongoDB storage could not be opened");
+    }
+    const client = opened;
+    try {
+      await refuseSameMongo(source, client);
+      const db = client.db();
+      if (!(await createMongoTransferBackend(db).isEmpty())) throw new CopyRefusedError(NOT_EMPTY);
+      await ensureIndexes(db);
+      return {
+        stores: createMongoStores(db),
+        close: () => client.close(),
+        kind: "mongodb",
+        mongoClient: client,
+      };
+    } catch (error) {
+      await client.close().catch(() => undefined);
+      throw error;
     }
   }
-  const driver = await openSqlDriver(url);
-  try {
-    return await createSqlTransferBackend(driver).isEmpty();
-  } finally {
-    await driver.close();
+  if (kind !== "memory") {
+    const driver = await openSqlDriver(url);
+    try {
+      if (!(await createSqlTransferBackend(driver).isEmpty()))
+        throw new CopyRefusedError(NOT_EMPTY);
+    } finally {
+      await driver.close();
+    }
   }
+  return openStores(url);
 }
 
-async function verify(backend: TransferBackend, expected: TransferDigest): Promise<string> {
-  const actual = new TransferDigest();
-  for await (const item of backend.exportAll()) {
-    if (item.kind === "uploads") await actual.addUpload(item, item.chunks);
-    else actual.addRecord(item);
+async function readAll(backend: TransferBackend, liveAt: Date): Promise<TransferDigest> {
+  const digest = new TransferDigest();
+  for await (const item of backend.exportAll(liveAt)) {
+    if (item.kind === "uploads") await digest.addUpload(item);
+    else digest.addRecord(item);
   }
-  const actualDigest = actual.digest();
-  const expectedCounts = JSON.stringify(expected.counts);
-  const actualCounts = JSON.stringify(actual.counts);
-  if (expectedCounts !== actualCounts || expected.digest() !== actualDigest)
-    throw new CopyVerificationError({ ...expected.counts });
-  return actualDigest;
+  return digest;
 }
 
 async function copyRecords(
   source: TransferBackend,
   destination: TransferBackend,
   digest: TransferDigest,
+  liveAt: Date,
   batchRecords: number,
   batchBytes: number,
 ): Promise<void> {
@@ -235,7 +407,7 @@ async function copyRecords(
     size = 0;
   };
 
-  for await (const item of source.exportAll()) {
+  for await (const item of source.exportAll(liveAt)) {
     if (item.kind === "uploads") {
       await flush();
       await destination.importUpload(item.record, item.createdAt, digest.trackUpload(item));
@@ -258,42 +430,62 @@ export async function copyDatabase(
   toUrl: string,
   options: CopyDatabaseOptions = {},
 ): Promise<CopyDatabaseResult> {
+  let fromKind: ReturnType<typeof storageKindFromUrl>;
   let toKind: ReturnType<typeof storageKindFromUrl>;
   try {
-    storageKindFromUrl(fromUrl);
+    fromKind = storageKindFromUrl(fromUrl);
     toKind = storageKindFromUrl(toUrl);
   } catch {
     throw new CopyRefusedError("Unsupported database URL scheme");
   }
-  if (sameDatabase(fromUrl, toUrl))
-    throw new CopyRefusedError("Source and destination are the same");
 
   const open = options.openStores ?? openStores;
   let source: OpenedStores | undefined;
   let destination: OpenedStores | undefined;
   let copiedCounts = emptyCounts();
   try {
-    if (!options.openStores && !(await destinationWasEmptyBeforeOpening(toUrl, toKind)))
-      throw new CopyRefusedError("Destination is not empty");
+    if (await sameDatabase(fromKind, fromUrl, toKind, toUrl))
+      throw new CopyRefusedError(SAME_DATABASE);
     source = await open(fromUrl);
-    destination = await open(toKind === "mongodb" ? mongoDestinationUrl(toUrl) : toUrl);
+    if (options.openStores) {
+      destination = await open(toUrl);
+      await refuseSameMongo(source, destination.mongoClient);
+    } else destination = await openDestination(toUrl, toKind, source);
     const sourceTransfer = transferBackend(source.stores);
     const destinationTransfer = transferBackend(destination.stores);
-    if (!(await destinationTransfer.isEmpty()))
-      throw new CopyRefusedError("Destination is not empty");
+    if (!(await destinationTransfer.isEmpty())) throw new CopyRefusedError(NOT_EMPTY);
 
-    const digest = new TransferDigest();
-    copiedCounts = digest.counts;
+    // Records already expired at this instant are garbage the TTL index or sweeper removes; every
+    // read below leaves them out the same way.
+    const liveAt = new Date();
+    const live = await sourceTransfer.countLive(liveAt);
+    const copied = new TransferDigest();
+    copiedCounts = copied.counts;
     await copyRecords(
       sourceTransfer,
       destinationTransfer,
-      digest,
+      copied,
+      liveAt,
       Math.max(1, options.batchRecords ?? BATCH_RECORDS),
       Math.max(1024, options.batchBytes ?? BATCH_BYTES),
     );
     await destinationTransfer.recomputeCounters();
-    const copiedDigest = await verify(destinationTransfer, digest);
-    return { counts: digest.counts, digest: copiedDigest };
+
+    // Verification does not trust the copy stream: it reads the source a second time and the
+    // destination, then compares both with each other and with what was copied. A record that
+    // expired or changed meanwhile makes them differ, so the copy fails instead of losing it.
+    const reread = await readAll(sourceTransfer, liveAt);
+    const stored = await readAll(destinationTransfer, liveAt);
+    const counter = await destinationTransfer.uploadCounter();
+    if (
+      !copied.matches(reread) ||
+      !reread.matches(stored) ||
+      live.shares !== reread.counts.shares ||
+      live.labs !== reread.counts.labs ||
+      (counter !== undefined && counter !== stored.uploadBytes)
+    )
+      throw new CopyVerificationError({ ...copied.counts });
+    return { counts: copied.counts, digest: stored.digest() };
   } catch (error) {
     if (error instanceof CopyRefusedError || error instanceof CopyVerificationError) throw error;
     if (error instanceof CopyFailureError) throw error;

@@ -16,9 +16,11 @@ import {
   type Db,
   type Document,
   GridFSBucket,
+  type GridFSFile,
   ObjectId,
 } from "mongodb";
 import { COLLECTIONS, UPLOADS_BUCKET } from "../mongo.js";
+import { splitShare } from "./members.js";
 import type { TransferBackend, TransferItem, TransferRecord } from "./types.js";
 
 const PAGE_SIZE = 128;
@@ -70,14 +72,25 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
   };
 
   return {
-    async *exportAll(): AsyncIterable<TransferItem> {
+    async *exportAll(liveAt: Date): AsyncIterable<TransferItem> {
+      const liveShare = { $or: [{ expiresAt: null }, { expiresAt: { $gte: liveAt } }] };
+      // Keeps records whose share is still live; a missing localField matches no share.
+      const withLiveShare = (localField: string) => ({
+        $lookup: {
+          from: COLLECTIONS.shares,
+          localField,
+          foreignField: "_id",
+          pipeline: [{ $match: liveShare }, { $project: { _id: 1 } }],
+          as: "liveShare",
+        },
+      });
+
       const shareCursor = db
         .collection<ShareDocument>(COLLECTIONS.shares)
-        .find({}, { batchSize: PAGE_SIZE })
-        .sort({ _id: 1 });
+        .find(liveShare, { batchSize: PAGE_SIZE });
       try {
         for await (const { _id, ...record } of shareCursor) {
-          yield { kind: "shares", record: { id: _id, ...record } };
+          yield* splitShare({ id: _id, ...record });
 
           const updateCursor = db
             .collection<UpdateDocument>(COLLECTIONS.updates)
@@ -122,72 +135,9 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
         await shareCursor.close();
       }
 
-      const orphanUpdates = db
-        .collection<UpdateDocument>(COLLECTIONS.updates)
-        .aggregate<UpdateDocument>(
-          [
-            {
-              $lookup: {
-                from: COLLECTIONS.shares,
-                localField: "shareId",
-                foreignField: "_id",
-                as: "parent",
-              },
-            },
-            { $match: { "parent.0": { $exists: false } } },
-            { $project: { parent: 0 } },
-            { $sort: { shareId: 1, seq: 1 } },
-          ],
-          { allowDiskUse: true, batchSize: PAGE_SIZE },
-        );
-      try {
-        for await (const row of orphanUpdates)
-          yield {
-            kind: "updates",
-            record: { shareId: row.shareId, seq: row.seq, data: binaryBytes(row.data), at: row.at },
-          };
-      } finally {
-        await orphanUpdates.close();
-      }
-
-      const orphanSnapshots = db
-        .collection<SnapshotDocument>(COLLECTIONS.snapshots)
-        .aggregate<SnapshotDocument>(
-          [
-            {
-              $lookup: {
-                from: COLLECTIONS.shares,
-                localField: "shareId",
-                foreignField: "_id",
-                as: "parent",
-              },
-            },
-            { $match: { "parent.0": { $exists: false } } },
-            { $project: { parent: 0 } },
-            { $sort: { shareId: 1, kind: 1, seq: 1 } },
-          ],
-          { allowDiskUse: true, batchSize: PAGE_SIZE },
-        );
-      try {
-        for await (const row of orphanSnapshots)
-          yield {
-            kind: "snapshots",
-            record: {
-              shareId: row.shareId,
-              kind: row.kind,
-              seq: row.seq,
-              at: row.at,
-              state: binaryBytes(row.state),
-            },
-          };
-      } finally {
-        await orphanSnapshots.close();
-      }
-
       const labCursor = db
         .collection<LabDocument>(COLLECTIONS.labs)
-        .find({}, { batchSize: PAGE_SIZE })
-        .sort({ _id: 1 });
+        .find({ expiresAt: { $gte: liveAt } }, { batchSize: PAGE_SIZE });
       try {
         for await (const { _id, ...record } of labCursor)
           yield { kind: "labs", record: { id: _id, ...record } };
@@ -197,10 +147,16 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
 
       const labelCursor = db
         .collection<LabelDocument>(COLLECTIONS.labels)
-        .find({}, { batchSize: PAGE_SIZE })
-        .sort({ clientId: 1, shareId: 1 });
+        .aggregate<LabelDocument & { liveShare: unknown }>(
+          [
+            withLiveShare("shareId"),
+            { $match: { "liveShare.0": { $exists: true } } },
+            { $project: { liveShare: 0 } },
+          ],
+          { batchSize: PAGE_SIZE },
+        );
       try {
-        for await (const { _id: _labelId, ...record } of labelCursor)
+        for await (const { _id: _labelId, liveShare: _liveShare, ...record } of labelCursor)
           yield { kind: "labels", record };
       } finally {
         await labelCursor.close();
@@ -221,8 +177,7 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
 
       const auditCursor = db
         .collection<AuditDocument>(COLLECTIONS.audit)
-        .find({}, { batchSize: PAGE_SIZE })
-        .sort({ _id: 1 });
+        .find({}, { batchSize: PAGE_SIZE });
       try {
         for await (const row of auditCursor) {
           const { _id, ...record } = row;
@@ -244,7 +199,22 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
         await auditCursor.close();
       }
 
-      const uploadCursor = files.find({}, { batchSize: PAGE_SIZE }).sort({ _id: 1 });
+      const uploadCursor = files.aggregate<GridFSFile>(
+        [
+          { $match: { "metadata.expiresAt": { $gte: liveAt } } },
+          withLiveShare("metadata.shareId"),
+          {
+            $match: {
+              $or: [
+                { "metadata.shareId": { $exists: false } },
+                { "liveShare.0": { $exists: true } },
+              ],
+            },
+          },
+          { $project: { liveShare: 0 } },
+        ],
+        { batchSize: PAGE_SIZE },
+      );
       try {
         for await (const file of uploadCursor) {
           const metadata = file.metadata as {
@@ -277,6 +247,15 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
       }
     },
 
+    async countLive(liveAt: Date) {
+      return {
+        shares: await db
+          .collection(COLLECTIONS.shares)
+          .countDocuments({ $or: [{ expiresAt: null }, { expiresAt: { $gte: liveAt } }] }),
+        labs: await db.collection(COLLECTIONS.labs).countDocuments({ expiresAt: { $gte: liveAt } }),
+      };
+    },
+
     async importBatch(items: readonly TransferRecord[]) {
       if (!items.length) return;
       await writeBatch(async (session) => {
@@ -294,6 +273,17 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
               return { _id: id, ...record };
             }),
         );
+        for (const item of items)
+          if (item.kind === "shareMembers") {
+            const { shareId, list, offset, clientIds } = item.record;
+            await db
+              .collection<ShareDocument>(COLLECTIONS.shares)
+              .updateOne(
+                { _id: shareId },
+                { $push: { [list]: { $each: clientIds, $position: offset } } },
+                options,
+              );
+          }
         await insert(
           COLLECTIONS.updates,
           items
@@ -403,6 +393,10 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
         { $set: { bytes: usage?.bytes ?? 0 } },
         { upsert: true },
       );
+    },
+
+    async uploadCounter() {
+      return (await quota.findOne({ _id: "uploads" }))?.bytes ?? Number.NaN;
     },
   };
 }
