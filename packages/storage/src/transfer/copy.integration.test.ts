@@ -853,15 +853,15 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
 
   it("fails a copy that takes longer than 10 minutes through the CLI", async () => {
     const name = "gp_copy_cli_deadline";
-    const source = `sqlite:/tmp/${name}_src.sqlite`;
     const destination = `sqlite:/tmp/${name}_dst.sqlite`;
-    // The copier's monotonic clock jumps 10 minutes after its start.
+    // The copier's monotonic clock jumps 10 minutes after its start. Only calls made by copy.ts
+    // itself (the caller frame) move; driver calls further down keep the real clock.
     const preload = await preloadModule(
       [
         "const now = performance.now.bind(performance);",
         "let started = false;",
         "performance.now = () => {",
-        '  if (!new Error().stack?.includes("transfer/copy.ts")) return now();',
+        '  if (!new Error().stack?.split("\\n")[2]?.includes("transfer/copy.ts")) return now();',
         "  if (!started) {",
         "    started = true;",
         "    return now();",
@@ -871,23 +871,29 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         "",
       ].join("\n"),
     );
+    const sources = [
+      ["sqlite", `sqlite:/tmp/${name}_src.sqlite`],
+      ["mongodb", databaseUrl("mongodb", `${name}_src`)],
+    ] as const;
     try {
-      await prepareDatabase("sqlite", `${name}_src`, source);
-      await prepareDatabase("sqlite", `${name}_dst`, destination);
-      const opened = await openStores(source);
-      await opened.stores.settings.put({ ...defaultSettings(), contact: "slow@example.invalid" });
-      await opened.close();
-      const run = runCli(source, destination, preload.url);
-      expect(run.output.trim().split("\n").at(-1)).toBe(
-        "Result: failed (took longer than 10 minutes); drop the destination before retrying.",
-      );
-      expect(run.status).toBe(1);
-      expect(run.output).not.toContain("/tmp/");
-      // The destination is left for the operator to drop.
-      expect(existsSync(`/tmp/${name}_dst.sqlite`)).toBe(true);
+      for (const [kind, source] of sources) {
+        await prepareDatabase(kind, `${name}_src`, source);
+        await prepareDatabase("sqlite", `${name}_dst`, destination);
+        const opened = await openStores(source);
+        await opened.stores.settings.put({ ...defaultSettings(), contact: "slow@example.invalid" });
+        await opened.close();
+        const run = runCli(source, destination, preload.url);
+        expect(run.output.trim().split("\n").at(-1)).toBe(
+          "Result: failed (took longer than 10 minutes); drop the destination before retrying.",
+        );
+        expect(run.status).toBe(1);
+        expect(run.output).not.toContain("/tmp/");
+        // The destination is left for the operator to drop.
+        expect(existsSync(`/tmp/${name}_dst.sqlite`)).toBe(true);
+      }
     } finally {
       await rm(preload.dir, { recursive: true, force: true });
-      await dropDatabase("sqlite", `${name}_src`, source);
+      for (const [kind, source] of sources) await dropDatabase(kind, `${name}_src`, source);
       await dropDatabase("sqlite", `${name}_dst`, destination);
     }
   }, 120_000);
@@ -959,7 +965,6 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
       const backend = transferBackend(createMongoStores(client.db()));
       const cutoff = new Date(Date.now() + margin);
       await backend.countLive(cutoff);
-      for await (const _audit of backend.exportAudit());
       for await (const item of backend.exportAll(cutoff))
         if (item.kind === "uploads") for await (const _chunk of item.chunks);
       await backend.uploadCounter();
