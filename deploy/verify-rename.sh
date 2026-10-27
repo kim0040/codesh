@@ -106,6 +106,9 @@ sys.stdout.write(text)
     case "$title" in codesh-api | codesh-collab | codesh-web) docker image rm -f "$id" >/dev/null 2>&1 || true ;; esac
   done
   cleanup_legacy_layers
+  if [ -f "$WORK/preexisting-image-tags" ]; then
+    verification_restore_image_tags "$WORK/preexisting-image-tags" || status=1
+  fi
   rm -rf "$WORK"
   echo "cleanup: isolated stack, volumes, registry, branch image tags and working files removed (status=$status)"
   exit "$status"
@@ -142,6 +145,7 @@ for image in "${OLD_IMAGES[@]}"; do
   docker image inspect "$image" >/dev/null 2>&1 && PREEXISTING_OLD_IMAGES+=("$image")
 done
 mapfile -t PREEXISTING_IMAGE_IDS < <(docker image ls -aq)
+verification_snapshot_image_tags "$WORK/preexisting-image-tags"
 
 echo 'build: all four production Dockerfiles from a branch snapshot (synthetic next release 1.0.2)'
 mkdir -p "$WORK/source"
