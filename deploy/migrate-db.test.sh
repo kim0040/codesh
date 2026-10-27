@@ -11,7 +11,7 @@ cat >"$F/bin/docker" <<'DOCKER'
 set -euo pipefail
 [[ "$*" != *'private@'* && "$*" != *'.invalid/db'* ]] || exit 97
 if [ "$1" = rm ]; then
-  [[ "${!#}" =~ ^gachipad-migrate-[a-f0-9]{32}-(copy|preflight|image|users)$ ]] || exit 98
+  [[ "${!#}" =~ ^gachipad-migrate-[a-f0-9]{32}-(copy|preflight|image|users|checkpoint)$ ]] || exit 98
   [ "${FAIL_CONTAINER_REMOVE:-0}" = 0 ] || exit 1
   echo container-removed >>"$FIXTURE/events"
   touch "$FIXTURE/container-removed"
@@ -81,6 +81,14 @@ if [[ "$*" == *'npm run --silent copy-db'* ]]; then
   elif [ "${COPY_STATUS:-0}" = 2 ] && [ "${COPY_WRAPPER_ERROR:-0}" = 0 ]; then echo 'Result: refused (Destination is not empty).';
   else echo 'Result: failed; drop the destination before retrying.'; fi
   exit "${COPY_STATUS:-0}"
+fi
+if [[ "$*" == *' api node --input-type=module -'* ]]; then
+  cat >"$FIXTURE/checkpoint-source"
+  grep -q 'PRAGMA wal_checkpoint(TRUNCATE)' "$FIXTURE/checkpoint-source" || exit 87
+  [ -f "$FIXTURE/stopped" ] && [ ! -f "$FIXTURE/backup" ] || exit 86
+  echo checkpoint >>"$FIXTURE/events"
+  [ "${FAIL_CHECKPOINT:-0}" = 0 ] || exit 1
+  exit 0
 fi
 if [[ "$*" == *' api node --import '* ]]; then
   cat >"$FIXTURE/preflight-source"
@@ -187,6 +195,24 @@ for status in 1 2; do
   clean_state
   echo "ok: copy exit $status survives npm invocation; old backend runs; new volume removed"
 done
+make_fixture checkpoint-failed sqlite
+if FAIL_CHECKPOINT=1 run --to postgres --yes; then exit 1; fi
+cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
+[ "$(cat "$FIXTURE/running")" = sqlite ]
+[ ! -e "$FIXTURE/backup" ]
+if grep -q '^postgres:up$' "$FIXTURE/events"; then exit 1; fi
+grep -q 'SQLite source checkpoint failed or -wal/-shm files remain' "$FIXTURE/install/state/migrate-db.log"
+clean_state
+echo 'ok: SQLite checkpoint failure prevents backup/copy and target startup; recovers source'
+make_fixture checkpoint-order sqlite
+run --to postgres --yes
+python3 - "$FIXTURE/events" <<'ORDER'
+import pathlib, sys
+events = pathlib.Path(sys.argv[1]).read_text().splitlines()
+assert events.index("stopped") < events.index("checkpoint") < events.index("backup") < events.index("postgres:run", events.index("backup"))
+ORDER
+clean_state
+echo 'ok: SQLite checkpoint runs after writers stop and before backup/copy'
 make_fixture existing-destination sqlite
 touch "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data"
 if DEST_NONEMPTY=1 run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi

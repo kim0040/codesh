@@ -392,6 +392,34 @@ if [ -n "$TARGET_VOLUME" ]; then
 fi
 STOPPED=1
 stop_writes || die 'writers did not stop cleanly; migration cancelled'
+# A killed last writer can leave WAL sidecars; fold them into the stopped source first.
+if [ "$SOURCE" = sqlite ]; then
+  ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-checkpoint"
+  GACHIPAD_COPY_FROM="$SOURCE_URL" migration_run docker compose run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T \
+    -e GACHIPAD_COPY_FROM api node --input-type=module - <<'CHECKPOINT' || die 'SQLite source checkpoint failed or -wal/-shm files remain; stop other SQLite users and inspect the source before retrying'
+import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+try {
+  const url = process.env.GACHIPAD_COPY_FROM;
+  const path = url.startsWith("sqlite://") ? decodeURIComponent(new URL(url).pathname) : url.slice(7);
+  if (/^file:/i.test(path) || path === ":memory:" || !existsSync(path)) throw new Error();
+  const sidecars = () => existsSync(`${path}-wal`) || existsSync(`${path}-shm`);
+  if (sidecars()) {
+    const db = new DatabaseSync(path);
+    try {
+      db.exec("PRAGMA busy_timeout=3000");
+      const result = db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+      if (result.busy !== 0) throw new Error();
+    } finally { db.close(); }
+    if (sidecars()) throw new Error();
+    console.log("migrate-db: stopped SQLite source checkpointed; WAL sidecars removed.");
+  }
+} catch {
+  console.error("migrate-db: SQLite checkpoint refused; source missing, busy or WAL sidecars remain.");
+  process.exit(1);
+}
+CHECKPOINT
+fi
 TARGET_STARTED=1
 case "$TO" in
   postgres) migration_run docker compose --env-file "$STAGE/.env" up -d --pull never --wait --wait-timeout 120 postgres ;;

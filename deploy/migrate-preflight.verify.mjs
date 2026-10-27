@@ -96,10 +96,71 @@ const setup = (url) => {
   });
   assert.equal(result.status, 0, "fixture schema creation");
 };
+const checkpoint = sql
+  .split("<<'CHECKPOINT' || die ")[1]
+  ?.split("\n")
+  .slice(1)
+  .join("\n")
+  .split("\nCHECKPOINT\n")[0];
+assert.ok(checkpoint, "production checkpoint heredoc must exist");
+const checkpointEntry = join(fixture, "checkpoint.mjs");
+writeFileSync(checkpointEntry, checkpoint);
+const runCheckpoint = (path, status = 0) => {
+  const result = spawnSync(process.execPath, [checkpointEntry], {
+    env: { ...process.env, GACHIPAD_COPY_FROM: `sqlite:${path}` },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(result.error, undefined, "checkpoint must exit promptly");
+  assert.equal(result.status, status, "checkpoint exit status");
+  checks++;
+};
 const digest = () => createHash("sha256").update(readFileSync(source)).digest("hex");
 let pg;
 const databases = [];
 try {
+  const dirty = join(fixture, "dirty.db");
+  const crash = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import { DatabaseSync } from "node:sqlite";
+    const db = new DatabaseSync(process.argv[1]);
+    db.exec("PRAGMA journal_mode=WAL; CREATE TABLE fixture (value TEXT); INSERT INTO fixture VALUES ('retained')");
+    process.exit(0);
+  `,
+      dirty,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(crash.status, 0);
+  assert.ok(readFileSync(`${dirty}-wal`).length > 0);
+  runCheckpoint(dirty);
+  assert.throws(() => readFileSync(`${dirty}-wal`));
+  assert.throws(() => readFileSync(`${dirty}-shm`));
+  const recovered = new DatabaseSync(dirty, { readOnly: true });
+  assert.equal(recovered.prepare("SELECT value FROM fixture").get().value, "retained");
+  recovered.close();
+  const clean = createHash("sha256").update(readFileSync(dirty)).digest("hex");
+  runCheckpoint(dirty);
+  assert.equal(createHash("sha256").update(readFileSync(dirty)).digest("hex"), clean);
+  const live = new DatabaseSync(dirty);
+  try {
+    live.exec("PRAGMA journal_mode=WAL; INSERT INTO fixture VALUES ('still-open')");
+    runCheckpoint(dirty, 1);
+    assert.ok(readFileSync(`${dirty}-shm`).length > 0, "open source sidecars must trigger refusal");
+    assert.equal(live.prepare("SELECT count(*) AS total FROM fixture").get().total, 2);
+  } finally {
+    live.close();
+  }
+  runCheckpoint(dirty);
+  runCheckpoint(absent, 1);
+  assert.throws(() => readFileSync(absent));
+  console.log(
+    "ok: production SQLite checkpoint preserves crash WAL rows, removes sidecars, leaves clean sources unchanged and refuses open or missing sources",
+  );
   setup(`sqlite:${source}`);
   const sqlite = new DatabaseSync(source);
   sqlite.exec("PRAGMA journal_mode=DELETE");
@@ -141,8 +202,10 @@ try {
   // biome-ignore lint/suspicious/noUndeclaredEnvVars: standalone verifier runs outside Turbo
   if (process.env.MIGRATE_PREFLIGHT_PG === "1") {
     // Read only connection metadata; never print container config or credentials.
+    // biome-ignore lint/suspicious/noUndeclaredEnvVars: standalone verifier runs outside Turbo
+    const container = process.env.MIGRATE_PREFLIGHT_PG_CONTAINER || "gp-sql-pg";
     const config = JSON.parse(
-      execFileSync("docker", ["inspect", "gp-sql-pg"], { encoding: "utf8" }),
+      execFileSync("docker", ["inspect", container], { encoding: "utf8" }),
     )[0];
     const settings = Object.fromEntries(
       config.Config.Env.map((value) => {
