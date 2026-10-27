@@ -4,14 +4,29 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 F="$(mktemp -d)"
 trap 'rm -rf "$F"' EXIT
+trap 'printf "migration fixture failed: %s at line %s\n" "${FIXTURE##*/}" "$LINENO" >&2' ERR
 mkdir "$F/bin"
 cat >"$F/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ "$*" != *'private@'* && "$*" != *'.invalid/db'* ]] || exit 97
+if [ "$1" = rm ]; then
+  [[ "${!#}" =~ ^gachipad-migrate-[a-f0-9]{32}-(copy|preflight|image|users)$ ]] || exit 98
+  [ "${FAIL_CONTAINER_REMOVE:-0}" = 0 ] || exit 1
+  echo container-removed >>"$FIXTURE/events"
+  touch "$FIXTURE/container-removed"
+  exit 0
+fi
+if [ "$1" = container ]; then
+  [ "${FAIL_CONTAINER_REMOVE:-0}" = 0 ] || echo owned-container
+  exit 0
+fi
 if [ "$1" = volume ]; then
   case "$2" in
-    ls) find "$FIXTURE/volumes" -type f -exec basename {} \; ;;
+    ls)
+      find "$FIXTURE/volumes" -type f -exec basename {} \;
+      if [ "${MANY_VOLUMES:-0}" = 1 ]; then awk 'BEGIN { for (i=0; i<20000; i++) print "unrelated-volume-" i }'; fi
+      ;;
     create)
       name="${!#}"; token=""
       for arg in "$@"; do case "$arg" in gachipad.migration=*) token="${arg#*=}" ;; esac; done
@@ -47,8 +62,12 @@ if [[ "$*" == *'npm run --silent copy-db'* ]]; then
   [ -f "$FIXTURE/backup" ] || exit 92
   [ "${GACHIPAD_COPY_WINDOW_MINUTES:-}" = "${EXPECTED_WINDOW:-15}" ] || exit 91
   if [ "${COPY_WAIT:-0}" = 1 ]; then
+    trap '' HUP INT TERM
     touch "$FIXTURE/copy-ready"
-    for _ in {1..100}; do [ ! -f "$FIXTURE/release-copy" ] || break; sleep 0.05; done
+    for _ in {1..400}; do [ ! -f "$FIXTURE/container-removed" ] || break; sleep 0.05; done
+    [ -f "$FIXTURE/container-removed" ] || exit 90
+    echo copy-ended >>"$FIXTURE/events"
+    exit 143
   fi
   case "$kind" in
     sqlite) touch "$FIXTURE/volumes/${COMPOSE_PROJECT_NAME}_gachipad-data" ;;
@@ -59,17 +78,24 @@ if [[ "$*" == *'npm run --silent copy-db'* ]]; then
   echo 'shares: 1'
   if [ "${COPY_STATUS:-0}" = 0 ]; then echo 'Result: success.'
   elif [ "${COPY_NOT_WRITTEN:-0}" = 1 ]; then echo 'Result: failed (CONNECT); nothing was copied.'
-  else echo 'Result: refused or failed.'; fi
+  elif [ "${COPY_STATUS:-0}" = 2 ] && [ "${COPY_WRAPPER_ERROR:-0}" = 0 ]; then echo 'Result: refused (Destination is not empty).';
+  else echo 'Result: failed; drop the destination before retrying.'; fi
   exit "${COPY_STATUS:-0}"
 fi
 if [[ "$*" == *' api node --import '* ]]; then
+  cat >"$FIXTURE/preflight-source"
+  grep -q '^const watchdog = setTimeout' "$FIXTURE/preflight-source" || exit 89
+  echo preflight >>"$FIXTURE/events"
   echo 'migrate-db: required local bytes 67108864'
+  if [ "${PREFLIGHT_STATUS:-0}" = 2 ]; then echo 'Result: refused (Destination is not empty).'; fi
   exit "${PREFLIGHT_STATUS:-0}"
 fi
 if [[ "$*" == *' api node -e '* ]] && [ "${FAIL_CLI:-0}" = 1 ]; then exit 1; fi
 if [[ "$*" == *' -T mongo-users'* ]] && [ "${FAIL_USERS:-0}" = 1 ]; then exit 1; fi
+if [ "$1" = rm ]; then echo "$kind:remove:${*:2}" >>"$FIXTURE/events"; fi
 if [ "$1" = stop ]; then echo "$kind:stopped-target" >>"$FIXTURE/events"; fi
 if [ "$1" = up ]; then
+  if [[ "$*" == *'postgres'* || "$*" == *'mongo'* ]]; then [ -f "$FIXTURE/stopped" ] || exit 88; fi
   if [ "${FAIL_TARGET_START:-0}" = 1 ] && [[ "$*" != *'api collab'* ]] && [ "$kind" != "$(cat "$FIXTURE/before.kind")" ]; then exit 1; fi
   case " $* " in
     *' postgres '*) touch "$FIXTURE/volumes/${COMPOSE_PROJECT_NAME}_postgres-data" ;;
@@ -80,11 +106,13 @@ if [ "$1" = up ]; then
 fi
 DOCKER
 chmod +x "$F/bin/docker"
+BASE_PATH="$PATH"
 export PATH="$F/bin:$PATH" COMPOSE_PROJECT_NAME=gp-dbdeploy-fixture
 make_fixture() {
   FIXTURE="$F/$1"
   export FIXTURE
   mkdir -p "$FIXTURE/install/state" "$FIXTURE/volumes"
+  : >"$FIXTURE/run.log"
   cp "$ROOT"/deploy/{migrate-db.sh,lib.sh,generate-secrets.sh,.env.example} "$FIXTURE/install/"
   cp "$ROOT/deploy/.env.example" "$FIXTURE/install/.env"
   (
@@ -121,21 +149,22 @@ clean_state() {
   [ ! -e "$FIXTURE/install/state/transaction" ]
   [ ! -e "$FIXTURE/install/state/install.lock.d" ]
   [ -z "$(find "$FIXTURE/install" -maxdepth 1 -name '.env.migrate-db.*')" ]
-  if grep -q 'private@\|postgresql://\|mongodb://' "$FIXTURE/run.log"; then exit 1; fi
+  if grep -Eq 'private@|[a-zA-Z][a-zA-Z0-9+.-]*://' "$FIXTURE/run.log"; then exit 1; fi
   if [ -f "$FIXTURE/install/state/migrate-db.log" ] &&
-    grep -q 'private@\|postgresql://\|mongodb://' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
+    grep -Eq 'private@|[a-zA-Z][a-zA-Z0-9+.-]*://' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
 }
-for pair in mongodb:sqlite sqlite:postgres postgres:external; do
+for pair in mongodb:sqlite sqlite:postgres postgres:external sqlite:mongodb external:postgres; do
   from="${pair%:*}"; to="${pair#*:}"
-  make_fixture "success-$from" "$from"
+  make_fixture "success-$from-$to" "$from"
   args=(--to "$to" --yes)
   if [ "$to" = external ]; then export DATABASE_URL='postgresql://fixture:private@target.invalid/db'; fi
-  run "${args[@]}"
+  GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 run "${args[@]}"
   unset DATABASE_URL
   [ "$(cat "$FIXTURE/install/state/database-kind")" = "$to" ]
   [ "$(cat "$FIXTURE/running")" = "$to" ]
   case "$to" in
     postgres) grep -qx 'COMPOSE_PROFILES=mdns,postgres' "$FIXTURE/install/.env"; grep -Eq '^POSTGRES_PASSWORD=.+$' "$FIXTURE/install/.env" ;;
+    mongodb) grep -qx 'COMPOSE_PROFILES=mdns,mongodb' "$FIXTURE/install/.env" ;;
     *) grep -qx 'COMPOSE_PROFILES=mdns' "$FIXTURE/install/.env" ;;
   esac
   grep -q 'previous backend data and backups are kept' "$FIXTURE/run.log"
@@ -166,6 +195,13 @@ if DEST_NONEMPTY=1 run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
 [ -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
 clean_state
 echo 'ok: refused existing destination volume is retained'
+make_fixture many-volumes sqlite
+touch "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data"
+if MANY_VOLUMES=1 DEST_NONEMPTY=1 run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
+[ ! -e "$FIXTURE/stopped" ]; [ ! -e "$FIXTURE/backup" ]
+[ -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
+clean_state
+echo 'ok: existing volume detection works beyond a pipe buffer with ignored PIPE'
 make_fixture failed-health mongodb
 if FAIL_HEALTH=1 run --to postgres --yes; then exit 1; fi
 cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
@@ -230,6 +266,48 @@ for status in 1 2; do
   clean_state
   echo "ok: preflight exit $status refuses before downtime"
 done
+make_fixture empty-existing sqlite
+touch "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data"
+if PREFLIGHT_STATUS=1 run --to postgres --yes; then exit 1; fi
+[ ! -s "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
+[ ! -e "$FIXTURE/stopped" ]; [ ! -e "$FIXTURE/backup" ]
+if grep -Eq 'postgres:(up|stop|rm)' "$FIXTURE/events"; then exit 1; fi
+cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
+cmp "$FIXTURE/install/state/database-kind" "$FIXTURE/before.kind"
+clean_state
+run --to postgres --yes
+[ "$(cat "$FIXTURE/running")" = postgres ]
+[ -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
+clean_state
+echo 'ok: failed preflight leaves existing empty target unchanged and retry succeeds'
+make_fixture sqlite-partial mongodb
+if COPY_STATUS=1 run --to sqlite --yes; then exit 1; fi
+grep -q 'SQLite destination files are /data/gachipad.db' "$FIXTURE/install/state/migrate-db.log"
+clean_state
+make_fixture mongo-partial sqlite
+if COPY_STATUS=1 run --to mongodb --yes; then exit 1; fi
+grep -qx 'mongodb:remove:-sfv mongo-users mongo' "$FIXTURE/events"
+[ ! -e "$FIXTURE/volumes/gp-dbdeploy-fixture_mongo-data" ]
+clean_state
+echo 'ok: SQLite partial hint and MongoDB container/anonymous volume cleanup are covered'
+make_fixture wrapper-exit-2 sqlite
+if COPY_STATUS=2 COPY_WRAPPER_ERROR=1 run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
+if grep -q 'destination was not modified' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
+grep -q 'destination may hold a partial copy' "$FIXTURE/install/state/migrate-db.log"
+clean_state
+echo 'ok: wrapper exit 2 does not claim the copy tool refused safely'
+make_fixture missing-tee sqlite
+cat >"$F/bin/tee" <<'TEE'
+#!/usr/bin/env bash
+exit 1
+TEE
+chmod +x "$F/bin/tee"
+if run --to postgres --yes; then exit 1; fi
+rm "$F/bin/tee"
+grep -q 'tee with -p support is required' "$FIXTURE/run.log"
+[ ! -e "$FIXTURE/stopped" ]; [ ! -e "$FIXTURE/backup" ]
+clean_state
+echo 'ok: missing tee -p refuses before downtime'
 make_fixture replaced-volume sqlite
 if COPY_STATUS=1 REPLACE_VOLUME=1 run --to postgres --yes; then exit 1; fi
 [ -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
@@ -237,7 +315,6 @@ grep -q 'identity could not be verified' "$FIXTURE/install/state/migrate-db.log"
 [ -e "$FIXTURE/install/state/transaction" ]
 echo 'ok: changed volume identity prevents removal during rollback'
 make_fixture nothing-written sqlite
-if COPY_STATUS=1 COPY_NOT_WRITTEN=1 run --to external --yes; then exit 1; fi
 # An external URL must be supplied through the environment, and failure before writes is distinct.
 if DATABASE_URL='postgresql://fixture:private@target.invalid/db' COPY_STATUS=1 COPY_NOT_WRITTEN=1 run --to external --yes; then exit 1; fi
 grep -q 'destination was not modified; nothing was copied' "$FIXTURE/install/state/migrate-db.log"
@@ -252,21 +329,29 @@ if grep -q 'inspect and clear' "$FIXTURE/install/state/migrate-db.log"; then exi
 [ -e "$FIXTURE/install/state/transaction" ]
 echo 'ok: ingress-opened failure retains destination writes and snapshots'
 make_fixture incomplete sqlite
-if COPY_STATUS=1 FAIL_RECOVERY=1 run --to postgres --yes; then exit 1; fi
+if COPY_STATUS=1 FAIL_RECOVERY=1 run --to postgres --yes; then exit 1; else [ "$?" = 3 ]; fi
 [ -e "$FIXTURE/install/state/transaction" ]
 [ -n "$(find "$FIXTURE/install" -maxdepth 1 -name '.env.migrate-db.*')" ]
 grep -q 'cp -p .*original.env .env' "$FIXTURE/install/state/migrate-db.log"
 grep -q 'only after recovery succeeds' "$FIXTURE/install/state/migrate-db.log"
 [ ! -e "$FIXTURE/install/state/install.lock.d" ]
 echo 'ok: incomplete recovery preserves snapshots/transaction and gives concrete commands'
-for signal in HUP INT TERM; do
-  make_fixture "signal-$signal" sqlite
+make_fixture container-removal-failed sqlite
+if COPY_STATUS=1 FAIL_CONTAINER_REMOVE=1 run --to postgres --yes; then exit 1; else [ "$?" = 3 ]; fi
+if grep -qx start "$FIXTURE/events"; then exit 1; fi
+grep -q 'writers will not be restarted' "$FIXTURE/install/state/migrate-db.log"
+[ -e "$FIXTURE/install/state/transaction" ]
+echo 'ok: unverified copy container removal prevents source restart and returns exit 3'
+for signal_target in HUP:postgres INT:sqlite TERM:external; do
+  signal="${signal_target%:*}"; target="${signal_target#*:}"
+  make_fixture "signal-$signal" mongodb
   # Python avoids the ignored SIGINT disposition of a shell background job. Close both
   # the output reader and stderr, modelling tee/SSH loss while the copy is running.
-  COPY_WAIT=1 python3 - "$signal" <<'SIGNAL'
-import os, pathlib, signal, subprocess, sys, time
+  if [ "$target" = external ]; then export DATABASE_URL='postgresql://fixture:private@target.invalid/db'; fi
+  COPY_WAIT=1 python3 - "$signal" "$target" <<'SIGNAL'
+import os, pathlib, re, signal, subprocess, sys, time
 root = pathlib.Path(os.environ["FIXTURE"])
-p = subprocess.Popen(["./migrate-db.sh", "--to", "postgres", "--yes"],
+p = subprocess.Popen(["./migrate-db.sh", "--to", sys.argv[2], "--yes"],
     cwd=root / "install", stdout=subprocess.PIPE, preexec_fn=lambda: os.close(2),
     start_new_session=True)
 p.stdout.close()
@@ -278,18 +363,34 @@ try:
     assert (root / "copy-ready").exists()
     sig = getattr(signal, "SIG" + sys.argv[1])
     p.send_signal(sig)
-    (root / "release-copy").touch()
-    assert p.wait(timeout=20) == 128 + sig
+    deadline = time.monotonic() + 1
+    while not (root / "container-removed").exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert (root / "container-removed").exists(), "signal did not stop copy within one second"
+    assert p.wait(timeout=10) == 128 + sig
+    events = (root / "events").read_text().splitlines()
+    assert events.index("container-removed") < events.index("start")
+    log = (root / "install/state/migrate-db.log").read_text()
+    assert "migration container stopped and removed before recovery" in log
+    assert "previous configuration restored and old backend retained" in log
+    assert "destination may hold a partial copy" in log
+    assert "private@" not in log and "://" not in log
+    for line in (root / "before.env").read_text().splitlines():
+        key, separator, value = line.partition("=")
+        if separator and re.search("SECRET|PASSWORD|TOKEN|PRIVATE_KEY", key) and len(value) > 8:
+            assert value not in log, "private log contains a configured secret"
+    assert (root / "install/state/migrate-db.log").stat().st_mode & 0o777 == 0o600
 finally:
     if p.poll() is None:
         os.killpg(p.pid, signal.SIGKILL)
         p.wait()
 SIGNAL
+  unset DATABASE_URL
   cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
   cmp "$FIXTURE/install/state/database-kind" "$FIXTURE/before.kind"
-  [ "$(cat "$FIXTURE/running")" = sqlite ]
+  [ "$(cat "$FIXTURE/running")" = mongodb ]
   [ ! -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
-  : >"$FIXTURE/run.log"
+  [ ! -e "$FIXTURE/volumes/gp-dbdeploy-fixture_gachipad-data" ]
   clean_state
   echo "ok: $signal with closed stderr/dead output pipe recovers and releases snapshots/lock"
 done
@@ -313,4 +414,5 @@ if DATABASE_URL='postgres:foo' run --to external --yes; then exit 1; fi
 grep -q 'requires a server scheme' "$FIXTURE/run.log"
 [ ! -e "$FIXTURE/backup" ]; clean_state
 echo 'ok: malformed server URL refuses before downtime without printing its value'
+PATH="$BASE_PATH" node "$ROOT/deploy/migrate-preflight.verify.mjs"
 echo 'migrate-db.test.sh: all checks passed'

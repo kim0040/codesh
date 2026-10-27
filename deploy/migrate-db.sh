@@ -19,13 +19,15 @@ while [ "$#" -gt 0 ]; do
     -h | --help)
       cat <<'HELP'
 usage: ./migrate-db.sh --to sqlite|postgres|mongodb|external [--window-minutes N] [--yes]
-External destination: export DATABASE_URL or enter it at the hidden terminal prompt.
+External destination: use the hidden terminal prompt, or read -rs DATABASE_URL; export DATABASE_URL.
+Unset DATABASE_URL before choosing a bundled destination.
 External source: set GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 after a server backup.
 Window: integer 15..1440, default GACHIPAD_COPY_WINDOW_MINUTES or 15 minutes.
 Diagnostics and records expiring within the window (and their child records) are skipped.
 The copy must finish within window minus 5 minutes. Raise the window for larger databases:
 measured uploads: about 40 MB/s into PostgreSQL, 85-106 MB/s into SQLite;
-allow at least twice the measured time for your network, disk and record count.
+Minimum window in minutes: size in MB / throughput in MB/s / 60 * 2 + 5.
+Allow more for your network, disk and record count; the minimum supported window is 15.
 Source data and backups are retained. Migration back requires an empty destination.
 Recovery details and command output: state/migrate-db.log (private).
 HELP
@@ -63,7 +65,9 @@ SUCCESS=0
 NEW_VOLUME=0
 TARGET_VOLUME=""
 VOLUME_ID=""
-RUN_ID=""
+RUN_ID="$(openssl rand -hex 16)"
+ACTIVE_CONTAINER=""
+ACTIVE_PID=""
 SOURCE=""
 TARGET_STARTED=0
 INGRESS_OPENED=0
@@ -76,17 +80,61 @@ migration_message() {
   echo "$*" >&3 || true
 }
 
+# wait is interruptible even when the Compose client/container ignores a signal.
+migration_run() {
+  "$@" <&0 &
+  ACTIVE_PID=$!
+  local status=0
+  wait "$ACTIVE_PID" || status=$?
+  ACTIVE_PID=""
+  return "$status"
+}
+
+migration_logged_run() {
+  local log="$1" status=0
+  shift
+  (set -o pipefail; "$@" | tee -p "$log") <&0 &
+  ACTIVE_PID=$!
+  wait "$ACTIVE_PID" || status=$?
+  ACTIVE_PID=""
+  return "$status"
+}
+
 migration_cleanup() {
-  local status=$? recovered=1 service identity
+  trap '' HUP INT TERM PIPE
+  local status="$1" recovered=1 service identity remaining
   set +e
   trap - EXIT
-  trap '' HUP INT TERM PIPE
   # Redirect before any recovery command; even a dead tee cannot interrupt recovery.
   shopt -s execfail
   exec >>"$LOG" 2>&1 || exec >/dev/null 2>&1
+  # Remove the one-off before restoring configuration or restarting any source writers.
+  if [ -n "$ACTIVE_CONTAINER" ]; then
+    docker rm -f "$ACTIVE_CONTAINER" >/dev/null 2>&1 || {
+      remaining="$(docker container ls -aq --filter "name=^/${ACTIVE_CONTAINER}$")" || recovered=0
+      [ -z "$remaining" ] || recovered=0
+    }
+    [ "$recovered" != 1 ] || migration_message 'migrate-db: migration container stopped and removed before recovery.'
+  fi
+  [ -z "$ACTIVE_PID" ] || kill "$ACTIVE_PID" 2>/dev/null || true
   if [ "$SUCCESS" = 0 ] && [ -n "$STAGE" ]; then
-    if [ "$STOPPED" = 1 ]; then
+    if [ "$recovered" != 1 ]; then
+      migration_message 'migrate-db: could not verify migration container removal; writers will not be restarted.'
+    elif [ "$STOPPED" = 1 ]; then
       stop_writes restore >&2 || recovered=0
+    fi
+    case "$TO" in
+      postgres) service=postgres ;;
+      mongodb) service=mongo ;;
+      *) service="" ;;
+    esac
+    if [ -n "$service" ] && [ "$TO" != "$SOURCE" ] && [ "$TARGET_STARTED" = 1 ]; then
+      docker compose --env-file "$STAGE/.env" stop "$service" >&2 || recovered=0
+      if [ "$INGRESS_OPENED" = 0 ]; then
+        if [ "$TO" = mongodb ]; then
+          docker compose --env-file "$STAGE/.env" rm -sfv mongo-users mongo >&2 || recovered=0
+        else docker compose --env-file "$STAGE/.env" rm -sf "$service" >&2 || recovered=0; fi
+      fi
     fi
     if [ "$CONFIG_SNAPSHOT_READY" = 1 ]; then
       cp -p "$STAGE/original.env" .env.migrate-recovery && mv .env.migrate-recovery .env || recovered=0
@@ -97,19 +145,6 @@ migration_cleanup() {
     if [ "$STOPPED" = 1 ] && [ "$recovered" = 1 ]; then
       database_start 120 && docker compose up -d --pull never --wait --wait-timeout 120 api collab &&
         wait_api 120 && docker compose up -d --pull never && wait_healthy 120 || recovered=0
-    fi
-    case "$TO" in
-      postgres) service=postgres ;;
-      mongodb) service=mongo ;;
-      *) service="" ;;
-    esac
-    if [ -n "$service" ] && [ "$TO" != "$SOURCE" ] && [ "$TARGET_STARTED" = 1 ]; then
-      docker compose --env-file "$STAGE/.env" stop "$service" >&2 || recovered=0
-      if [ "$NEW_VOLUME" = 1 ] && [ "$INGRESS_OPENED" = 0 ] && [ "$recovered" = 1 ]; then
-        if [ "$TO" = mongodb ]; then
-          docker compose --env-file "$STAGE/.env" rm -sfv mongo-users mongo >&2 || recovered=0
-        else docker compose --env-file "$STAGE/.env" rm -sf "$service" >&2 || recovered=0; fi
-      fi
     fi
     if [ "$NEW_VOLUME" = 1 ] && [ "$INGRESS_OPENED" = 0 ] && [ "$recovered" = 1 ]; then
       identity="$(docker volume inspect --format '{{.CreatedAt}} {{index .Labels "gachipad.migration"}}' "$TARGET_VOLUME")" || identity=""
@@ -134,7 +169,7 @@ migration_cleanup() {
       { [ "$COPY_STARTED" = 1 ] || [ "$STOPPED" = 1 ] || [ "$TARGET_STARTED" = 1 ]; }; then
       case "$TO" in
         sqlite) migration_message 'migrate-db: if retained, SQLite destination files are /data/gachipad.db, /data/gachipad.db-wal and /data/gachipad.db-shm in the shared gachipad-data volume; inspect them with writers stopped before removing only those destination files.' ;;
-        postgres | mongodb) migration_message "migrate-db: if retained, inspect destination volume $TARGET_VOLUME before retrying; never remove a pre-existing volume without checking its data." ;;
+        postgres | mongodb) migration_message "migrate-db: if retained, inspect destination volume $TARGET_VOLUME before retrying; an offline target start may have initialized a previously empty volume. Never remove a pre-existing volume without checking its data." ;;
         external) migration_message 'migrate-db: inspect the external destination with its server tools; clear it only if the Result line says to drop the destination.' ;;
       esac
     fi
@@ -145,6 +180,7 @@ migration_cleanup() {
       migration_message 'migrate-db: migration failed; previous configuration restored and old backend retained.'
     else
       migration_message "migrate-db: automatic recovery incomplete; configuration snapshots kept in $STAGE."
+      status=3
       migration_recovery_hint "$STAGE" | while IFS= read -r line; do migration_message "$line"; done
     fi
   fi
@@ -155,7 +191,7 @@ migration_cleanup() {
   install_unlock || true
   exit "$status"
 }
-trap migration_cleanup EXIT
+trap 'migration_cleanup "$?"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -168,7 +204,7 @@ install_lock
 # directly to this file. The logger inherits ignored signals and PIPE.
 chmod 600 "$LOG" 2>/dev/null || true
 exec 3>&1
-exec > >(trap '' HUP INT TERM PIPE; exec tee -i -p -a "$LOG") 2>&1
+exec > >(trap '' HUP INT TERM PIPE; exec 9>&-; exec tee -i -p -a "$LOG") 2>&1
 if [ ! -f VERSION ] || [ "$(cat VERSION)" != "$(env_get GACHIPAD_VERSION)" ]; then
   die 'VERSION must match the installed GACHIPAD_VERSION; extract scripts from the same verified release'
 fi
@@ -219,7 +255,7 @@ TARGET_CONNECTION="$(cd "$STAGE" && env_get DATABASE_URL "$(env_get GACHIPAD_DAT
 if [ "$TO" != external ]; then
   TARGET_VOLUME="$(database_project)_$(database_volume_suffix "$TO")"
   volumes="$(docker volume ls -q)" || die 'cannot list destination volumes; refusing migration'
-  if printf '%s\n' "$volumes" | grep -qxF "$TARGET_VOLUME"; then
+  if grep -qxF "$TARGET_VOLUME" <<<"$volumes"; then
     docker volume inspect "$TARGET_VOLUME" >/dev/null || die 'cannot inspect destination volume; refusing migration'
     if database_volume_nonempty "$TARGET_VOLUME" "$TO"; then
       COPY_REFUSED=1
@@ -227,7 +263,6 @@ if [ "$TO" != external ]; then
       exit 2
     fi
   else
-    RUN_ID="$(openssl rand -hex 16)"
     docker volume create --label "gachipad.migration=$RUN_ID" \
       --label "com.docker.compose.project=$(database_project)" \
       --label "com.docker.compose.volume=$(database_volume_suffix "$TO")" "$TARGET_VOLUME" >/dev/null
@@ -238,86 +273,113 @@ if [ "$TO" != external ]; then
     NEW_VOLUME=1
   fi
 fi
-# Image/CLI, destination reachability/emptiness and disk checks all precede downtime.
-GACHIPAD_EXPECT_VERSION="$(cat VERSION)" docker compose --env-file "$STAGE/.env" run --rm --no-deps --pull never -T \
+# Check the image, source, external destination and space before downtime.
+# Bundled destinations use the read-only volume probe; their server starts only offline.
+ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-image"
+GACHIPAD_EXPECT_VERSION="$(cat VERSION)" migration_run docker compose --env-file "$STAGE/.env" run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T \
   -e GACHIPAD_EXPECT_VERSION api node -e '
     const fs = require("node:fs"); const p = require("./package.json");
     if (!p.scripts?.["copy-db"] || !fs.existsSync("src/copy-db.ts") ||
         fs.readFileSync("VERSION", "utf8").trim() !== process.env.GACHIPAD_EXPECT_VERSION) process.exit(1);
   ' || die 'installed API image/version lacks the matching copy CLI; use the same verified release'
-TARGET_STARTED=1
-case "$TO" in
-  postgres) docker compose --env-file "$STAGE/.env" up -d --pull never --wait --wait-timeout 120 postgres ;;
-  mongodb)
-    docker compose --env-file "$STAGE/.env" up -d --pull never --wait --wait-timeout 120 mongo
-    docker compose --env-file "$STAGE/.env" run --rm --no-deps --pull never -T mongo-users ;;
-esac
+ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-preflight"
 preflight_status=0
-GACHIPAD_COPY_FROM="$SOURCE_URL" GACHIPAD_COPY_TO="$TARGET_CONNECTION" GACHIPAD_COPY_WINDOW_MINUTES="$WINDOW" \
-  docker compose --env-file "$STAGE/.env" run --rm --no-deps --pull never -T \
-    -e GACHIPAD_COPY_FROM -e GACHIPAD_COPY_TO api node --import /opt/tsx/node_modules/tsx/dist/esm/index.mjs --input-type=module - <<'PREFLIGHT' | tee "$STAGE/preflight.log" || preflight_status=$?
+GACHIPAD_COPY_FROM="$SOURCE_URL" GACHIPAD_COPY_TO="$TARGET_CONNECTION" GACHIPAD_COPY_WINDOW_MINUTES="$WINDOW" GACHIPAD_PREFLIGHT_BUNDLED="$TO" \
+  migration_logged_run "$STAGE/preflight.log" docker compose --env-file "$STAGE/.env" run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T \
+    -e GACHIPAD_COPY_FROM -e GACHIPAD_COPY_TO -e GACHIPAD_PREFLIGHT_BUNDLED api node --import /opt/tsx/node_modules/tsx/dist/esm/index.mjs --input-type=module - <<'PREFLIGHT' || preflight_status=$?
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { existsSync, statfsSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { MongoClient } from "mongodb";
-const require = createRequire(import.meta.url);
-const root = dirname(require.resolve("@gachipad/storage"));
-const { openSqlDriver } = await import(pathToFileURL(join(root, "sql/driver.ts")).href);
-const { createSqlTransferBackend } = await import(pathToFileURL(join(root, "transfer/sql.ts")).href);
-const { createMongoTransferBackend } = await import(pathToFileURL(join(root, "transfer/mongo.ts")).href);
-const sqlitePath = url => url.startsWith("sqlite://") ? decodeURIComponent(new URL(url).pathname) : url.slice(7);
-// A watchdog also bounds opens/closes and prevents a dead server holding the install lock.
-const watchdog = setTimeout(() => { console.error("migrate-db: preflight timed out; destination not copied."); process.exit(1); }, 120000);
+// Keep the watchdog alive through imports, opens, queries and closes. Never log driver messages.
+const watchdog = setTimeout(() => { console.error("migrate-db: preflight failed (ETIMEDOUT); nothing was copied."); process.exit(1); }, 120000);
+let status = 0;
+let phase = "IMPORT";
+let sqlErrorCode = () => undefined;
 try {
+  const require = createRequire(import.meta.url);
+  const root = dirname(require.resolve("@gachipad/storage"));
+  const driverModule = await import(pathToFileURL(join(root, "sql/driver.ts")).href);
+  const { createSqlTransferBackend, supportedSqlSchema } = await import(pathToFileURL(join(root, "transfer/sql.ts")).href);
+  const { createMongoTransferBackend } = await import(pathToFileURL(join(root, "transfer/mongo.ts")).href);
+  const { MongoClient } = await import("mongodb");
+  const { openSqlDriver } = driverModule;
+  sqlErrorCode = driverModule.sqlErrorCode;
+  const sqlitePath = url => url.startsWith("sqlite://") ? decodeURIComponent(new URL(url).pathname) : url.slice(7);
   let bytes = 0n;
   const source = process.env.GACHIPAD_COPY_FROM;
   const target = process.env.GACHIPAD_COPY_TO;
-  if (source.startsWith("sqlite:")) bytes = BigInt(statSync(sqlitePath(source)).size);
-  else if (/^mongodb(?:\+srv)?:/.test(source)) {
+  phase = "SOURCE";
+  if (source.startsWith("sqlite:")) {
+    const path = sqlitePath(source);
+    if (/^file:/i.test(path) || path === ":memory:") throw new Error();
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const driver = { dialect: "sqlite", all: async (sql, values = []) => db.prepare(sql).all(...values) };
+      if (!await supportedSqlSchema(driver)) throw Object.assign(new Error(), { code: "SOURCE_SCHEMA" });
+      bytes = BigInt(statSync(path).size);
+      if (existsSync(`${path}-wal`)) bytes += BigInt(statSync(`${path}-wal`).size);
+    } finally { db.close(); }
+  } else if (/^mongodb(?:\+srv)?:/.test(source)) {
     const client = new MongoClient(source, { serverSelectionTimeoutMS: 30000, socketTimeoutMS: 30000 });
     try { await client.connect(); bytes = BigInt(Math.ceil((await client.db().command({ dbStats: 1 })).dataSize)); }
     finally { await client.close(); }
   } else {
     const driver = await openSqlDriver(source);
     try {
+      if (!await supportedSqlSchema(driver)) throw Object.assign(new Error(), { code: "SOURCE_SCHEMA" });
       const rows = await driver.all(driver.dialect === "postgres"
         ? "SELECT pg_database_size(current_database()) AS bytes"
         : "SELECT COALESCE(SUM(data_length+index_length),0) AS bytes FROM information_schema.tables WHERE table_schema=DATABASE()");
       bytes = BigInt(rows[0].bytes);
     } finally { await driver.close(); }
   }
-  const space = statfsSync("/data", { bigint: true });
+  phase = "DATA_SPACE";
+  const space = statfsSync(process.env.GACHIPAD_PREFLIGHT_DATA_PATH || "/data", { bigint: true });
   const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
   console.log(`migrate-db: required local bytes ${required}`);
-  if (space.bavail * space.bsize < required) throw new Error("space");
-  if (target.startsWith("sqlite:")) {
-    if (existsSync(sqlitePath(target))) { console.log("Result: refused (Destination is not empty)."); process.exit(2); }
+  const rate = target.startsWith("sqlite:") ? 85 : 40;
+  console.log(`migrate-db: estimated minimum window minutes ${Math.max(15, Math.ceil(Number(bytes) / 1000000 / rate / 60 * 2 + 5))}; allow more for network and record count.`);
+  if (space.bavail * space.bsize < required) throw new Error();
+  phase = "DESTINATION";
+  // Bundled destinations are checked read-only by the shell. Never initialize a DB in preflight.
+  if (process.env.GACHIPAD_PREFLIGHT_BUNDLED !== "external") {
+    console.log("migrate-db: bundled destination checked without starting its database.");
+  } else if (target.startsWith("sqlite:")) {
+    throw new Error();
   } else if (/^mongodb(?:\+srv)?:/.test(target)) {
     const client = new MongoClient(target, { serverSelectionTimeoutMS: 30000, socketTimeoutMS: 30000 });
     try {
       await client.connect();
-      if (!await createMongoTransferBackend(client.db()).isEmpty()) { console.log("Result: refused (Destination is not empty)."); process.exit(2); }
+      if (!await createMongoTransferBackend(client.db()).isEmpty()) status = 2;
     } finally { await client.close(); }
   } else {
     const driver = await openSqlDriver(target);
     try {
-      if (!await createSqlTransferBackend(driver).isEmpty()) { console.log("Result: refused (Destination is not empty)."); process.exit(2); }
+      if (!await createSqlTransferBackend(driver).isEmpty()) status = 2;
     } finally { await driver.close(); }
   }
-  console.log("migrate-db: preflight passed (image, destination and local data space).");
-} catch {
-  console.error("migrate-db: preflight failed (source/destination connection or local data space); nothing was copied.");
-  process.exitCode = 1;
-} finally { clearTimeout(watchdog); }
+  console.log(status === 2 ? "Result: refused (Destination is not empty)."
+    : "migrate-db: preflight passed (image, destination and local data space).");
+} catch (error) {
+  const code = sqlErrorCode(error) || (Number.isInteger(error?.code) && error.code >= 0 && error.code <= 99999 ? `MONGO_${error.code}` : phase);
+  console.error(`migrate-db: preflight failed (${code}); nothing was copied.`);
+  status = 1;
+}
+// A driver may leave live handles even after a resolved/rejected close. Always exit explicitly.
+clearTimeout(watchdog);
+process.exit(status);
 PREFLIGHT
 if [ "$preflight_status" != 0 ]; then
-  [ "$preflight_status" != 2 ] || COPY_REFUSED=1
+  if [ "$preflight_status" = 2 ] && grep -q '^Result: refused' "$STAGE/preflight.log"; then COPY_REFUSED=1; fi
   exit "$preflight_status"
 fi
+ACTIVE_CONTAINER=""
 required="$(sed -n 's/^migrate-db: required local bytes //p' "$STAGE/preflight.log")"
 [[ "$required" =~ ^[0-9]+$ ]] || die 'preflight did not report disk-space requirement'
-df -Pk . | awk -v required="$required" 'NR == 2 {exit !($4 * 1024 >= required)}' ||
+mkdir -p backups
+df -Pk backups | awk -v required="$required" 'NR == 2 {exit !($4 * 1024 >= required)}' ||
   die 'backup filesystem needs source size plus 20 percent (at least 64 MiB extra)'
 if [ -n "$TARGET_VOLUME" ]; then
   GACHIPAD_REQUIRED_BYTES="$required" docker run --rm --pull never --network none --read-only \
@@ -330,22 +392,32 @@ if [ -n "$TARGET_VOLUME" ]; then
 fi
 STOPPED=1
 stop_writes || die 'writers did not stop cleanly; migration cancelled'
+TARGET_STARTED=1
+case "$TO" in
+  postgres) migration_run docker compose --env-file "$STAGE/.env" up -d --pull never --wait --wait-timeout 120 postgres ;;
+  mongodb)
+    migration_run docker compose --env-file "$STAGE/.env" up -d --pull never --wait --wait-timeout 120 mongo
+    ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-users"
+    migration_run docker compose --env-file "$STAGE/.env" run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T mongo-users ;;
+esac
 echo "migrate-db: backing up quiescent $SOURCE before copying to $TO."
 database_backup ./backups || die 'source backup failed; migration cancelled'
 
 echo "migrate-db: copying offline; records expiring within $WINDOW minutes are skipped; deadline $((WINDOW - 5)) minutes."
+ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-copy"
 COPY_STARTED=1
 copy_status=0
 GACHIPAD_COPY_FROM="$SOURCE_URL" GACHIPAD_COPY_TO="$TARGET_CONNECTION" GACHIPAD_COPY_WINDOW_MINUTES="$WINDOW" \
-  docker compose --env-file "$STAGE/.env" run --rm --no-deps --pull never -T \
-    -e GACHIPAD_COPY_FROM -e GACHIPAD_COPY_TO -e GACHIPAD_COPY_WINDOW_MINUTES -e NPM_CONFIG_UPDATE_NOTIFIER=false api npm run --silent copy-db | tee "$STAGE/copy.log" || copy_status=$?
+  migration_logged_run "$STAGE/copy.log" docker compose --env-file "$STAGE/.env" run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T \
+    -e GACHIPAD_COPY_FROM -e GACHIPAD_COPY_TO -e GACHIPAD_COPY_WINDOW_MINUTES -e NPM_CONFIG_UPDATE_NOTIFIER=false api npm run --silent copy-db || copy_status=$?
 if grep -q '^Result: failed.*; nothing was copied\.$' "$STAGE/copy.log"; then COPY_UNWRITTEN=1; fi
-if [ "$copy_status" != 2 ]; then COPY_STARTED=1; else COPY_STARTED=0; COPY_REFUSED=1; fi
+if [ "$copy_status" = 2 ] && grep -q '^Result: refused' "$STAGE/copy.log"; then COPY_STARTED=0; COPY_REFUSED=1; fi
 if [ "$copy_status" != 0 ]; then
   echo "migrate-db: copy exited $copy_status; configuration will be restored." >&2
   exit "$copy_status"
 fi
 
+ACTIVE_CONTAINER=""
 # Publish the target env atomically and marker under the same install lock; EXIT restores both.
 cp -p "$STAGE/.env" .env.migrate-next
 mv .env.migrate-next .env
