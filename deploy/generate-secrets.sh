@@ -159,7 +159,7 @@ if [ -n "$database_url" ]; then
 else
   if [ "$pin_mongo" = 1 ]; then
     if [ -n "$(tmp_get GACHIPAD_DB)" ] && [ "$(tmp_get GACHIPAD_DB)" != mongodb ]; then
-      echo "generate-secrets: ignoring the template database default; keeping the existing MongoDB backend."
+      echo "generate-secrets: GACHIPAD_DB=$(tmp_get GACHIPAD_DB) in this env file is ignored; keeping the existing MongoDB backend; $migration_hint"
     fi
     db=mongodb
   else db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"; fi

@@ -118,7 +118,7 @@ cp generate-secrets.sh .env.example choices/staged/
 cp choices/live/.env choices/staged/.env
 printf 'GACHIPAD_DB=sqlite\n' >>choices/staged/.env
 (cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" ./generate-secrets.sh >pin.log 2>&1)
-grep -q 'ignoring the template database default' choices/staged/pin.log
+grep -q 'in this env file is ignored' choices/staged/pin.log
 if grep -q 'refused' choices/staged/pin.log; then exit 1; fi
 grep -qx 'GACHIPAD_DB=mongodb' choices/staged/.env
 grep -qx 'COMPOSE_PROFILES=mdns,mongodb' choices/staged/.env

@@ -237,7 +237,7 @@ check_migration_data() {
   call "/api/uploads/$UPLOAD" >"$WORK/migration-upload-after"
   cmp "$WORK/migration-upload-before" "$WORK/migration-upload-after" || fail 'migration lost upload bytes'
 }
-in_install ./migrate-db.sh --to sqlite --yes
+in_install ./migrate-db.sh --to sqlite --window-minutes 20 --yes
 [ "$(cat "$INSTALL/state/database-kind")" = sqlite ] || fail 'MongoDB to SQLite marker missing'
 check_migration_data
 docker volume inspect "${PROJECT}_mongo-data" >/dev/null
@@ -281,19 +281,21 @@ if in_install ./migrate-db.sh --to mongodb --yes >"$WORK/migration-refused.log" 
   fail 'migration into nonempty MongoDB succeeded'
 else status=$?; fi
 [ "$status" = 2 ] || fail 'nonempty destination refusal lost exit 2'
-grep -q 'Result: refused' "$WORK/migration-refused.log" || fail 'real copy tool did not refuse'
+grep -q 'Result: refused' "$WORK/migration-refused.log" || fail 'preflight did not refuse'
+grep -q 'destination was not modified: refused' "$INSTALL/state/migrate-db.log" || fail 'safe refusal guidance missing'
+! grep -q 'inspect and clear' "$WORK/migration-refused.log" || fail 'refusal incorrectly requests destination clearing'
 cmp "$INSTALL/.env" "$WORK/migration-before.env" || fail 'refusal changed source env'
 docker volume inspect "${PROJECT}_mongo-data" >/dev/null
 check_migration_data
-echo 'PASS: real nonempty destination refusal returns 2 and retains both backends and share/upload'
+echo 'PASS: real nonempty destination preflight refusal returns 2 and retains both backends and share/upload'
 # Old volumes retained by migration must not prevent later normal updates.
 in_install ./upgrade.sh "$NEXT"
 check_migration_data
-in_install ./migrate-db.sh --to external --database-url "$external_url" --yes
+DATABASE_URL="$external_url" in_install ./migrate-db.sh --to external --yes
 [ "$(cat "$INSTALL/state/database-kind")" = external ] || fail 'PostgreSQL to external marker missing'
 check_migration_data
 docker volume inspect "${PROJECT}_postgres-data" >/dev/null
-if in_install ./migrate-db.sh --to external --database-url "$external_url" --yes >"$WORK/migration-identical.log" 2>&1; then
+if DATABASE_URL="$external_url" in_install ./migrate-db.sh --to external --yes >"$WORK/migration-identical.log" 2>&1; then
   fail 'identical external migration succeeded'
 fi
 grep -q 'URLs are identical' "$WORK/migration-identical.log" || fail 'identical external refusal missing'

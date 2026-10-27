@@ -93,7 +93,7 @@ database_volume_nonempty() {
   registry="${registry:-$(env_get GACHIPAD_REGISTRY ghcr.io/kim0040)}"
   version="$(cat VERSION 2>/dev/null || env_get GACHIPAD_VERSION)"
   image="$registry/gachipad-api:$version"
-  result="$(GACHIPAD_PROBE_SQLITE_URL="$url" docker run --rm --pull never --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" -e GACHIPAD_PROBE_SQLITE_URL \
+  result="$(GACHIPAD_PROBE_SQLITE_URL="$url" docker run --rm --pull never --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" -e GACHIPAD_PROBE_SQLITE_URL \
     --entrypoint node "$image" -e '
       const { readdirSync, existsSync } = require("node:fs");
       const url = process.env.GACHIPAD_PROBE_SQLITE_URL ?? "";
@@ -106,6 +106,25 @@ database_volume_nonempty() {
       process.stdout.write(nonempty ? "nonempty" : "empty");
     ' "$kind" 2>/dev/null)" || die "cannot inspect existing database volume $volume; refusing to change the database backend"
   [ "$result" = nonempty ]
+}
+
+# A migration snapshot is different from update.sh's rollback directory. Never delete the
+# transaction until the saved backend is healthy; a hard crash can interrupt the env/marker pair.
+migration_recovery_hint() {
+  local stage="${1:-$(sed -n 's/^snapshot=//p' state/transaction 2>/dev/null | head -n1)}"
+  echo 'migrate-db: first clear shell overrides: unset DATABASE_URL GACHIPAD_DB COMPOSE_PROFILES GACHIPAD_DATABASE_URL'
+  echo 'migrate-db: keep writers stopped: docker compose stop caddy api collab'
+  if [[ "$stage" =~ ^\.env\.migrate-db\.[A-Za-z0-9]+$ ]] && [ -f "$stage/original.env" ]; then
+    printf 'migrate-db: restore configuration: cp -p %q/original.env .env\n' "$stage"
+    if [ -f "$stage/original.kind" ]; then
+      printf 'migrate-db: restore marker: cp -p %q/original.kind state/database-kind\n' "$stage"
+    else echo 'migrate-db: original had no marker: rm -f state/database-kind'; fi
+    echo 'migrate-db: restart the saved backend and check shares/uploads: docker compose up -d --pull never --wait'
+    printf 'migrate-db: only after recovery succeeds: rm -rf -- %q state/transaction\n' "$stage"
+  else
+    echo 'migrate-db: locate the private .env.migrate-db.*/original.env snapshot; restore it and its original.kind (or remove the marker if originally absent), restart the saved backend and check shares/uploads before removing the snapshot and state/transaction.'
+  fi
+  echo 'migrate-db: inspect any destination separately; retained data may include writes accepted before rollback. Verify stale lock ownership before removing state/install.lock.d.'
 }
 
 database_migration_hint() {
@@ -159,7 +178,7 @@ install_lock() {
   fi
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$path"
-    flock -n 9 || die "another update, upgrade, backup or restore is running"
+    flock -n 9 || die "another update, upgrade, backup, restore or migration is running"
     GACHIPAD_LOCK_KIND=flock
   else
     GACHIPAD_LOCK_KIND="mkdir"
@@ -327,11 +346,11 @@ database_start() {
   local timeout="${1:-120}"
   case "$(database_kind)" in
     mongodb)
-      docker compose up -d --wait --wait-timeout "$timeout" mongo valkey &&
+      docker compose up -d --pull never --wait --wait-timeout "$timeout" mongo valkey &&
         docker compose run --rm --no-deps --pull never -T mongo-users
       ;;
-    postgres) docker compose up -d --wait --wait-timeout "$timeout" postgres valkey ;;
-    sqlite | external) docker compose up -d --wait --wait-timeout "$timeout" valkey ;;
+    postgres) docker compose up -d --pull never --wait --wait-timeout "$timeout" postgres valkey ;;
+    sqlite | external) docker compose up -d --pull never --wait --wait-timeout "$timeout" valkey ;;
   esac
 }
 
@@ -346,14 +365,14 @@ sqlite_backup() (
   docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     import { createReadStream, mkdtempSync, rmSync, readdirSync, statSync, statfsSync } from "node:fs";
-    import { dirname, join } from "node:path";
+    import { basename, dirname, join } from "node:path";
     import { pipeline } from "node:stream/promises";
     const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
     const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
     const dataDirectory = dirname(source);
     for (const name of readdirSync(dataDirectory)) {
-      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name.endsWith(".restore"))
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name === `${basename(source)}.restore`)
         rmSync(join(dataDirectory, name), { recursive: true, force: true });
     }
     const bytes = BigInt(statSync(source).size);
@@ -403,13 +422,13 @@ sqlite_validate() {
     import { DatabaseSync } from "node:sqlite";
     import { createWriteStream, mkdtempSync, openSync, readSync, closeSync, rmSync, readdirSync, statfsSync } from "node:fs";
     import { pipeline } from "node:stream/promises";
-    import { dirname, join } from "node:path";
+    import { basename, dirname, join } from "node:path";
     const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
     const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
     const dataDirectory = dirname(source);
     for (const name of readdirSync(dataDirectory)) {
-      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name.endsWith(".restore"))
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name === `${basename(source)}.restore`)
         rmSync(join(dataDirectory, name), { recursive: true, force: true });
     }
     const bytes = BigInt(process.env.GACHIPAD_SQLITE_BYTES);
@@ -448,10 +467,10 @@ sqlite_restore() {
     const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
     const destination = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
-    import { dirname, join } from "node:path";
+    import { basename, dirname, join } from "node:path";
     const dataDirectory = dirname(destination);
     for (const name of readdirSync(dataDirectory)) {
-      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name.endsWith(".restore"))
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name === `${basename(destination)}.restore`)
         rmSync(join(dataDirectory, name), { recursive: true, force: true });
     }
     const bytes = BigInt(process.env.GACHIPAD_SQLITE_BYTES);

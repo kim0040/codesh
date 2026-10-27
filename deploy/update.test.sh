@@ -666,6 +666,23 @@ grep -q 'stop\|pull' "$DOCKER_CALLS" && fail "unfinished transaction mutated sta
 rm "$I/state/transaction"
 ok "unfinished marker blocks rerun and preserves previous snapshot and status"
 
+step "migration marker gives snapshot recovery rather than update rollback instructions"
+mkdir "$I/.env.migrate-db.recovery"
+cp -p "$I/.env" "$I/.env.migrate-db.recovery/original.env"
+printf 'mongodb\n' >"$I/.env.migrate-db.recovery/original.kind"
+printf 'database migration\nsnapshot=.env.migrate-db.recovery\n' >"$I/state/transaction"
+cp -p "$I/state/transaction" "$F/migration-marker-before"
+: >"$DOCKER_CALLS"
+run ./update.sh --yes && fail "unfinished migration accepted"
+grep -q 'cp -p .env.migrate-db.recovery/original.env .env' "$F/run.log" || fail "migration env recipe missing"
+grep -q 'cp -p .env.migrate-db.recovery/original.kind state/database-kind' "$F/run.log" || fail "migration marker recipe missing"
+grep -q 'only after recovery succeeds' "$F/run.log" || fail "migration cleanup order missing"
+if grep -q 'OPERATIONS 15.7' "$F/run.log"; then fail "migration directed to update rollback"; fi
+cmp "$I/state/transaction" "$F/migration-marker-before" || fail "migration marker changed"
+if grep -q 'stop\|pull' "$DOCKER_CALLS"; then fail "migration marker mutated stack"; fi
+rm -rf "$I/.env.migrate-db.recovery" "$I/state/transaction"
+ok "unfinished migration retains marker and prints exact snapshot recovery recipe"
+
 step "offline release SHA256SUMS and a shared lock for every entry point"
 # Make an offline archive whose scripts are the same transaction engine.
 offline="$F/stage/gachipad-1.1.0"
@@ -852,7 +869,7 @@ SQLITE_DATA="$sqlite_fixture/data" node --input-type=module -e '
     DATABASE_URL="sqlite:$SQLITE_DATA/custom.db" node --import "$sqlite_fixture/check-files.mjs" --input-type=module -e "$1"
   }
   mkdir "$SQLITE_DATA/.gachipad-backup-stale" "$SQLITE_DATA/.gachipad-validate-stale"
-  touch "$SQLITE_DATA/custom.db.restore"
+  touch "$SQLITE_DATA/custom.db.restore" "$SQLITE_DATA/unrelated.restore"
   sqlite_backup backups >snapshot.log
   [ ! -e "$SQLITE_DATA/.gachipad-backup-stale" ] && [ ! -e "$SQLITE_DATA/.gachipad-validate-stale" ]
   [ ! -e "$SQLITE_DATA/custom.db.restore" ]
@@ -867,6 +884,8 @@ SQLITE_DATA="$sqlite_fixture/data" node --input-type=module -e '
   if SQLITE_FAIL_WRITE=1 sqlite_validate "$archive"; then exit 1; fi
   gzip -c </dev/null >empty.gz
   if sqlite_validate empty.gz; then exit 1; fi
+  [ -f "$SQLITE_DATA/unrelated.restore" ]
+  rm "$SQLITE_DATA/unrelated.restore"
   [ -z "$(find "$SQLITE_DATA" -name '.gachipad-*' -o -name '*.restore')" ]
 ) >"$F/sqlite-files.log" 2>&1 || { cat "$F/sqlite-files.log" >&2; fail "SQLite data-volume temporary file checks"; }
 ok "SQLite sibling snapshots, streamed output, validation/error cleanup and WAL removal before rename"

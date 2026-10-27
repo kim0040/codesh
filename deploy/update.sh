@@ -699,6 +699,10 @@ main() {
 
   if [ -e "$MARKER" ]; then
     RECORDED=1
+    if grep -qx 'database migration' "$MARKER"; then
+      migration_recovery_hint ""
+      die "unfinished database migration in $MARKER; follow the snapshot recovery commands above"
+    fi
     die "unfinished transaction in $MARKER; keep rollback and backups, recover manually per OPERATIONS 15.7 before removing the marker"
   fi
 

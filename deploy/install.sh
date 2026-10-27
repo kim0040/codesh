@@ -137,13 +137,13 @@ verify_bundle .
 
 [ -f images.tar ] || die "images.tar is missing: run this from the extracted bundle"
 VERSION="$(cat VERSION)"
-install_lock
 ENV_SNAPSHOT=""
 ENV_SNAPSHOT_READY=0
 ENV_READY=0
 install_cleanup() {
   local status=$? restored=1
-  trap - EXIT HUP INT TERM
+  trap - EXIT
+  trap '' HUP INT TERM PIPE
   if [ "$ENV_READY" = 0 ] && [ "$ENV_SNAPSHOT_READY" = 1 ]; then
     if [ "$FRESH" = 0 ]; then
       cp -p "$ENV_SNAPSHOT" .env.install-recovery && mv .env.install-recovery .env || restored=0
@@ -163,6 +163,7 @@ trap install_cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+install_lock
 
 # legacy codesh name (1.0.x); remove in 2.0
 # A 1.0.x installation keeps its data in codesh_* volumes. A folder without its .env would start an
