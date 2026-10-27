@@ -4,6 +4,8 @@
 # Run through verify-update.sh --rename, on the box only. Every Docker resource is isolated.
 set -euo pipefail
 ROOT="$(pwd)"
+# shellcheck source=verify-lib.sh
+. "$ROOT/deploy/verify-lib.sh"
 WORK="${VERIFY_DIR:-/data/workspace/gp-dbdeploy-rename}"
 PROJECT="${VERIFY_PROJECT:-gp-dbdeploy-rename}"
 P="${VERIFY_HTTP_PORT:-18080}"
@@ -31,9 +33,24 @@ mkdir -p "$WORK" "$INSTALL" "$WORK/registry"
 exec > >(tee "$REPORT") 2>&1
 
 in_install() { (cd "$INSTALL" && COMPOSE_PROJECT_NAME="$PROJECT" "$@"); }
+# Published 1.0.1 loads these unused platform images beside the current tagged bases.
+# Only these published image IDs may be reclaimed, and never while tagged or in use.
+cleanup_legacy_layers() {
+  local image
+  for image in \
+    sha256:01f1fb6bf474533926d54689d63aaf150d8e16c1d1c05b44113c1c8068162c50 \
+    sha256:e88e49eb39dd0c0377ce8b13369dc8a3a3c4e9b4b272ea70d8581c2c02b913e1; do
+    docker image inspect "$image" >/dev/null 2>&1 || continue
+    [ -z "$(docker ps -aq --filter "ancestor=$image")" ] || continue
+    [ "$(docker image inspect --format '{{len .RepoTags}}' "$image")" = 0 ] || continue
+    docker image rm "$image" >/dev/null 2>&1 || true
+  done
+}
 prepare_old_bundle_images() {
   local name
   docker load -i "$INSTALL/images.tar" >/dev/null
+  cleanup_legacy_layers
+  verification_mongo_volume "$PROJECT" "$WORK"
   for name in api collab web; do
     docker tag "ghcr.io/kim0040/codesh-$name:1.0.1" "$REG/codesh-$name:1.0.1"
   done
@@ -43,6 +60,23 @@ cleanup() {
   local status=$? image saved existing id title
   trap - EXIT
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
+  if [ "$status" != 0 ] && [ -f "$INSTALL/.env" ]; then
+    df -h / /data
+    for id in $(in_install docker compose ps -aq api collab 2>/dev/null); do
+      docker inspect --format 'failure-state {{.Name}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} status={{.State.Status}}' "$id" || true
+    done
+    in_install docker compose logs --no-color --tail 40 api collab 2>&1 | python3 -c '
+import pathlib, re, sys
+text = sys.stdin.read()
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    key, sep, value = line.partition("=")
+    if sep and (key.endswith(("_SECRET", "_TOKEN", "_PASSWORD")) or key in ("DATABASE_URL", "GACHIPAD_DATABASE_URL", "MONGO_URL")):
+        value = value.strip().strip(chr(39) + chr(34))
+        if value: text = text.replace(value, "[redacted]")
+text = re.sub(r"(?:sqlite|postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?):\S+", "[database-url]", text)
+sys.stdout.write(text)
+' "$INSTALL/.env" || true
+  fi
   if [ -f "$INSTALL/docker-compose.yml" ]; then
     in_install docker compose down -v --remove-orphans >/dev/null 2>&1 || true
   fi
@@ -52,7 +86,7 @@ cleanup() {
   if [ "$BUILDER_STARTED" = 1 ]; then docker buildx rm "$PROJECT" >/dev/null 2>&1 || true; fi
   if [ "$BUILDER_VOLUME_STARTED" = 1 ]; then docker volume rm "$BUILDER_VOLUME" >/dev/null 2>&1 || true; fi
   if [ "$REGISTRY_STARTED" = 1 ]; then
-    docker run --rm --pull never -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry /w/buildkit
+    docker run --rm --pull never -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry /w/buildkit /w/volume-data
   fi
   docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -F "$REG/" | xargs -r docker image rm -f >/dev/null 2>&1 || true
   for image in "${OLD_IMAGES[@]}"; do
@@ -69,6 +103,7 @@ cleanup() {
     title="$(docker image inspect "$id" --format '{{index .Config.Labels "org.opencontainers.image.title"}}')"
     case "$title" in codesh-api | codesh-collab | codesh-web) docker image rm -f "$id" >/dev/null 2>&1 || true ;; esac
   done
+  cleanup_legacy_layers
   rm -rf "$WORK"
   echo "cleanup: isolated stack, volumes, registry, branch image tags and working files removed (status=$status)"
   exit "$status"
@@ -298,6 +333,7 @@ cp "$INSTALL/.env.example" "$INSTALL/.env"
 for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off GACHIPAD_DB=mongodb; do
   sed -i "s|^${setting%%=*}=.*|$setting|" "$INSTALL/.env"
 done
+verification_mongo_volume "$PROJECT" "$WORK"
 in_install ./install.sh
 ! grep -qi codesh "$INSTALL/.env" || fail 'legacy name in fresh .env'
 in_install docker compose config >"$WORK/fresh-config"

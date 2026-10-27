@@ -3,6 +3,8 @@
 # Resources belong to the caller's gp-dbdeploy-* project; no shared server is modified except
 # the explicitly owned temporary PostgreSQL database, which is dropped on exit.
 set -euo pipefail
+# shellcheck source=verify-lib.sh
+. "$(dirname "$0")/verify-lib.sh"
 BASE="$(realpath "${1:?baseline bundle}")"
 NEXT="$(realpath "${2:?next bundle}")"
 WORK="${3:?owned verification directory}"
@@ -30,6 +32,7 @@ cleanup_stack() {
     done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' | awk -v prefix="$registry/gachipad-" 'index($0, prefix) == 1')
     ;;
   esac
+  verification_cleanup_mongo_dirs "$PROJECT" "$WORK" || true
   rm -rf "$INSTALL"
 }
 cleanup() {
@@ -51,6 +54,7 @@ check_share() {
   unzip -p "$WORK/selection.zip" | grep -q 'database selection fixture' || fail 'share content missing'
 }
 prepare() {
+  verification_mongo_volume "$PROJECT" "$WORK"
   mkdir -p "$INSTALL"
   tar xzf "$BASE" -C "$INSTALL" --strip-components=1
   cp "$INSTALL/.env.example" "$INSTALL/.env"

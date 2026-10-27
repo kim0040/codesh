@@ -206,7 +206,8 @@ sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP
 (cd "$I" && ./generate-secrets.sh .env >/dev/null)
 envv() { sed -n "s/^$1=//p" "$I/.env" | tail -n 1; }
 status() { cat "$I/state/update.json"; }
-run() { (cd "$I" && "$@") >"$F/run.log" 2>&1; }
+# Wait for the updater's process-substitution logger to close before reading its output.
+run() { (cd "$I" && "$@") 2>&1 | cat >"$F/run.log"; }
 calls() { cat "$DOCKER_CALLS" 2>/dev/null || true; }
 
 step "--check: newest of this major and the new major, nothing changes"
