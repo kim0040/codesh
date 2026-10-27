@@ -257,11 +257,12 @@ echo 'PASS: same volumes, share content, guest ownership, session, profile/ident
 in_install bash -c '
   . ./lib.sh
   verify_archive "$1"
-  tar -xOf "$1" "gachipad-$2/migrate-db.sh" >migrate-db.sh.new
+  bundle_root="$(tar -tzf "$1" | cut -d / -f 1 | sort -u)"
+  tar -xOf "$1" "$bundle_root/migrate-db.sh" >migrate-db.sh.new
   chmod 700 migrate-db.sh.new
   mv migrate-db.sh.new migrate-db.sh
   ./migrate-db.sh --help >/dev/null
-' _ "$WORK/source/deploy/dist/gachipad-deploy-$TARGET.tar.gz" "$TARGET"
+' _ "$WORK/source/deploy/dist/gachipad-deploy-$TARGET.tar.gz"
 echo 'PASS: one-time verified-bundle extraction supplies migrate-db.sh after the unmodified 1.0.1 updater'
 
 echo 'offline: original 1.0.1 upgrader, with bundle images from a different registry'
