@@ -156,24 +156,85 @@ async function sqlAll(url: string, sql: string) {
   }
 }
 
-/** Tables and their columns as sql/schema.ts creates them. */
-async function sqliteSchema(url: string): Promise<Map<string, string[]>> {
-  const schema = new Map<string, string[]>();
+/** Tables and their columns as sql/schema.ts creates them, each with its default as SQL text. */
+async function sqliteSchema(
+  url: string,
+): Promise<Map<string, Array<{ name: string; default: string | null }>>> {
+  const schema = new Map<string, Array<{ name: string; default: string | null }>>();
   for (const { name } of await sqlAll(
     url,
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
   ))
     schema.set(
       String(name),
-      (await sqlAll(url, `PRAGMA table_info(${String(name)})`)).map((column) =>
-        String(column.name),
-      ),
+      (await sqlAll(url, `PRAGMA table_info(${String(name)})`)).map((column) => ({
+        name: String(column.name),
+        default: column.dflt_value == null ? null : String(column.dflt_value),
+      })),
     );
   return schema;
 }
 
 /** Tables the copy leaves out on purpose. */
 const NOT_COPIED = ["diagnostics", "schema_version"];
+/**
+ * Every column the transfer mappers in sql.ts carry, per copied table, written out independently
+ * of sql/schema.ts: a new column fails the test until this list and the mappers are updated. The
+ * importer recomputes shares.title_search and upload_capacity.used_bytes.
+ */
+const TRANSFERRED: Record<string, string[]> = {
+  shares: [
+    "id",
+    "title",
+    "title_search",
+    "language",
+    "owner_id",
+    "lab_id",
+    "fork_of",
+    "created_at",
+    "updated_at",
+    "last_active_at",
+    "expires_at",
+    "saved",
+    "access_json",
+    "join_code",
+    "locked",
+    "size_bytes",
+    "preview",
+    "preview_at",
+  ],
+  share_saved_by: ["share_id", "client_id", "position"],
+  share_bans: ["share_id", "client_id", "position"],
+  share_updates: ["share_id", "seq", "data", "at"],
+  share_snapshots: ["share_id", "kind", "seq", "at", "state"],
+  uploads: [
+    "id",
+    "name",
+    "size",
+    "content_type",
+    "owner_id",
+    "share_id",
+    "expires_at",
+    "created_at",
+    "complete",
+  ],
+  upload_chunks: ["upload_id", "chunk_no", "data"],
+  upload_capacity: ["id", "used_bytes"],
+  labs: [
+    "id",
+    "title",
+    "owner_id",
+    "join_code",
+    "template_share_id",
+    "locked",
+    "students_json",
+    "created_at",
+    "expires_at",
+  ],
+  share_labels: ["client_id", "share_id", "folder", "tags_json", "updated_at"],
+  settings: ["id", "value_json"],
+  audit: ["id", "at", "actor", "ip", "action", "share_id", "detail_json"],
+};
 /** Columns the copy rewrites on purpose: the write lease of an upload that is already complete. */
 const REWRITTEN: Record<string, string[]> = { uploads: ["lease_until"] };
 
@@ -197,19 +258,29 @@ describe("transfer schema coverage", () => {
     ).toEqual(SQL_SCHEMA_VERSIONS);
 
     const copied = [...schema.keys()].filter((table) => !NOT_COPIED.includes(table));
-    // A column the fixture leaves empty could be dropped unnoticed: extend the fixture first.
+    expect(Object.keys(TRANSFERRED).sort(), "copied tables").toEqual(copied);
+    for (const table of copied)
+      expect(
+        (schema.get(table) ?? []).map((column) => column.name).sort(),
+        `${table} columns`,
+      ).toEqual([...(TRANSFERRED[table] ?? []), ...(REWRITTEN[table] ?? [])].sort());
+    // A column the mappers leave out matches when both sides fall back to its default (or null),
+    // so the fixture must hold another value in it: extend the fixture first.
     for (const table of copied)
       for (const column of schema.get(table) ?? [])
         expect(
-          await sqlAll(source, `SELECT 1 AS present FROM ${table} WHERE ${column} IS NOT NULL`),
-          `${table}.${column} is filled`,
+          await sqlAll(
+            source,
+            `SELECT 1 AS present FROM ${table} WHERE ${column.name} IS NOT ${column.default ?? "NULL"} LIMIT 1`,
+          ),
+          `${table}.${column.name} holds a value other than its default`,
         ).not.toEqual([]);
 
     await copyDatabase(source, destination);
     for (const table of copied) {
-      const columns = (schema.get(table) ?? []).filter(
-        (column) => !REWRITTEN[table]?.includes(column),
-      );
+      const columns = (schema.get(table) ?? [])
+        .map((column) => column.name)
+        .filter((column) => !REWRITTEN[table]?.includes(column));
       const read = (url: string) =>
         sqlAll(url, `SELECT ${columns.join(",")} FROM ${table} ORDER BY ${columns.join(",")}`);
       expect(await read(destination), `${table} rows`).toEqual(await read(source));

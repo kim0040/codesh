@@ -1,7 +1,11 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { type AddressInfo, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { type AuditRecord, defaultSettings, type ShareRecord } from "@gachipad/shared";
 import { type MongoClient, Timestamp } from "mongodb";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,12 +13,14 @@ import { createMemoryStores } from "../memory.js";
 import { type OpenedStores, openStores } from "../open.js";
 import { openSqlDriver } from "../sql/driver.js";
 import {
+  CLOSE_TIMEOUT_MS,
   CopyDeadlineError,
   CopyFailureError,
   CopyRefusedError,
   CopyVerificationError,
   copyDatabase,
   type MongoIdentity,
+  PG_QUERY_TIMEOUT_MS,
   sameMongoDatabase,
 } from "./copy.js";
 import { registerTransferBackend, transferBackend } from "./registry.js";
@@ -334,6 +340,41 @@ async function sqlAll(url: string, sql: string) {
   } finally {
     await driver.close();
   }
+}
+
+/**
+ * A PostgreSQL server that accepts every connection and then never answers a query, like one
+ * whose replies stopped arriving while its connections stay open.
+ */
+async function stalledPostgres() {
+  const sockets = new Set<Socket>();
+  let queries = 0;
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    let started = false;
+    socket.on("data", () => {
+      if (started) {
+        queries++;
+        return;
+      }
+      started = true;
+      // AuthenticationOk, then ReadyForQuery (idle).
+      socket.write(Buffer.from([0x52, 0, 0, 0, 8, 0, 0, 0, 0, 0x5a, 0, 0, 0, 5, 0x49]));
+    });
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => undefined);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `postgres://gp@127.0.0.1:${port}/gp`,
+    queries: () => queries,
+    connections: () => sockets.size,
+    close: () => {
+      for (const socket of sockets) socket.destroy();
+      return new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
 async function readStream(stream: NodeJS.ReadableStream): Promise<Uint8Array> {
@@ -1297,8 +1338,6 @@ describe("database transfer", () => {
       ["sqlite::memory:", `sqlite:${target}`],
       [file, "sqlite://:memory:"],
       [file, "sqlite:"],
-      [file, "sqlite:file::memory:?cache=shared"],
-      [file, `sqlite:file:${target}?mode=memory`],
     ] as const)
       await expect(copyDatabase(from, to)).rejects.toThrow(
         new CopyRefusedError("Source and destination must be persistent databases"),
@@ -1306,31 +1345,91 @@ describe("database transfer", () => {
     expect(existsSync(target)).toBe(false);
   });
 
-  it("applies MySQL query parameters that change the server or the database", async () => {
+  it("refuses SQLite file: URIs as source or destination before opening either", async () => {
+    const dir = await tempDir();
+    const kept = join(dir, "kept.sqlite");
+    await (await openStores(`sqlite:${kept}`)).close();
+    const target = join(dir, "never.sqlite");
     const neverOpen = async (): Promise<OpenedStores> => {
       throw new Error("must not open");
     };
     for (const [from, to] of [
-      ["mysql://root@db1/gp", "mysql://root@db9/other?host=db1&database=gp"],
-      ["mysql://root@db1:3307/gp", "mariadb://root@db1/gp?port=3307"],
-      ["mysql://root@db1/gp", "mysql://root@db1/other?database=%22gp%22"],
-      ["mysql://root@db1/gp?database=a&database=gp", "mysql://root@db1/gp"],
-    ] as const)
-      await expect(copyDatabase(from, to, { openStores: neverOpen })).rejects.toThrow(
-        new CopyRefusedError("Source and destination are the same"),
-      );
-    for (const [from, to] of [
-      ["mysql://root@db1/gp", "mysql://root@db1/gp?database=other"],
-      ["mysql://root@db1/gp", "mysql://root@db1/gp?host=db2"],
-      ["mysql://root@db1/gp?port=3307", "mysql://root@db1/gp"],
+      // No path: a temporary database. Escaped options: mode=memory and vfs=memdb.
+      [`sqlite:${kept}`, "sqlite:file:"],
+      [`sqlite:${kept}`, `sqlite:file:${target}?mode=%6demory`],
+      [`sqlite:${kept}`, `sqlite:file:${target}?%76fs=memdb`],
+      [`sqlite:${kept}`, "sqlite:file::memory:?cache=shared"],
+      // Plain file: paths, in any case, on either side.
+      [`sqlite:${kept}`, `sqlite:file:${target}`],
+      [`sqlite:${kept}`, `sqlite:FILE:${target}`],
+      [`sqlite:file:${kept}`, `sqlite:${target}`],
+      [`sqlite:file://${kept}?mode=ro`, `sqlite:${target}`],
     ] as const) {
-      const source = createMemoryStores();
-      await source.shares.create(sampleShare());
-      const result = await copyDatabase(from, to, {
-        openStores: openMemory({ [from]: source, [to]: createMemoryStores() }),
-      });
-      expect(result.counts.shares).toBe(1);
+      const refused = new CopyRefusedError(
+        "SQLite databases must be plain file paths, not file: URIs",
+      );
+      await expect(copyDatabase(from, to)).rejects.toThrow(refused);
+      await expect(copyDatabase(from, to, { openStores: neverOpen })).rejects.toThrow(refused);
     }
+    expect(existsSync(target)).toBe(false);
+    expect((await readdir(dir)).sort()).toEqual(["kept.sqlite"]);
+  });
+
+  it("identifies MySQL databases the way mysql2 parses their URLs", async () => {
+    // The pinned driver's own parser, which the copy's identity must agree with.
+    const { ConnectionConfig } = createRequire(import.meta.url)("mysql2") as {
+      ConnectionConfig: new (options: {
+        uri: string;
+      }) => { host: string; port: number; socketPath?: unknown; database?: string };
+    };
+    const connectsTo = (url: string) => {
+      // As sql/driver.ts hands the URL to mysql2.
+      const config = new ConnectionConfig({
+        uri: new URL(url.replace(/^mariadb:/, "mysql:")).href,
+      });
+      return config.socketPath
+        ? `socket:${String(config.socketPath)}:${config.database}`
+        : `${config.host.toLowerCase()}:${config.port}:${config.database}`;
+    };
+    const urls = [
+      "mysql://root@db1/gp",
+      "mariadb://root@DB1:3306/gp",
+      // URL parts win over query parameters of the same name.
+      "mysql://root@db9/other?host=db1&database=gp",
+      "mysql://root@db1/other?database=%22gp%22",
+      "mysql://root@db1/gp?database=other",
+      "mysql://root@db1/gp?host=db2&port=3307",
+      "mysql://root@db1:3307/gp",
+      "mariadb://root@db1/gp?port=3307",
+      // Query-only keys take their first value, as JSON when it parses.
+      "mysql://root@db1/gp?socketPath=/run/a.sock&socketPath=/run/b.sock",
+      "mysql://root@db2/gp?socketPath=%22/run/a.sock%22",
+      "mysql://root@db1/gp?socketPath=/run/b.sock&socketPath=/run/a.sock",
+      "mysql://root@db1/gp?socketPath=null",
+      "mysql://root@db1/gp?socketPath=",
+      "mysql://root@[::1]/gp",
+      "mysql://root@[::1]:3306/gp",
+      "mysql:///gp",
+      "mysql://root@localhost/gp",
+    ];
+    let same = 0;
+    for (const from of urls)
+      for (const to of urls) {
+        if (from === to) continue;
+        const source = createMemoryStores();
+        await source.shares.create(sampleShare());
+        const outcome = await copyDatabase(from, to, {
+          openStores: openMemory({ [from]: source, [to]: createMemoryStores() }),
+        }).catch((caught: unknown) => caught);
+        if (connectsTo(from) === connectsTo(to)) {
+          same++;
+          expect(outcome, `${from} and ${to}`).toEqual(
+            new CopyRefusedError("Source and destination are the same"),
+          );
+        } else expect(outcome, `${from} and ${to}`).toMatchObject({ counts: { shares: 1 } });
+      }
+    // Both outcomes occur, so the comparison is not vacuous.
+    expect(same).toBeGreaterThan(10);
   });
 
   it("opens a SQL source as it is and refuses a missing or unknown schema version", async () => {
@@ -1366,5 +1465,156 @@ describe("database transfer", () => {
     await expect(copyDatabase(`sqlite:${missing}`, destination)).rejects.toThrow(refused);
     expect(existsSync(missing)).toBe(false);
     expect(existsSync(join(dir, "destination.sqlite"))).toBe(false);
+  });
+
+  it("reads a SQLite source without writing to it or changing its journal mode", async () => {
+    /** The source's bytes, its journal mode bytes and every file in its folder. */
+    const state = async (path: string) => {
+      const bytes = await readFile(path);
+      return {
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        journal: [bytes[18], bytes[19]],
+        files: (await readdir(dirname(path))).sort(),
+      };
+    };
+    const seeded = async (path: string, journal: "DELETE" | "WAL") => {
+      const opened = await openStores(`sqlite:${path}`);
+      await seed(opened.stores);
+      await opened.close();
+      const db = new DatabaseSync(path);
+      db.exec(`PRAGMA journal_mode=${journal}`);
+      db.close();
+      return state(path);
+    };
+    const destinations = await tempDir();
+    for (const journal of ["DELETE", "WAL"] as const) {
+      const path = join(await tempDir(), "source.sqlite");
+      const before = await seeded(path, journal);
+      expect(before.journal).toEqual(journal === "WAL" ? [2, 2] : [1, 1]);
+      expect(before.files).toEqual(["source.sqlite"]);
+      const destination = `sqlite:${join(destinations, `${journal}.sqlite`)}`;
+      // Success, then a refusal after the source was opened (the destination is no longer empty).
+      expect((await copyDatabase(`sqlite:${path}`, destination)).counts.shares).toBe(1);
+      expect(await state(path), journal).toEqual(before);
+      await expect(copyDatabase(`sqlite:${path}`, destination)).rejects.toThrow(
+        new CopyRefusedError("Destination is not empty"),
+      );
+      expect(await state(path), journal).toEqual(before);
+    }
+
+    // A schema version this code does not know: refused, the source unchanged.
+    const unknown = join(await tempDir(), "unknown.sqlite");
+    await seeded(unknown, "WAL");
+    await sqlRun(`sqlite:${unknown}`, "UPDATE schema_version SET version=2");
+    const db = new DatabaseSync(unknown);
+    db.exec("PRAGMA journal_mode=DELETE");
+    db.close();
+    const unknownBefore = await state(unknown);
+    await expect(
+      copyDatabase(`sqlite:${unknown}`, `sqlite:${join(destinations, "unknown.sqlite")}`),
+    ).rejects.toThrow(
+      new CopyRefusedError("SQL source schema version is missing or not supported"),
+    );
+    expect(await state(unknown)).toEqual(unknownBefore);
+
+    // A WAL-mode source still open elsewhere has -wal and -shm files, which reading it would write.
+    const busy = join(await tempDir(), "busy.sqlite");
+    await seeded(busy, "WAL");
+    const other = new DatabaseSync(busy);
+    try {
+      other.exec("PRAGMA journal_mode=WAL");
+      await expect(
+        copyDatabase(`sqlite:${busy}`, `sqlite:${join(destinations, "busy.sqlite")}`),
+      ).rejects.toThrow(
+        new CopyRefusedError(
+          "SQLite source is open elsewhere or was not closed cleanly: it has -wal or -shm files",
+        ),
+      );
+    } finally {
+      other.close();
+    }
+    expect(existsSync(join(destinations, "busy.sqlite"))).toBe(false);
+  });
+
+  it("fails when another connection opens a WAL-mode source during the copy", async () => {
+    const path = join(await tempDir(), "source.sqlite");
+    const opened = await openStores(`sqlite:${path}`);
+    await seed(opened.stores);
+    await opened.close();
+    const destination = join(await tempDir(), "destination.sqlite");
+    // Nothing locks the immutable source, so a service started meanwhile shows only by its files.
+    // It starts at the copy's first deadline check, once the destination exists.
+    let other: DatabaseSync | undefined;
+    const now = performance.now.bind(performance);
+    vi.spyOn(performance, "now").mockImplementation(() => {
+      if (!other && existsSync(destination)) {
+        other = new DatabaseSync(path);
+        other.exec("PRAGMA journal_mode=WAL");
+      }
+      return now();
+    });
+    try {
+      await expect(copyDatabase(`sqlite:${path}`, `sqlite:${destination}`)).rejects.toBeInstanceOf(
+        CopyVerificationError,
+      );
+      expect(other).toBeDefined();
+    } finally {
+      other?.close();
+    }
+  });
+
+  it("bounds a stalled SQL check and the close of its connection", async () => {
+    const server = await stalledPostgres();
+    const dir = await tempDir();
+    const source = `sqlite:${join(dir, "source.sqlite")}`;
+    const opened = await openStores(source);
+    await opened.stores.shares.create(sampleShare());
+    await opened.close();
+    const never = `sqlite:${join(dir, "never.sqlite")}`;
+    // A query_timeout of the URL's own keeps pg from dropping the stuck connection.
+    const kept = `${server.url}?query_timeout=86400000`;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      for (const [from, to, dropped] of [
+        // The source's schema check, then the destination's emptiness check, stall.
+        [server.url, never, true],
+        [source, server.url, true],
+        [kept, never, false],
+        [source, kept, false],
+      ] as const) {
+        const queries = server.queries();
+        let settled = false;
+        const outcome = copyDatabase(from, to)
+          .catch((caught: unknown) => caught)
+          .finally(() => {
+            settled = true;
+          });
+        while (server.queries() === queries) await new Promise((resolve) => setImmediate(resolve));
+        const connections = server.connections();
+        await vi.advanceTimersByTimeAsync(OPERATION_TIMEOUT_MS - 1);
+        expect(settled).toBe(false);
+        // The copy's timeout, then pg's query_timeout: pg ends the stuck connection by itself.
+        await vi.advanceTimersByTimeAsync(PG_QUERY_TIMEOUT_MS - OPERATION_TIMEOUT_MS + 1);
+        const waiting = performance.now();
+        while (
+          !(settled && server.connections() < connections) &&
+          performance.now() - waiting < 1_000
+        )
+          await new Promise((resolve) => setImmediate(resolve));
+        expect(settled, `${from} to ${to} settled before the close allowance`).toBe(dropped);
+        expect(server.connections()).toBe(dropped ? connections - 1 : connections);
+        // Otherwise the close is still pending, and its own bound ends the wait.
+        await vi.advanceTimersByTimeAsync(
+          OPERATION_TIMEOUT_MS + CLOSE_TIMEOUT_MS - PG_QUERY_TIMEOUT_MS,
+        );
+        expect(settled).toBe(true);
+        expect(await outcome).toMatchObject({ code: "ETIMEDOUT", destinationWritten: false });
+        expect(await outcome).toBeInstanceOf(CopyFailureError);
+      }
+      expect(existsSync(join(dir, "never.sqlite"))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      await server.close();
+    }
   });
 });

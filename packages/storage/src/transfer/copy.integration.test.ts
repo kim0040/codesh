@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -625,6 +625,18 @@ async function compareBoundary(
   ]);
 }
 
+/** A SQLite test database's SHA-256 and which of its -wal and -shm files exist. */
+async function sqliteFiles(name: string) {
+  const path = `/tmp/${name}.sqlite`;
+  return {
+    sha256: createHash("sha256")
+      .update(await readFile(path))
+      .digest("hex"),
+    wal: existsSync(`${path}-wal`),
+    shm: existsSync(`${path}-shm`),
+  };
+}
+
 /** A module for the CLI's NODE_OPTIONS, written to a temporary directory. */
 async function preloadModule(source: string): Promise<{ url: string; dir: string }> {
   const dir = await mkdtemp(join(tmpdir(), "gp-copy-preload-"));
@@ -686,6 +698,8 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
           const fixture = await seed(sourceDb.stores);
           await sourceDb.close();
           sourceDb = undefined;
+          // A SQLite source is read without writing to it or next to it.
+          const sqliteSource = pair.from === "sqlite" ? await sqliteFiles(sourceName) : undefined;
 
           if (pair.cli) {
             const { status, output } = runCli(sourceUrl, destinationUrl);
@@ -698,6 +712,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
             const result = await copyDatabase(sourceUrl, destinationUrl);
             expect(result.counts).toEqual(expectedCopyCounts);
           }
+          if (sqliteSource) expect(await sqliteFiles(sourceName)).toEqual(sqliteSource);
 
           sourceDb = await openStores(sourceUrl);
           destinationDb = await openStores(destinationUrl);
@@ -803,6 +818,25 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
           2,
           "Result: refused (Source and destination must be persistent databases).",
         ],
+        // SQLite file: URIs, which can name temporary or in-memory databases through escapes.
+        [
+          filled,
+          "sqlite:file:",
+          2,
+          "Result: refused (SQLite databases must be plain file paths, not file: URIs).",
+        ],
+        [
+          filled,
+          `sqlite:file:/tmp/${name}_uri.sqlite?mode=%6demory`,
+          2,
+          "Result: refused (SQLite databases must be plain file paths, not file: URIs).",
+        ],
+        [
+          `sqlite:file:/tmp/${name}_filled.sqlite`,
+          `sqlite:/tmp/${name}_uri.sqlite`,
+          2,
+          "Result: refused (SQLite databases must be plain file paths, not file: URIs).",
+        ],
         [
           mongo,
           `${mongo}${mongo.includes("?") ? "&" : "?"}appName=gp-copy-cli`,
@@ -827,12 +861,36 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         expect(run.output.trim().split("\n").at(-1)).toBe(result);
         expect(run.status).toBe(status);
         expect(run.output).toContain("Source must be quiescent");
-        expect(run.output).toContain("Copy window: 15 minutes.");
+        expect(run.output).toContain(
+          "Copy window: 15 minutes (GACHIPAD_COPY_WINDOW_MINUTES, 15 to 1440; unset or empty means 15).",
+        );
         expect(run.output).toContain("records that expired or expire within 15 minutes");
         expect(run.output).toContain("The copy must finish within 10 minutes.");
         expect(run.output).not.toContain("cli-secret");
         expect(run.output).not.toContain("/tmp/");
       }
+      expect(existsSync(`/tmp/${name}_uri.sqlite`)).toBe(false);
+
+      // A SQLite source still open elsewhere: reading it would write its -wal and -shm files.
+      const other = await openSqlDriver(filled);
+      try {
+        const run = runCli(filled, `sqlite:/tmp/${name}_window.sqlite`);
+        expect(run.output.trim().split("\n").at(-1)).toBe(
+          "Result: refused (SQLite source is open elsewhere or was not closed cleanly: it has -wal or -shm files).",
+        );
+        expect(run.status).toBe(2);
+      } finally {
+        await other.close();
+      }
+
+      // An empty copy window counts as unset: a deploy wrapper may pass the variable empty.
+      const unset = runCli(empty, filled, undefined, "");
+      expect(unset.output).toContain(
+        "Copy window: 15 minutes (GACHIPAD_COPY_WINDOW_MINUTES, 15 to 1440; unset or empty means 15).",
+      );
+      expect(unset.output.trim().split("\n").at(-1)).toBe(
+        "Result: refused (Destination is not empty).",
+      );
 
       // The copy window: refused outside 15..1440 whole minutes, stated on the startup line.
       for (const window of ["14", "1441", "15.5", "abc", " 30"]) {
@@ -845,7 +903,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         expect(existsSync(`/tmp/${name}_window.sqlite`)).toBe(false);
       }
       const wide = runCli(filled, `sqlite:/tmp/${name}_window.sqlite`, undefined, "1440");
-      expect(wide.output).toContain("Copy window: 1440 minutes.");
+      expect(wide.output).toContain("Copy window: 1440 minutes (");
       expect(wide.output).toContain("records that expired or expire within 1440 minutes");
       expect(wide.output).toContain("The copy must finish within 1435 minutes.");
       expect(wide.output.trim().split("\n").at(-1)).toMatch(
@@ -853,6 +911,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
       );
       expect(wide.status).toBe(0);
     } finally {
+      await dropDatabase("sqlite", `${name}_uri`, `sqlite:/tmp/${name}_uri.sqlite`);
       await dropDatabase("sqlite", `${name}_window`, `sqlite:/tmp/${name}_window.sqlite`);
       await dropDatabase("sqlite", `${name}_filled`, filled);
       await dropDatabase("sqlite", `${name}_empty`, empty);

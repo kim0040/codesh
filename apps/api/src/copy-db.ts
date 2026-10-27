@@ -10,7 +10,8 @@ import {
   type TransferCounts,
 } from "@gachipad/storage";
 
-// Unset or empty means the default; anything but a whole number in range is refused below.
+// Unset or empty means the default, since a deploy wrapper may pass the variable empty; anything
+// but a whole number in range is refused below.
 const windowSetting =
   process.env.GACHIPAD_COPY_WINDOW_MINUTES || String(COPY_WINDOW_MINUTES.default);
 const windowMinutes = /^\d{1,4}$/.test(windowSetting) ? Number(windowSetting) : Number.NaN;
@@ -19,7 +20,7 @@ const windowValid =
 
 console.log(
   windowValid
-    ? `Source must be quiescent: stop the API and collab service first. Copy window: ${windowMinutes} minutes. Not copied: diagnostics, records that expired or expire within ${windowMinutes} minutes, and records of such or missing shares. The copy must finish within ${windowMinutes - 5} minutes.`
+    ? `Source must be quiescent: stop the API and collab service first. Copy window: ${windowMinutes} minutes (GACHIPAD_COPY_WINDOW_MINUTES, ${COPY_WINDOW_MINUTES.min} to ${COPY_WINDOW_MINUTES.max}; unset or empty means ${COPY_WINDOW_MINUTES.default}). Not copied: diagnostics, records that expired or expire within ${windowMinutes} minutes, and records of such or missing shares. The copy must finish within ${windowMinutes - 5} minutes.`
     : "Source must be quiescent: stop the API and collab service first.",
 );
 

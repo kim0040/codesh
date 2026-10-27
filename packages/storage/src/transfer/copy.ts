@@ -1,10 +1,11 @@
 import { createHash, type Hash } from "node:crypto";
-import { access, realpath } from "node:fs/promises";
+import { access, open as openFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Document, MongoClient, MongoClientOptions } from "mongodb";
 import type { OpenedStores } from "../open.js";
 import { openStores, storageKindFromUrl } from "../open.js";
 import { openSqlDriver, sqlErrorCode } from "../sql/driver.js";
+import { createSqlStores } from "../sql/stores.js";
 import { transferBackend } from "./registry.js";
 import { createSqlTransferBackend, supportedSqlSchema } from "./sql.js";
 import { OPERATION_TIMEOUT_MS, withTimeout } from "./timeout.js";
@@ -36,14 +37,19 @@ const MAX_CLOCK_SKEW_MS = 2 * 60_000;
 const MAJORITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
 /** How long a majority write may wait for replication before it fails. */
 const WRITE_CONCERN_TIMEOUT_MS = 60_000;
-/** How long closing a connection may take after the copy ended. */
-const CLOSE_TIMEOUT_MS = 10_000;
+/** How long closing a connection may take after the copy ended or a check failed. */
+export const CLOSE_TIMEOUT_MS = 10_000;
+/** pg drops a query stuck this long with its connection, after the copy's own timeout reported it. */
+export const PG_QUERY_TIMEOUT_MS = OPERATION_TIMEOUT_MS + 5_000;
 const SAME_DATABASE = "Source and destination are the same";
 const NOT_EMPTY = "Destination is not empty";
 const NOT_PRIMARY = "MongoDB source is not the primary";
 const NOT_MAJORITY = "MongoDB source has writes not yet replicated to a majority";
 const CLOCK_SKEW = "MongoDB server clock differs from this host by more than 2 minutes";
 const NOT_PERSISTENT = "Source and destination must be persistent databases";
+const SQLITE_URI = "SQLite databases must be plain file paths, not file: URIs";
+const SQLITE_IN_USE =
+  "SQLite source is open elsewhere or was not closed cleanly: it has -wal or -shm files";
 const SQL_SCHEMA = "SQL source schema version is missing or not supported";
 const WINDOW_RANGE = `Copy window must be a whole number of minutes from ${COPY_WINDOW_MINUTES.min} to ${COPY_WINDOW_MINUTES.max}`;
 
@@ -293,23 +299,79 @@ function sqlitePath(url: string): string {
   return decodeURIComponent(new URL(url).pathname);
 }
 
+/**
+ * SQLite reads a name starting with file: as a URI, whose escaped options can make the database
+ * in-memory or temporary. Spelled in any case, such names are refused rather than decoded.
+ */
+function sqliteUri(kind: ReturnType<typeof storageKindFromUrl>, url: string): boolean {
+  if (kind !== "sqlite") return false;
+  try {
+    return /^file:/i.test(sqlitePath(url));
+  } catch {
+    // The driver rejects this URL with its own error.
+    return false;
+  }
+}
+
 /** In-memory and temporary SQLite databases end with their connection. */
 function persistentDatabase(kind: ReturnType<typeof storageKindFromUrl>, url: string): boolean {
   if (kind === "memory") return false;
   if (kind !== "sqlite") return true;
-  let path: string;
   try {
-    path = sqlitePath(url);
+    const path = sqlitePath(url);
+    return path !== "" && path !== ":memory:";
   } catch {
     // The driver rejects this URL with its own error.
     return true;
   }
-  return !(
-    path === "" ||
-    path === ":memory:" ||
-    /^file::memory:/i.test(path) ||
-    (/^file:/i.test(path) && /[?&](?:mode=memory|vfs=memdb)(?:[&#]|$)/i.test(path))
+}
+
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
   );
+
+/** Whether a SQLite file has -wal or -shm files, which SQLite keeps next to the file a link names. */
+async function sqliteSidecars(path: string): Promise<boolean> {
+  for (const file of new Set([path, await realpath(path)]))
+    if ((await exists(`${file}-wal`)) || (await exists(`${file}-shm`))) return true;
+  return false;
+}
+
+/**
+ * How a SQLite source opens without writing to it. A rollback-journal file opens read-only. A
+ * WAL-mode file is read as immutable, since read-only access would create or write its -wal and
+ * -shm files; those exist only while it is open or after it was not closed cleanly, and then the
+ * source is refused.
+ */
+async function sqliteSourceMode(path: string): Promise<true | "immutable"> {
+  // Opening a missing file would create it.
+  if (!(await exists(path))) throw new CopyRefusedError(SQL_SCHEMA);
+  const header = Buffer.alloc(20);
+  const file = await openFile(path, "r");
+  try {
+    await file.read(header, 0, header.length, 0);
+  } finally {
+    await file.close();
+  }
+  // Bytes 18 and 19 of a database header are 2 in WAL mode (sqlite.org/fileformat.html).
+  if (header.toString("latin1", 0, 16) !== "SQLite format 3\0") return true;
+  if (header[18] !== 2 && header[19] !== 2) return true;
+  if (await sqliteSidecars(path)) throw new CopyRefusedError(SQLITE_IN_USE);
+  return "immutable";
+}
+
+/** The URL the copy connects with: a PostgreSQL URL gains pg's query_timeout unless it sets one. */
+function connectionUrl(kind: ReturnType<typeof storageKindFromUrl>, url: string): string {
+  if (kind !== "postgresql" || url.includes("#")) return url;
+  try {
+    if (new URL(url).searchParams.has("query_timeout")) return url;
+  } catch {
+    // The driver rejects this URL with its own error.
+    return url;
+  }
+  return `${url}${url.includes("?") ? "&" : "?"}query_timeout=${PG_QUERY_TIMEOUT_MS}`;
 }
 
 /** The file behind a path, following symlinks of the file or, before it exists, its directory. */
@@ -342,28 +404,25 @@ async function sqlIdentity(
     }
     const parsed = new URL(url);
     const hostname = decodeURIComponent(parsed.hostname.replace(/^\[(.+)\]$/, "$1"));
-    // A repeated query parameter takes its last value in both drivers.
-    const param = (name: string) => parsed.searchParams.getAll(name).at(-1);
     if (kind === "mysql") {
-      // mysql2 (ConnectionConfig.parseUrl): every query parameter, JSON or plain text, overrides
-      // the URL's own host, port and database; a socketPath replaces host and port.
-      const config: Record<string, unknown> = {
-        host: hostname,
-        port: parsed.port,
-        database: decodeURIComponent(parsed.pathname.slice(1)),
-      };
-      for (const [key, value] of parsed.searchParams) {
+      // mysql2 3.24.6 (ConnectionConfig.parseUrl): host, port and database come from the URL, and
+      // query parameters of those names are ignored. Any other parameter takes its first value, as
+      // JSON when it parses; a socketPath that is set replaces host and port.
+      const database = decodeURIComponent(parsed.pathname.slice(1));
+      const socket = parsed.searchParams.get("socketPath");
+      let socketPath: unknown;
+      if (socket !== null)
         try {
-          config[key] = JSON.parse(value);
+          socketPath = JSON.parse(socket);
         } catch {
-          config[key] = value;
+          socketPath = socket;
         }
-      }
-      const database = String(config.database ?? "");
-      if (config.socketPath) return `mysql:socket:${String(config.socketPath)}:${database}`;
-      const port = Number.parseInt(String(config.port), 10) || 3306;
-      return `mysql:${(String(config.host ?? "") || "localhost").toLowerCase()}:${port}:${database}`;
+      if (socketPath) return `mysql:socket:${String(socketPath)}:${database}`;
+      const port = Number.parseInt(parsed.port, 10) || 3306;
+      return `mysql:${(hostname || "localhost").toLowerCase()}:${port}:${database}`;
     }
+    // A repeated query parameter takes its last value in pg.
+    const param = (name: string) => parsed.searchParams.getAll(name).at(-1);
     // pg: query parameters, then the URL, then PG* variables, then defaults. The database
     // defaults to the user name. A host starting with "/" is a socket directory: a
     // case-sensitive path, unlike a host name.
@@ -518,39 +577,64 @@ async function connectMongoClient(url: string, options: MongoClientOptions): Pro
     await client.connect();
     return client;
   } catch {
-    await client?.close().catch(() => undefined);
+    await closeWithin(client);
     throw new Error("MongoDB storage could not be opened");
   }
 }
 
 /**
+ * Settles within CLOSE_TIMEOUT_MS: a connection stuck in a timed-out operation must not hold the
+ * copy, and pg's own close waits for it.
+ */
+function closeWithin(connection?: { close(): Promise<void> }): Promise<void> {
+  return withTimeout(connection?.close() ?? Promise.resolve(), CLOSE_TIMEOUT_MS).catch(
+    () => undefined,
+  );
+}
+
+/** Waits for stores to open within the operation timeout; stores that open later are closed. */
+async function openWithin(opening: Promise<OpenedStores>): Promise<OpenedStores> {
+  try {
+    return await withTimeout(opening);
+  } catch (error) {
+    void opening.then(closeWithin, () => undefined);
+    throw error;
+  }
+}
+
+interface OpenedSource extends OpenedStores {
+  /** false when something else may have opened the source while the copy read it. */
+  untouched?: () => Promise<boolean>;
+}
+
+/**
  * Opens the source as it is: unlike the stores opener, it builds no indexes on a MongoDB source
- * and runs no migration on a SQL source, which must have exactly the schema this code knows.
+ * and runs no migration on a SQL source, which must have exactly the schema this code knows. A
+ * SQLite source is opened read-only. Its schema check and, when that fails, its close are bounded.
  */
 async function openSource(
   url: string,
   kind: ReturnType<typeof storageKindFromUrl>,
-): Promise<OpenedStores> {
+): Promise<OpenedSource> {
   if (kind !== "mongodb") {
-    // Opening a missing SQLite file would create it.
-    if (kind === "sqlite") {
-      const path = sqlitePath(url);
-      if (
-        !/^file:/i.test(path) &&
-        !(await access(path).then(
-          () => true,
-          () => false,
-        ))
-      )
-        throw new CopyRefusedError(SQL_SCHEMA);
-    }
-    const driver = await openSqlDriver(url);
+    const path = kind === "sqlite" ? sqlitePath(url) : undefined;
+    const readOnly = path === undefined ? undefined : await sqliteSourceMode(path);
+    const driver = await openSqlDriver(connectionUrl(kind, url), readOnly ? { readOnly } : {});
     try {
-      if (!(await supportedSqlSchema(driver))) throw new CopyRefusedError(SQL_SCHEMA);
-    } finally {
-      await driver.close();
+      if (!(await withTimeout(supportedSqlSchema(driver)))) throw new CopyRefusedError(SQL_SCHEMA);
+    } catch (error) {
+      await closeWithin(driver);
+      throw error;
     }
-    return withTimeout(openStores(url, { migrate: false }));
+    return {
+      stores: createSqlStores(driver),
+      close: () => driver.close(),
+      kind,
+      // Nothing locks an immutable file: a service that opened it meanwhile left -wal or -shm files.
+      ...(path !== undefined && readOnly === "immutable"
+        ? { untouched: async () => !(await sqliteSidecars(path)) }
+        : {}),
+    };
   }
   const { createMongoStores } = await import("../mongo.js");
   const client = await connectMongoClient(url, {});
@@ -594,21 +678,22 @@ async function openDestination(
         mongoClient: client,
       };
     } catch (error) {
-      await client.close().catch(() => undefined);
+      await closeWithin(client);
       throw error;
     }
   }
+  // The emptiness check and the close of its connection are each bounded.
   if (kind !== "memory") {
-    const driver = await openSqlDriver(url);
+    const driver = await openSqlDriver(connectionUrl(kind, url));
     try {
-      if (!(await createSqlTransferBackend(driver).isEmpty()))
+      if (!(await withTimeout(createSqlTransferBackend(driver).isEmpty())))
         throw new CopyRefusedError(NOT_EMPTY);
     } finally {
-      await driver.close();
+      await closeWithin(driver);
     }
   }
   writing();
-  return withTimeout(openStores(url));
+  return openWithin(openStores(connectionUrl(kind, url)));
 }
 
 async function readAll(
@@ -686,11 +771,13 @@ export async function copyDatabase(
     throw new CopyRefusedError("Unsupported database URL scheme");
   }
 
+  if (sqliteUri(fromKind, fromUrl) || sqliteUri(toKind, toUrl))
+    throw new CopyRefusedError(SQLITE_URI);
   const open = options.openStores;
   // The test seam may open in-memory stores; real runs must leave a database behind.
   if (!open && !(persistentDatabase(fromKind, fromUrl) && persistentDatabase(toKind, toUrl)))
     throw new CopyRefusedError(NOT_PERSISTENT);
-  let source: OpenedStores | undefined;
+  let source: OpenedSource | undefined;
   let destination: OpenedStores | undefined;
   let copiedCounts = emptyCounts();
   let destinationWritten = false;
@@ -749,9 +836,11 @@ export async function copyDatabase(
     const reread = await readAll(sourceTransfer, cutoff, inTime);
     const stored = await readAll(destinationTransfer, cutoff, inTime);
     const counter = await destinationTransfer.uploadCounter();
+    const untouched = (await source.untouched?.()) ?? true;
     // After the last read: matching reads prove nothing once a TTL deletion could have run.
     inTime();
     if (
+      !untouched ||
       !copied.matches(reread) ||
       !reread.matches(stored) ||
       live.shares !== reread.counts.shares ||
@@ -766,13 +855,8 @@ export async function copyDatabase(
     const code = safeDriverCode(error);
     throw new CopyFailureError({ ...copiedCounts }, code, destinationWritten);
   } finally {
-    // A connection stuck in a timed-out operation must not hold the result back.
-    await withTimeout(destination?.close() ?? Promise.resolve(), CLOSE_TIMEOUT_MS).catch(
-      () => undefined,
-    );
-    await withTimeout(source?.close() ?? Promise.resolve(), CLOSE_TIMEOUT_MS).catch(
-      () => undefined,
-    );
+    await closeWithin(destination);
+    await closeWithin(source);
   }
 }
 
