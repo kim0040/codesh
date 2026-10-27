@@ -14,7 +14,6 @@ INSTALL="$WORK/selection"
 DB="$PROJECT-external"
 RELAY="$PROJECT-pg-relay"
 RELAY_STARTED=0
-DB_CREATED=0
 PG="$PROJECT-external-pg"
 PG_STARTED=0
 case "$PROJECT" in gp-dbdeploy-*) ;; *) echo 'verification requires a gp-dbdeploy- project' >&2; exit 1 ;; esac
@@ -39,10 +38,9 @@ cleanup_stack() {
 cleanup() {
   local status=$?
   trap - EXIT
-  if [ "$RELAY_STARTED" = 1 ]; then docker rm -f "$RELAY" >/dev/null; fi
+  if [ "$RELAY_STARTED" = 1 ]; then docker rm -f "$RELAY" >/dev/null 2>&1 || true; fi
   cleanup_stack
-  if [ "$DB_CREATED" = 1 ]; then docker exec "$PG" dropdb -U gp --if-exists --force "$DB"; fi
-  if [ "$PG_STARTED" = 1 ]; then docker rm -fv "$PG" >/dev/null; fi
+  if [ "$PG_STARTED" = 1 ]; then docker rm -fv "$PG" >/dev/null 2>&1 || true; fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -197,27 +195,31 @@ for choice in sqlite postgres; do
 
 echo 'selection: owned external PostgreSQL (owned TCP relay across isolated Docker networks)'
 ! docker container inspect "$PG" >/dev/null 2>&1 || fail 'external PostgreSQL fixture already exists'
-docker run -d --pull never --name "$PG" --tmpfs /var/lib/postgresql/data:rw,size=512m \
-  -e POSTGRES_USER=gp -e POSTGRES_PASSWORD=gp postgres:17-alpine >/dev/null
 PG_STARTED=1
+POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+export POSTGRES_PASSWORD
+docker run -d --pull never --name "$PG" --tmpfs /var/lib/postgresql/data:rw,size=512m \
+  -e POSTGRES_USER=gp -e POSTGRES_PASSWORD postgres:17-alpine >/dev/null
+pg_ready=0
 for _ in $(seq 60); do
-  docker exec "$PG" pg_isready -U gp >/dev/null 2>&1 && break
+  if docker exec "$PG" pg_isready -h 127.0.0.1 -U gp >/dev/null 2>&1; then pg_ready=1; break; fi
   sleep 1
 done
+[ "$pg_ready" = 1 ] || fail 'external PostgreSQL fixture did not become ready'
 prepare
 docker exec "$PG" createdb -U gp "$DB"
-DB_CREATED=1
 pg_ip="$(docker inspect "$PG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
 # The owned external server stays on the default bridge; the relay joins both bridges.
 docker network create --subnet 172.29.98.0/24 --label "com.docker.compose.project=$PROJECT" --label com.docker.compose.network=default "${PROJECT}_default" >/dev/null
+RELAY_STARTED=1
 docker run -d --pull never --name "$RELAY" --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node node:22.23.3-slim -e '
   const net = require("node:net");
   net.createServer(c => { const s = net.connect(5432, process.argv[1]); c.pipe(s); s.pipe(c); c.on("error", () => s.destroy()); s.on("error", () => c.destroy()); }).listen(5432, "0.0.0.0");
 ' "$pg_ip" >/dev/null
-RELAY_STARTED=1
 docker network connect "${PROJECT}_default" "$RELAY"
-# Credentials are the shared test fixture's throwaway credentials, never sent to stdout.
-external_url="postgresql://gp:gp@$RELAY:5432/$DB"
+# Per-run fixture credentials are never sent to stdout.
+external_url="postgresql://gp:$POSTGRES_PASSWORD@$RELAY:5432/$DB"
+unset POSTGRES_PASSWORD
 DATABASE_URL="$external_url" in_install ./install.sh
 [ "$(cat "$INSTALL/state/database-kind")" = external ] || fail 'external backend not selected'
 services="$(in_install docker compose ps --services)"
@@ -280,8 +282,41 @@ if docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1; then fail '
 check_migration_data
 echo 'PASS: injected copy process failure restarts old SQLite with share/upload; new populated target volume removed'
 
-in_install ./migrate-db.sh --to postgres --yes
+# Leave a committed marker only in WAL, with all normal writers cleanly stopped.
+# A clean migration alone would pass even if the checkpoint feature were absent.
+in_install bash -c '. ./lib.sh; stop_writes'
+in_install docker compose run --rm --no-deps --pull never -T api node --input-type=module - <<'WAL_FIXTURE'
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+const url = process.env.DATABASE_URL;
+const path = url.startsWith("sqlite://") ? decodeURIComponent(new URL(url).pathname) : url.slice(7);
+const db = new DatabaseSync(path);
+db.exec("PRAGMA journal_mode=WAL");
+db.prepare("INSERT INTO audit (id,at,actor,ip,action,detail_json) VALUES (?,?,?,?,?,?)")
+  .run(randomUUID(), Date.now(), randomUUID(), "127.0.0.1", "checkpoint-fixture", JSON.stringify({ marker: "wal-only" }));
+if (!existsSync(`${path}-wal`)) throw new Error("WAL fixture missing");
+process.exit(0);
+WAL_FIXTURE
+in_install docker compose run --rm --no-deps --pull never -T api node --input-type=module - <<'WAL_ASSERT'
+import { statSync } from "node:fs";
+const url = process.env.DATABASE_URL;
+const path = url.startsWith("sqlite://") ? decodeURIComponent(new URL(url).pathname) : url.slice(7);
+if (statSync(`${path}-wal`).size <= 32) throw new Error("committed WAL fixture missing");
+WAL_ASSERT
+in_install ./migrate-db.sh --to postgres --yes >"$WORK/migration-checkpoint.log" 2>&1
+grep -q 'stopped SQLite source checkpointed; WAL sidecars removed' "$WORK/migration-checkpoint.log" || fail 'real SQLite checkpoint did not run'
 [ "$(cat "$INSTALL/state/database-kind")" = postgres ] || fail 'SQLite to PostgreSQL marker missing'
+in_install docker compose exec -T api node --import /opt/tsx/node_modules/tsx/dist/esm/index.mjs --input-type=module - <<'WAL_RETAINED'
+import { openStores } from "@gachipad/storage";
+const opened = await openStores(process.env.DATABASE_URL);
+try {
+  const rows = await opened.stores.audit.list({ limit: 100 });
+  if (!rows.some(row => row.action === "checkpoint-fixture" && row.detail?.marker === "wal-only"))
+    throw new Error("committed WAL marker did not migrate");
+} finally { await opened.close(); }
+WAL_RETAINED
+echo 'PASS: real SQLite checkpoint ran against forced WAL and retained its committed marker in PostgreSQL'
 check_migration_data
 docker volume inspect "${PROJECT}_gachipad-data" >/dev/null
 echo 'PASS: SQLite -> PostgreSQL retains API share, upload bytes and old SQLite volume'
@@ -314,5 +349,4 @@ docker rm -f "$RELAY" >/dev/null
 RELAY_STARTED=0
 cleanup_stack
 docker exec "$PG" dropdb -U gp --if-exists --force "$DB"
-DB_CREATED=0
 echo 'verify-databases: all checks passed'

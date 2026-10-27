@@ -77,7 +77,8 @@ if [[ "$*" == *'npm run --silent copy-db'* ]]; then
   if [ "${REPLACE_VOLUME:-0}" = 1 ]; then echo 'replaced foreign' >"$FIXTURE/volumes/${COMPOSE_PROJECT_NAME}_postgres-data"; fi
   echo 'shares: 1'
   if [ "${COPY_STATUS:-0}" = 0 ]; then echo 'Result: success.'
-  elif [ "${COPY_NOT_WRITTEN:-0}" = 1 ]; then echo 'Result: failed (CONNECT); nothing was copied.'
+  elif [ "${COPY_NOT_WRITTEN:-0}" = 1 ]; then echo "Result: failed${COPY_FAILURE_CODE- (CONNECT)}; nothing was copied."
+  elif [ -n "${COPY_REFUSAL:-}" ]; then echo "Result: refused ($COPY_REFUSAL)."
   elif [ "${COPY_STATUS:-0}" = 2 ] && [ "${COPY_WRAPPER_ERROR:-0}" = 0 ]; then echo 'Result: refused (Destination is not empty).';
   else echo 'Result: failed; drop the destination before retrying.'; fi
   exit "${COPY_STATUS:-0}"
@@ -87,6 +88,12 @@ if [[ "$*" == *' api node --input-type=module -'* ]]; then
   grep -q 'PRAGMA wal_checkpoint(TRUNCATE)' "$FIXTURE/checkpoint-source" || exit 87
   [ -f "$FIXTURE/stopped" ] && [ ! -f "$FIXTURE/backup" ] || exit 86
   echo checkpoint >>"$FIXTURE/events"
+  if [ "${CHECKPOINT_WAIT:-0}" = 1 ]; then
+    trap '' HUP INT TERM
+    touch "$FIXTURE/checkpoint-ready"
+    for _ in {1..400}; do [ ! -f "$FIXTURE/container-removed" ] || break; sleep 0.05; done
+    exit 143
+  fi
   [ "${FAIL_CHECKPOINT:-0}" = 0 ] || exit 1
   exit 0
 fi
@@ -177,6 +184,7 @@ for pair in mongodb:sqlite sqlite:postgres postgres:external sqlite:mongodb exte
   esac
   grep -q 'previous backend data and backups are kept' "$FIXTURE/run.log"
   if grep -q 'volume-removed' "$FIXTURE/events"; then exit 1; fi
+  if [ "$from" != sqlite ] && grep -qx checkpoint "$FIXTURE/events"; then exit 1; fi
   clean_state
   echo "ok: $from -> $to publishes only after copy; keeps source and mdns"
 done
@@ -201,7 +209,7 @@ cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
 [ "$(cat "$FIXTURE/running")" = sqlite ]
 [ ! -e "$FIXTURE/backup" ]
 if grep -q '^postgres:up$' "$FIXTURE/events"; then exit 1; fi
-grep -q 'SQLite source checkpoint failed or -wal/-shm files remain' "$FIXTURE/install/state/migrate-db.log"
+grep -q 'SQLite source checkpoint failed, timed out or -wal/-shm files remain' "$FIXTURE/install/state/migrate-db.log"
 clean_state
 echo 'ok: SQLite checkpoint failure prevents backup/copy and target startup; recovers source'
 make_fixture checkpoint-order sqlite
@@ -213,6 +221,75 @@ assert events.index("stopped") < events.index("checkpoint") < events.index("back
 ORDER
 clean_state
 echo 'ok: SQLite checkpoint runs after writers stop and before backup/copy'
+refusal_case=0
+for refusal in 'SQLite source is open elsewhere or was not closed cleanly' 'SQLite source must be a regular file' 'SQLite source path changed during the copy' 'SQL source schema version is missing or not supported' 'MongoDB source is not the primary' 'Audit details are not plain JSON in 1 record'; do
+  refusal_case=$((refusal_case + 1))
+  make_fixture "source-refused-$refusal_case" sqlite
+  if COPY_STATUS=2 COPY_REFUSAL="$refusal" run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
+  grep -q 'source refused .*nothing was copied' "$FIXTURE/install/state/migrate-db.log"
+  if grep -Eq 'use an empty destination|destination may hold a partial copy|inspect and clear' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
+  cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
+  [ "$(cat "$FIXTURE/running")" = sqlite ]
+  clean_state
+done
+echo 'ok: source copy refusals retain exit 2 and give source-only recovery guidance'
+make_fixture generic-refused sqlite
+if COPY_STATUS=2 COPY_REFUSAL='Unsupported database URL scheme' run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
+grep -q 'copy refused before writing' "$FIXTURE/install/state/migrate-db.log"
+if grep -Eq 'use an empty destination|destination may hold a partial copy' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
+clean_state
+echo 'ok: unclassified copy refusal gives neutral recovery guidance'
+make_fixture checkpoint-finished sqlite
+if FAIL_BACKUP=1 FAIL_CONTAINER_REMOVE=1 run --to postgres --yes; then exit 1; else [ "$?" = 1 ]; fi
+if grep -q container-removed "$FIXTURE/events"; then exit 1; fi
+[ "$(cat "$FIXTURE/running")" = sqlite ]
+clean_state
+echo 'ok: completed checkpoint clears its container name before backup recovery'
+make_fixture checkpoint-timeout sqlite
+# Shorten only the production deadline in this fixture, leaving real timeout semantics intact.
+sed -i 's/--kill-after=5s 180s/--kill-after=1s 1s/' "$FIXTURE/install/migrate-db.sh"
+checkpoint_started=$SECONDS
+if CHECKPOINT_WAIT=1 run --to postgres --yes; then exit 1; else [ "$?" = 1 ]; fi
+[ "$((SECONDS - checkpoint_started))" -le 5 ]
+[ -f "$FIXTURE/checkpoint-ready" ]
+[ -f "$FIXTURE/container-removed" ]
+[ ! -e "$FIXTURE/backup" ]
+[ "$(cat "$FIXTURE/running")" = sqlite ]
+cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
+python3 - "$FIXTURE/events" <<'TIMEOUT'
+import pathlib, sys
+events = pathlib.Path(sys.argv[1]).read_text().splitlines()
+assert events.index("container-removed") < events.index("start")
+TIMEOUT
+clean_state
+echo 'ok: checkpoint wall-clock timeout removes container before source recovery'
+make_fixture checkpoint-signal sqlite
+CHECKPOINT_WAIT=1 python3 - <<'CHECKPOINT_SIGNAL'
+import os, pathlib, signal, subprocess, time
+root = pathlib.Path(os.environ["FIXTURE"])
+with (root / "run.log").open("w") as log:
+    p = subprocess.Popen(["./migrate-db.sh", "--to", "postgres", "--yes"],
+        cwd=root / "install", stdout=log, stderr=log, start_new_session=True)
+    try:
+        deadline = time.monotonic() + 10
+        while not (root / "checkpoint-ready").exists() and time.monotonic() < deadline:
+            assert p.poll() is None, "checkpoint never started"
+            time.sleep(0.05)
+        assert (root / "checkpoint-ready").exists()
+        p.send_signal(signal.SIGTERM)
+        assert p.wait(timeout=10) == 143
+        events = (root / "events").read_text().splitlines()
+        assert events.index("container-removed") < events.index("start")
+        assert not (root / "backup").exists()
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait()
+CHECKPOINT_SIGNAL
+cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
+[ "$(cat "$FIXTURE/running")" = sqlite ]
+clean_state
+echo 'ok: signal during checkpoint removes container before source recovery'
 make_fixture existing-destination sqlite
 touch "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data"
 if DEST_NONEMPTY=1 run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
@@ -340,12 +417,19 @@ if COPY_STATUS=1 REPLACE_VOLUME=1 run --to postgres --yes; then exit 1; fi
 grep -q 'identity could not be verified' "$FIXTURE/install/state/migrate-db.log"
 [ -e "$FIXTURE/install/state/transaction" ]
 echo 'ok: changed volume identity prevents removal during rollback'
-make_fixture nothing-written sqlite
 # An external URL must be supplied through the environment, and failure before writes is distinct.
-if DATABASE_URL='postgresql://fixture:private@target.invalid/db' COPY_STATUS=1 COPY_NOT_WRITTEN=1 run --to external --yes; then exit 1; fi
-grep -q 'destination was not modified; nothing was copied' "$FIXTURE/install/state/migrate-db.log"
-if grep -q 'inspect and clear' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
-clean_state
+failure_case=0
+for code in ' (CONNECT)' '' ' (took longer than 10 minutes)'; do
+  failure_case=$((failure_case + 1))
+  make_fixture "nothing-written-$failure_case" sqlite
+  if DATABASE_URL='postgresql://fixture:private@target.invalid/db' COPY_STATUS=1 COPY_NOT_WRITTEN=1 COPY_FAILURE_CODE="$code" run --to external --yes; then exit 1; else [ "$?" = 1 ]; fi
+  grep -q 'destination was not modified; nothing was copied' "$FIXTURE/install/state/migrate-db.log"
+  if grep -Eq 'inspect and clear|use an empty destination|drop the destination' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
+  cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
+  [ "$(cat "$FIXTURE/running")" = sqlite ]
+  clean_state
+done
+echo 'ok: coded and generic pre-write failures retain exit 1 without destination deletion advice'
 make_fixture ingress-opened sqlite
 if FAIL_INGRESS=1 run --to postgres --yes; then exit 1; fi
 [ -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]

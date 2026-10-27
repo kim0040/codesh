@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -114,6 +114,7 @@ const runCheckpoint = (path, status = 0) => {
   assert.equal(result.error, undefined, "checkpoint must exit promptly");
   assert.equal(result.status, status, "checkpoint exit status");
   checks++;
+  return result;
 };
 const digest = () => createHash("sha256").update(readFileSync(source)).digest("hex");
 let pg;
@@ -137,7 +138,9 @@ try {
   );
   assert.equal(crash.status, 0);
   assert.ok(readFileSync(`${dirty}-wal`).length > 0);
-  runCheckpoint(dirty);
+  const alias = join(fixture, "alias.db");
+  symlinkSync(dirty, alias);
+  runCheckpoint(alias);
   assert.throws(() => readFileSync(`${dirty}-wal`));
   assert.throws(() => readFileSync(`${dirty}-shm`));
   const recovered = new DatabaseSync(dirty, { readOnly: true });
@@ -149,6 +152,11 @@ try {
   const live = new DatabaseSync(dirty);
   try {
     live.exec("PRAGMA journal_mode=WAL; INSERT INTO fixture VALUES ('still-open')");
+    // A held read transaction forces wal_checkpoint to return busy, independently of sidecars.
+    live.exec("BEGIN; SELECT * FROM fixture");
+    const busy = runCheckpoint(dirty, 1);
+    assert.match(busy.stderr, /checkpoint refused \(SQLITE_BUSY\)/);
+    live.exec("ROLLBACK");
     runCheckpoint(dirty, 1);
     assert.ok(readFileSync(`${dirty}-shm`).length > 0, "open source sidecars must trigger refusal");
     assert.equal(live.prepare("SELECT count(*) AS total FROM fixture").get().total, 2);

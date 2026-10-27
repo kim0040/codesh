@@ -72,6 +72,7 @@ SOURCE=""
 TARGET_STARTED=0
 INGRESS_OPENED=0
 COPY_REFUSED=0
+COPY_REFUSAL_SIDE=destination
 COPY_UNWRITTEN=0
 LOG=state/migrate-db.log
 
@@ -159,7 +160,11 @@ migration_cleanup() {
       fi
     fi
     if [ "$COPY_REFUSED" = 1 ]; then
-      migration_message 'migrate-db: destination was not modified: refused (see the Result line above); use an empty destination.'
+      case "$COPY_REFUSAL_SIDE" in
+        source) migration_message 'migrate-db: source refused (see the Result line above); nothing was copied. Fix the source and retry; do not delete -wal/-shm files, which can hold committed data.' ;;
+        destination) migration_message 'migrate-db: destination was not modified: refused (see the Result line above); use an empty destination.' ;;
+        *) migration_message 'migrate-db: copy refused before writing (see the Result line above); nothing was copied. Fix the cause and retry.' ;;
+      esac
     elif [ "$COPY_UNWRITTEN" = 1 ]; then
       migration_message 'migrate-db: destination was not modified; nothing was copied. Fix the cause and retry.'
     elif [ "$COPY_STARTED" = 1 ] && [ "$INGRESS_OPENED" = 0 ]; then
@@ -195,7 +200,7 @@ trap 'migration_cleanup "$?"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-for tool in curl tee gzip tar openssl df awk sed mktemp cp mv chmod rm cat grep head tail dirname; do
+for tool in curl tee gzip tar openssl df awk sed mktemp cp mv chmod rm cat grep head tail dirname timeout; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool missing: $tool"
 done
 tee -p </dev/null >/dev/null 2>&1 || die 'tee with -p support is required for migration logging'
@@ -395,31 +400,35 @@ stop_writes || die 'writers did not stop cleanly; migration cancelled'
 # A killed last writer can leave WAL sidecars; fold them into the stopped source first.
 if [ "$SOURCE" = sqlite ]; then
   ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-checkpoint"
-  GACHIPAD_COPY_FROM="$SOURCE_URL" migration_run docker compose run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T \
-    -e GACHIPAD_COPY_FROM api node --input-type=module - <<'CHECKPOINT' || die 'SQLite source checkpoint failed or -wal/-shm files remain; stop other SQLite users and inspect the source before retrying'
-import { existsSync } from "node:fs";
+  GACHIPAD_COPY_FROM="$SOURCE_URL" migration_run timeout --foreground --kill-after=5s 180s docker compose run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T \
+    -e GACHIPAD_COPY_FROM api node --input-type=module - <<'CHECKPOINT' || die 'SQLite source checkpoint failed, timed out or -wal/-shm files remain; stop other SQLite users and inspect the source; do not delete -wal/-shm files, which can hold committed data'
+import { existsSync, realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 try {
   const url = process.env.GACHIPAD_COPY_FROM;
   const path = url.startsWith("sqlite://") ? decodeURIComponent(new URL(url).pathname) : url.slice(7);
   if (/^file:/i.test(path) || path === ":memory:" || !existsSync(path)) throw new Error();
-  const sidecars = () => existsSync(`${path}-wal`) || existsSync(`${path}-shm`);
+  const paths = new Set([path, realpathSync(path)]);
+  const sidecars = () => [...paths].some(p => existsSync(`${p}-wal`) || existsSync(`${p}-shm`));
   if (sidecars()) {
     const db = new DatabaseSync(path);
     try {
       db.exec("PRAGMA busy_timeout=3000");
       const result = db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-      if (result.busy !== 0) throw new Error();
+      if (result.busy !== 0) throw Object.assign(new Error(), { code: "SQLITE_BUSY" });
     } finally { db.close(); }
     if (sidecars()) throw new Error();
     console.log("migrate-db: stopped SQLite source checkpointed; WAL sidecars removed.");
   }
-} catch {
-  console.error("migrate-db: SQLite checkpoint refused; source missing, busy or WAL sidecars remain.");
+} catch (error) {
+  const code = error?.code ?? error?.errcode;
+  const safe = typeof code === "number" || /^[A-Z][A-Z0-9_]{0,63}$/.test(code ?? "") ? code : "CHECKPOINT_FAILED";
+  console.error(`migrate-db: SQLite checkpoint refused (${safe}); source missing, busy or WAL sidecars remain. Do not delete -wal/-shm files; they can hold committed data.`);
   process.exit(1);
 }
 CHECKPOINT
 fi
+ACTIVE_CONTAINER=""
 TARGET_STARTED=1
 case "$TO" in
   postgres) migration_run docker compose --env-file "$STAGE/.env" up -d --pull never --wait --wait-timeout 120 postgres ;;
@@ -439,7 +448,13 @@ GACHIPAD_COPY_FROM="$SOURCE_URL" GACHIPAD_COPY_TO="$TARGET_CONNECTION" GACHIPAD_
   migration_logged_run "$STAGE/copy.log" docker compose --env-file "$STAGE/.env" run --rm --name "$ACTIVE_CONTAINER" --no-deps --pull never -T \
     -e GACHIPAD_COPY_FROM -e GACHIPAD_COPY_TO -e GACHIPAD_COPY_WINDOW_MINUTES -e NPM_CONFIG_UPDATE_NOTIFIER=false api npm run --silent copy-db || copy_status=$?
 if grep -q '^Result: failed.*; nothing was copied\.$' "$STAGE/copy.log"; then COPY_UNWRITTEN=1; fi
-if [ "$copy_status" = 2 ] && grep -q '^Result: refused' "$STAGE/copy.log"; then COPY_STARTED=0; COPY_REFUSED=1; fi
+if [ "$copy_status" = 2 ] && grep -q '^Result: refused' "$STAGE/copy.log"; then
+  COPY_STARTED=0
+  COPY_REFUSED=1
+  if grep -q '^Result: refused (Destination is not empty)' "$STAGE/copy.log"; then COPY_REFUSAL_SIDE=destination
+  elif grep -Ei '^Result: refused .*source|^Result: refused \(Audit details' "$STAGE/copy.log" >/dev/null; then COPY_REFUSAL_SIDE=source
+  else COPY_REFUSAL_SIDE=copy; fi
+fi
 if [ "$copy_status" != 0 ]; then
   echo "migrate-db: copy exited $copy_status; configuration will be restored." >&2
   exit "$copy_status"
