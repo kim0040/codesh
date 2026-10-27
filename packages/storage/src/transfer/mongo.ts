@@ -18,10 +18,12 @@ import {
   GridFSBucket,
   type GridFSFile,
   ObjectId,
+  ReadConcern,
+  ReadPreference,
 } from "mongodb";
 import { COLLECTIONS, UPLOADS_BUCKET } from "../mongo.js";
 import { splitShare } from "./members.js";
-import type { TransferBackend, TransferItem, TransferRecord } from "./types.js";
+import type { AuditItem, TransferBackend, TransferItem, TransferRecord } from "./types.js";
 
 const PAGE_SIZE = 128;
 const binaryBytes = (value: Binary) => Uint8Array.from(value.buffer.subarray(0, value.position));
@@ -44,7 +46,14 @@ function isTransactionUnsupported(error: unknown, seen = new Set<object>()): boo
   return "cause" in error && isTransactionUnsupported(error.cause, seen);
 }
 
-export function createMongoTransferBackend(db: Db): TransferBackend {
+export function createMongoTransferBackend(storesDb: Db): TransferBackend {
+  // Every copy operation reads the primary's majority-committed data, whatever the connection
+  // string selects; Db options win over the string's readPreference and readConcernLevel. The
+  // stores keep the connection's own options.
+  const db = storesDb.client.db(storesDb.databaseName, {
+    readPreference: ReadPreference.primary,
+    readConcern: new ReadConcern("majority"),
+  });
   const bucket = new GridFSBucket(db, { bucketName: UPLOADS_BUCKET });
   const files = db.collection(`${UPLOADS_BUCKET}.files`);
   const quota = db.collection<{ _id: string; bytes: number }>("storage_quotas");
@@ -71,10 +80,36 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
     }
   };
 
+  async function* auditItems(): AsyncIterable<AuditItem> {
+    const auditCursor = db
+      .collection<AuditDocument>(COLLECTIONS.audit)
+      .find({}, { batchSize: PAGE_SIZE });
+    try {
+      for await (const row of auditCursor) {
+        const { _id, ...record } = row;
+        const audit: AuditRecord = {
+          at: record.at,
+          actor: record.actor,
+          ip: record.ip,
+          action: record.action,
+          ...(record.shareId === undefined ? {} : { shareId: record.shareId }),
+          ...(record.detail === undefined ? {} : { detail: record.detail }),
+        };
+        yield {
+          kind: "audit",
+          id: _id instanceof ObjectId ? _id.toHexString() : String(_id),
+          record: audit,
+        };
+      }
+    } finally {
+      await auditCursor.close();
+    }
+  }
+
   return {
-    async *exportAll(liveAt: Date): AsyncIterable<TransferItem> {
-      const liveShare = { $or: [{ expiresAt: null }, { expiresAt: { $gte: liveAt } }] };
-      // Keeps records whose share is still live; a missing localField matches no share.
+    async *exportAll(cutoff: Date): AsyncIterable<TransferItem> {
+      const liveShare = { $or: [{ expiresAt: null }, { expiresAt: { $gt: cutoff } }] };
+      // Keeps records whose share is copied; a missing localField matches no share.
       const withLiveShare = (localField: string) => ({
         $lookup: {
           from: COLLECTIONS.shares,
@@ -137,7 +172,7 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
 
       const labCursor = db
         .collection<LabDocument>(COLLECTIONS.labs)
-        .find({ expiresAt: { $gte: liveAt } }, { batchSize: PAGE_SIZE });
+        .find({ expiresAt: { $gt: cutoff } }, { batchSize: PAGE_SIZE });
       try {
         for await (const { _id, ...record } of labCursor)
           yield { kind: "labs", record: { id: _id, ...record } };
@@ -175,33 +210,11 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
         await settingCursor.close();
       }
 
-      const auditCursor = db
-        .collection<AuditDocument>(COLLECTIONS.audit)
-        .find({}, { batchSize: PAGE_SIZE });
-      try {
-        for await (const row of auditCursor) {
-          const { _id, ...record } = row;
-          const audit: AuditRecord = {
-            at: record.at,
-            actor: record.actor,
-            ip: record.ip,
-            action: record.action,
-            ...(record.shareId === undefined ? {} : { shareId: record.shareId }),
-            ...(record.detail === undefined ? {} : { detail: record.detail }),
-          };
-          yield {
-            kind: "audit",
-            id: _id instanceof ObjectId ? _id.toHexString() : String(_id),
-            record: audit,
-          };
-        }
-      } finally {
-        await auditCursor.close();
-      }
+      yield* auditItems();
 
       const uploadCursor = files.aggregate<GridFSFile>(
         [
-          { $match: { "metadata.expiresAt": { $gte: liveAt } } },
+          { $match: { "metadata.expiresAt": { $gt: cutoff } } },
           withLiveShare("metadata.shareId"),
           {
             $match: {
@@ -247,12 +260,14 @@ export function createMongoTransferBackend(db: Db): TransferBackend {
       }
     },
 
-    async countLive(liveAt: Date) {
+    exportAudit: auditItems,
+
+    async countLive(cutoff: Date) {
       return {
         shares: await db
           .collection(COLLECTIONS.shares)
-          .countDocuments({ $or: [{ expiresAt: null }, { expiresAt: { $gte: liveAt } }] }),
-        labs: await db.collection(COLLECTIONS.labs).countDocuments({ expiresAt: { $gte: liveAt } }),
+          .countDocuments({ $or: [{ expiresAt: null }, { expiresAt: { $gt: cutoff } }] }),
+        labs: await db.collection(COLLECTIONS.labs).countDocuments({ expiresAt: { $gt: cutoff } }),
       };
     },
 

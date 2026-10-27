@@ -46,19 +46,23 @@ export interface TransferUpload {
   chunks: AsyncIterable<Uint8Array>;
 }
 
+export type AuditItem = Extract<TransferRecord, { kind: "audit" }>;
 export type TransferItem = TransferRecord | TransferUpload;
 export type TransferCounts = Record<TransferKind, number>;
 
 /** Backend-only persistence operations used by the offline database copier. */
 export interface TransferBackend {
   /**
-   * Every live record. Shares and labs that expired before `liveAt`, completed uploads that
-   * expired before it, and the updates, snapshots, labels and uploads of an expired or missing
-   * share are left out. A share's savedBy and bans lists may continue in `shareMembers` items.
+   * Every record that outlives `cutoff`: shares without expiry or expiring after it, labs and
+   * completed uploads expiring after it. Everything else, and the updates, snapshots, labels and
+   * uploads of a share left out or missing, is skipped. A share's savedBy and bans lists may
+   * continue in `shareMembers` items.
    */
-  exportAll(liveAt: Date): AsyncIterable<TransferItem>;
-  /** Live shares and labs: the kinds a database TTL index can delete while the copy runs. */
-  countLive(liveAt: Date): Promise<{ shares: number; labs: number }>;
+  exportAll(cutoff: Date): AsyncIterable<TransferItem>;
+  /** The audit entries exportAll yields, read alone to check their details before the copy. */
+  exportAudit(): AsyncIterable<AuditItem>;
+  /** Shares and labs exportAll yields: the kinds a database TTL index can delete. */
+  countLive(cutoff: Date): Promise<{ shares: number; labs: number }>;
   importBatch(items: readonly TransferRecord[]): Promise<void>;
   importUpload(
     record: UploadRecord,
