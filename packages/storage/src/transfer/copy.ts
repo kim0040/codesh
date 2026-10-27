@@ -1,4 +1,5 @@
 import { createHash, type Hash } from "node:crypto";
+import type { BigIntStats } from "node:fs";
 import { access, lstat, open as openFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Document, MongoClient, MongoClientOptions } from "mongodb";
@@ -25,7 +26,7 @@ const BATCH_BYTES = 2 * 1024 * 1024;
 const DIGEST_MODULUS = 1n << 256n;
 /**
  * The copy window in minutes. Records expiring within the window after the start are skipped like
- * expired ones, and everything from the first count to the last verification read must finish
+ * expired ones, and everything from opening the source to the last verification read must finish
  * within the window minus DEADLINE_RESERVE_MS.
  */
 export const COPY_WINDOW_MINUTES = { default: 15, min: 15, max: 1440 } as const;
@@ -87,6 +88,8 @@ export class CopyDeadlineError extends Error {
   constructor(
     readonly counts: TransferCounts,
     readonly minutes: number,
+    /** false when the run failed before its first write to the destination. */
+    readonly destinationWritten = true,
   ) {
     super(`Copy took longer than ${minutes} minutes`);
     this.name = "CopyDeadlineError";
@@ -335,46 +338,97 @@ const exists = (path: string) =>
     () => false,
   );
 
-/** Whether a SQLite file has -wal or -shm files, which SQLite keeps next to the file a link names. */
-async function sqliteSidecars(path: string): Promise<boolean> {
-  for (const file of new Set([path, await realpath(path)]))
-    if ((await exists(`${file}-wal`)) || (await exists(`${file}-shm`))) return true;
+/** Whether a SQLite file has -wal or -shm files, next to it or to the link that names it. */
+async function sqliteSidecars(path: string, file: string): Promise<boolean> {
+  for (const name of new Set([path, file]))
+    if ((await exists(`${name}-wal`)) || (await exists(`${name}-shm`))) return true;
   return false;
 }
 
-/**
- * A SQLite file as seen without SQLite: the file its path resolves to, that file's identity, size
- * and times before and after a SHA-256 of its bytes, and its first 20 bytes. Every step is bounded.
- */
-async function sqliteFileState(path: string): Promise<{ state: string; header: Buffer }> {
-  const file = await withTimeout(realpath(path));
-  const identity = async () => {
-    const stats = await withTimeout(lstat(file, { bigint: true }));
-    return `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+/** The copy's deadline on the monotonic clock, counted from before the source is opened. */
+interface Budget {
+  /** Throws CopyDeadlineError once the deadline has passed. */
+  inTime(): void;
+  /** Bounds a wait by the operation timeout and by the time left before the deadline. */
+  within<T>(work: Promise<T>): Promise<T>;
+}
+
+function copyBudget(deadline: number, overdue: () => CopyDeadlineError): Budget {
+  const started = performance.now();
+  const left = () => deadline - (performance.now() - started);
+  return {
+    inTime() {
+      if (left() <= 0) throw overdue();
+    },
+    async within<T>(work: Promise<T>): Promise<T> {
+      const ms = left();
+      try {
+        return await withTimeout(work, Math.max(0, Math.min(OPERATION_TIMEOUT_MS, ms)));
+      } catch (error) {
+        throw error instanceof OperationTimeoutError && ms < OPERATION_TIMEOUT_MS
+          ? overdue()
+          : error;
+      }
+    },
   };
-  const before = await identity();
+}
+
+const fileId = (stats: BigIntStats) => `${stats.dev}:${stats.ino}`;
+const fileStats = (stats: BigIntStats) =>
+  `${fileId(stats)}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+
+/**
+ * A SQLite file as seen without SQLite, all through one open handle: the file's identity, size and
+ * times before and after a SHA-256 of its bytes, and its first 20 bytes. Every wait is bounded by
+ * the budget, whose deadline is also checked between reads.
+ */
+async function sqliteFileState(
+  file: string,
+  budget: Budget,
+): Promise<{ state: string; id: string; header: Buffer }> {
   const hash = createHash("sha256");
   const header = Buffer.alloc(20);
-  const handle = await openWithin(openFile(file, "r"));
+  const handle = await openWithin(openFile(file, "r"), budget.within);
   try {
+    const before = await budget.within(handle.stat({ bigint: true }));
     const buffer = Buffer.alloc(FILE_READ_BYTES);
     for (let position = 0; ; ) {
-      const { bytesRead } = await withTimeout(handle.read(buffer, 0, buffer.length, position));
+      budget.inTime();
+      const { bytesRead } = await budget.within(handle.read(buffer, 0, buffer.length, position));
       if (!bytesRead) break;
       if (position < header.length) buffer.copy(header, position, 0, bytesRead);
       hash.update(buffer.subarray(0, bytesRead));
       position += bytesRead;
     }
+    const after = await budget.within(handle.stat({ bigint: true }));
+    const state = `${fileStats(before)}\n${hash.digest("hex")}\n${fileStats(after)}`;
+    return { state, id: fileId(before), header };
   } finally {
     await closeWithin(handle);
   }
-  return { state: `${file}\n${before}\n${hash.digest("hex")}\n${await identity()}`, header };
 }
 
 interface SqliteSource {
   readOnly: true | "immutable";
+  /** The file the source path resolved to once; the witness and the open both use this name. */
+  file: string;
   /** sqliteFileState before the open. */
   state: string;
+  /** Device and inode of the file read for that state. */
+  id: string;
+}
+
+/**
+ * Whether the source path still resolves to the file the copy opened, and that name still holds
+ * the file read for the witness. Replacing or relinking the source meanwhile is not supported.
+ */
+async function sqlitePathStable(
+  path: string,
+  source: SqliteSource,
+  budget: Budget,
+): Promise<boolean> {
+  if ((await budget.within(realpath(path))) !== source.file) return false;
+  return fileId(await budget.within(lstat(source.file, { bigint: true }))) === source.id;
 }
 
 /**
@@ -383,22 +437,24 @@ interface SqliteSource {
  * A file with -wal or -shm files is open elsewhere or was not closed cleanly, and SQLite would use
  * them whatever the header says, so it is refused. A rollback-journal file opens read-only. A
  * WAL-mode file is read as immutable, since read-only access would create or write its -wal and
- * -shm files.
+ * -shm files. The path is resolved once, and every later step uses the file it resolved to.
  */
-async function sqliteSource(path: string): Promise<SqliteSource> {
-  const stats = await withTimeout(stat(path)).catch((error: unknown) => {
-    if (error instanceof OperationTimeoutError) throw error;
+async function sqliteSource(path: string, budget: Budget): Promise<SqliteSource> {
+  const missing = (error: unknown): never => {
+    if (error instanceof OperationTimeoutError || error instanceof CopyDeadlineError) throw error;
     // Opening a missing file would create it.
     throw new CopyRefusedError(SQL_SCHEMA);
-  });
+  };
+  const file = await budget.within(realpath(path)).catch(missing);
+  const stats = await budget.within(stat(file)).catch(missing);
   if (!stats.isFile()) throw new CopyRefusedError(SQLITE_NOT_FILE);
-  if (await withTimeout(sqliteSidecars(path))) throw new CopyRefusedError(SQLITE_IN_USE);
-  const { state, header } = await sqliteFileState(path);
+  if (await budget.within(sqliteSidecars(path, file))) throw new CopyRefusedError(SQLITE_IN_USE);
+  const { state, id, header } = await sqliteFileState(file, budget);
   // Bytes 18 and 19 of a database header are 2 in WAL mode (sqlite.org/fileformat.html).
   const wal =
     header.toString("latin1", 0, 16) === "SQLite format 3\0" &&
     (header[18] === 2 || header[19] === 2);
-  return { readOnly: wal ? "immutable" : true, state };
+  return { readOnly: wal ? "immutable" : true, file, state, id };
 }
 
 /** The URL the copy connects with: a PostgreSQL URL gains pg's query_timeout unless it sets one. */
@@ -606,6 +662,7 @@ async function checkMongoDestination(client: MongoClient, source?: MongoServer):
 async function connectMongoClient(url: string, options: MongoClientOptions): Promise<MongoClient> {
   const { MongoClient } = await import("mongodb");
   let client: MongoClient | undefined;
+  let connecting: Promise<unknown> | undefined;
   try {
     // A server that stops answering fails the operation instead of stalling the copy.
     client = new MongoClient(url, {
@@ -613,10 +670,15 @@ async function connectMongoClient(url: string, options: MongoClientOptions): Pro
       socketTimeoutMS: OPERATION_TIMEOUT_MS,
       ...options,
     });
-    await withTimeout(client.connect());
+    connecting = client.connect();
+    await withTimeout(connecting);
     return client;
   } catch {
     await closeWithin(client);
+    // A connect that ends after the timeout can open connections after that close.
+    const late = client;
+    const closeLate = () => closeWithin(late);
+    void connecting?.then(closeLate, closeLate);
     throw new Error("MongoDB storage could not be opened");
   }
 }
@@ -632,12 +694,16 @@ function closeWithin(connection?: { close(): Promise<void> }): Promise<void> {
 }
 
 /**
- * Waits for stores, a connection or a file to open within the operation timeout; one that opens
- * later is closed. Synchronous work inside the opener, such as a node:sqlite open, is not bounded.
+ * Waits for stores, a connection or a file to open within the operation timeout, or the bound of
+ * `wait`; one that opens later is closed. Synchronous work inside the opener, such as a node:sqlite
+ * open, is not bounded.
  */
-async function openWithin<T extends { close(): Promise<void> }>(opening: Promise<T>): Promise<T> {
+async function openWithin<T extends { close(): Promise<void> }>(
+  opening: Promise<T>,
+  wait: (work: Promise<T>) => Promise<T> = withTimeout,
+): Promise<T> {
   try {
-    return await withTimeout(opening);
+    return await wait(opening);
   } catch (error) {
     void opening.then(closeWithin, () => undefined);
     throw error;
@@ -652,20 +718,26 @@ interface OpenedSource extends OpenedStores {
 /**
  * Opens the source as it is: unlike the stores opener, it builds no indexes on a MongoDB source
  * and runs no migration on a SQL source, which must have exactly the schema this code knows. A
- * SQLite source is opened read-only. Its open, its schema check and, when that fails, its close
- * are bounded.
+ * SQLite source is opened read-only, by the file name its path resolved to before it was read.
+ * Its open, its schema check and, when that fails, its close are bounded.
  */
 async function openSource(
   url: string,
   kind: ReturnType<typeof storageKindFromUrl>,
+  budget: Budget,
 ): Promise<OpenedSource> {
   if (kind !== "mongodb") {
     const path = kind === "sqlite" ? sqlitePath(url) : undefined;
-    const sqlite = path === undefined ? undefined : await sqliteSource(path);
+    const sqlite = path === undefined ? undefined : await sqliteSource(path, budget);
     const driver = await openWithin(
-      openSqlDriver(connectionUrl(kind, url), sqlite ? { readOnly: sqlite.readOnly } : {}),
+      sqlite
+        ? openSqlDriver(`sqlite:${sqlite.file}`, { readOnly: sqlite.readOnly })
+        : openSqlDriver(connectionUrl(kind, url)),
     );
     try {
+      // The file opened must be the one read before: a path changed in between fails the copy.
+      if (path !== undefined && sqlite && !(await sqlitePathStable(path, sqlite, budget)))
+        throw new Error("SQLite source changed while it was opened");
       if (!(await withTimeout(supportedSqlSchema(driver)))) throw new CopyRefusedError(SQL_SCHEMA);
     } catch (error) {
       await closeWithin(driver);
@@ -677,12 +749,14 @@ async function openSource(
       kind,
       // An immutable connection holds no lock and may answer from pages it read before, so a
       // service that opened, changed and cleanly closed the source meanwhile shows only in the
-      // file itself. Either mode: it must be the file read before the open, with no -wal or -shm.
+      // file itself. Either mode: it must be the file read before the open, still at the same
+      // path, with no -wal or -shm.
       ...(path !== undefined && sqlite
         ? {
             untouched: async () =>
-              (await sqliteFileState(path)).state === sqlite.state &&
-              !(await withTimeout(sqliteSidecars(path))),
+              (await sqliteFileState(sqlite.file, budget)).state === sqlite.state &&
+              (await sqlitePathStable(path, sqlite, budget)) &&
+              !(await budget.within(sqliteSidecars(path, sqlite.file))),
           }
         : {}),
     };
@@ -838,7 +912,15 @@ export async function copyDatabase(
   try {
     if (await withTimeout(sameDatabase(fromKind, fromUrl, toKind, toUrl)))
       throw new CopyRefusedError(SAME_DATABASE);
-    source = open ? await open(fromUrl) : await openSource(fromUrl, fromKind);
+    // The deadline runs from here, so both full reads of a SQLite source file count against it.
+    const margin = windowMinutes * 60_000;
+    const deadline = margin - DEADLINE_RESERVE_MS;
+    const budget = copyBudget(
+      deadline,
+      () => new CopyDeadlineError({ ...copiedCounts }, deadline / 60_000, destinationWritten),
+    );
+    const { inTime } = budget;
+    source = open ? await open(fromUrl) : await openSource(fromUrl, fromKind, budget);
     const sourceServer = source.mongoClient && (await checkMongoSource(source.mongoClient));
     const sourceTransfer = transferBackend(source.stores);
     const unsupported = await unsupportedAudit(sourceTransfer);
@@ -846,6 +928,8 @@ export async function copyDatabase(
       throw new CopyRefusedError(
         `Audit details are not plain JSON in ${unsupported} ${unsupported === 1 ? "record" : "records"}`,
       );
+    // Past the deadline already: fail before anything is written.
+    inTime();
     if (open) {
       writing();
       destination = await open(toUrl);
@@ -857,16 +941,10 @@ export async function copyDatabase(
 
     // One fixed cutoff for every read below. Records expiring at or before it are skipped like
     // expired ones, and the run must end well before it (allowing for clock skew), so no record
-    // the reads include can reach its expiry, and a TTL deletion, while they run. Elapsed time
-    // comes from the monotonic clock, which wall-clock changes do not move.
-    const margin = windowMinutes * 60_000;
-    const deadline = margin - DEADLINE_RESERVE_MS;
-    const started = performance.now();
+    // the reads include can reach its expiry, and a TTL deletion, while they run: the deadline
+    // started before this cutoff was taken. Elapsed time comes from the monotonic clock, which
+    // wall-clock changes do not move.
     const cutoff = new Date(Date.now() + margin);
-    const inTime = () => {
-      if (performance.now() - started >= deadline)
-        throw new CopyDeadlineError({ ...copiedCounts }, deadline / 60_000);
-    };
     const live = await sourceTransfer.countLive(cutoff);
     const copied = new TransferDigest();
     copiedCounts = copied.counts;

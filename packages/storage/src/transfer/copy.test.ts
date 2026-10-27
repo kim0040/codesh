@@ -290,12 +290,14 @@ function openMemory(
   };
 }
 
-/** Moves the monotonic clock, and optionally the wall clock, by the returned offsets. */
+/**
+ * Moves the monotonic clock, and optionally the wall clock, by the returned offsets. The monotonic
+ * clock reads only its offset, so a boundary case does not depend on how long the run takes.
+ */
 function fakeClocks() {
   const clocks = { monotonic: 0, wall: 0 };
-  const now = performance.now.bind(performance);
   const wall = Date.now.bind(Date);
-  vi.spyOn(performance, "now").mockImplementation(() => now() + clocks.monotonic);
+  vi.spyOn(performance, "now").mockImplementation(() => clocks.monotonic);
   vi.spyOn(Date, "now").mockImplementation(() => wall() + clocks.wall);
   return clocks;
 }
