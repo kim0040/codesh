@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AuditRecord, defaultSettings, type ShareRecord } from "@gachipad/shared";
-import type { MongoClient } from "mongodb";
+import { type MongoClient, Timestamp } from "mongodb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryStores } from "../memory.js";
 import { type OpenedStores, openStores } from "../open.js";
@@ -18,6 +18,8 @@ import {
   sameMongoDatabase,
 } from "./copy.js";
 import { registerTransferBackend, transferBackend } from "./registry.js";
+import { createSqlTransferBackend } from "./sql.js";
+import { OPERATION_TIMEOUT_MS } from "./timeout.js";
 import type { TransferBackend, TransferItem } from "./types.js";
 
 const shareId = "Share001";
@@ -231,14 +233,36 @@ const MINUTE = 60_000;
 const MARGIN = 15 * MINUTE;
 const DEADLINE = 10 * MINUTE;
 
-/** A MongoDB client whose only use is the copy's hello command. */
+/** A MongoDB client whose only use is the copy's hello command; a set member is caught up. */
 function helloClient(reply: Record<string, unknown>, database = "gp"): MongoClient {
+  const opTime = { ts: new Timestamp({ t: 1_800_000_000, i: 1 }), t: 1 };
   return {
     db: () => ({
       databaseName: database,
-      command: async () => ({ localTime: new Date(), isWritablePrimary: true, ...reply }),
+      command: async () => ({
+        localTime: new Date(),
+        isWritablePrimary: true,
+        lastWrite: { opTime, majorityOpTime: opTime },
+        ...reply,
+      }),
     }),
   } as unknown as MongoClient;
+}
+
+/** A MongoDB client answering hello with each reply in turn, then with the last one again. */
+function helloSequence(replies: readonly Record<string, unknown>[]) {
+  let calls = 0;
+  const client = {
+    db: () => ({
+      databaseName: "gp",
+      command: async () => ({
+        localTime: new Date(),
+        isWritablePrimary: true,
+        ...replies[Math.min(calls++, replies.length - 1)],
+      }),
+    }),
+  } as unknown as MongoClient;
+  return { client, calls: () => calls };
 }
 
 /** Memory stores per URL, with an optional MongoDB client to answer hello. */
@@ -276,6 +300,7 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -297,6 +322,15 @@ async function sqlRun(url: string, sql: string): Promise<void> {
   const driver = await openSqlDriver(url);
   try {
     await driver.run(sql);
+  } finally {
+    await driver.close();
+  }
+}
+
+async function sqlAll(url: string, sql: string) {
+  const driver = await openSqlDriver(url);
+  try {
+    return await driver.all(sql);
   } finally {
     await driver.close();
   }
@@ -598,7 +632,9 @@ describe("database transfer", () => {
     const url = `sqlite:${join(await tempDir(), "extra.sqlite")}`;
     await (await openStores(url)).close();
     await sqlRun(url, "INSERT INTO upload_capacity (id,used_bytes) VALUES (2,0)");
-    await expect(copyDatabase("memory:", url)).rejects.toBeInstanceOf(CopyRefusedError);
+    await expect(
+      copyDatabase("memory:", url, { openStores: openWithMemorySource(createMemoryStores()) }),
+    ).rejects.toThrow(new CopyRefusedError("Destination is not empty"));
   });
 
   it("fails verification when the recomputed upload counter is wrong", async () => {
@@ -650,7 +686,9 @@ describe("database transfer", () => {
 
   it("fails a malformed MongoDB URL without exposing it", async () => {
     const url = "mongodb://copy-user:secret-value@localhost/gp?authMechanism=NOT-A-MECHANISM";
-    const error = await copyDatabase("memory:", url).catch((caught: unknown) => caught);
+    const error = await copyDatabase("memory:", url, {
+      openStores: openWithMemorySource(createMemoryStores()),
+    }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(CopyFailureError);
     expect(JSON.stringify(error)).not.toContain("secret-value");
     expect(String(error)).not.toContain("secret-value");
@@ -1083,5 +1121,250 @@ describe("database transfer", () => {
       });
       expect(result.counts.shares).toBe(1);
     }
+  });
+
+  it("waits for a lagging majority commit point and refuses a source that stays behind", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const opTime = (i: number) => ({ ts: new Timestamp({ t: 1_800_000_000, i }), t: 4 });
+    const behind = { setName: "rs0", lastWrite: { opTime: opTime(9), majorityOpTime: opTime(8) } };
+    const current = { setName: "rs0", lastWrite: { opTime: opTime(9), majorityOpTime: opTime(9) } };
+    for (const [replies, hellos, refusedAt] of [
+      // A replica set member that is up to date, and a standalone server, which reports neither.
+      [[current], 1, undefined],
+      [[{}], 1, undefined],
+      // Behind for the first two checks, at 0 and 1 s, then caught up at 3 s.
+      [[behind, behind, current], 3, undefined],
+      // Behind, or silent about its commit point, through every check until 30 s.
+      [[behind], 6, 30_000],
+      [[{ setName: "rs0" }], 6, 30_000],
+    ] as const) {
+      const source = createMemoryStores();
+      await source.shares.create(sampleShare());
+      const hello = helloSequence(replies);
+      const open = openMemory(
+        { "memory:": source, "memory://": createMemoryStores() },
+        { "memory:": hello.client },
+      );
+      const opened: string[] = [];
+      let settled = false;
+      const outcome = copyDatabase("memory:", "memory://", {
+        openStores: (url) => {
+          opened.push(url);
+          return open(url);
+        },
+      })
+        .catch((caught: unknown) => caught)
+        .finally(() => {
+          settled = true;
+        });
+      if (refusedAt) {
+        await vi.advanceTimersByTimeAsync(refusedAt - 1);
+        expect(settled).toBe(false);
+      }
+      await vi.advanceTimersByTimeAsync(30_000);
+      const result = await outcome;
+      expect(hello.calls()).toBe(hellos);
+      if (refusedAt) {
+        expect(result).toBeInstanceOf(CopyRefusedError);
+        expect((result as Error).message).toBe(
+          "MongoDB source has writes not yet replicated to a majority",
+        );
+        expect(opened).toEqual(["memory:"]);
+      } else expect(result).toMatchObject({ counts: { shares: 1 } });
+    }
+  });
+
+  it("scales the expiry margin and the deadline with the copy window", async () => {
+    const lab = (id: string, joinCode: string, minutes: number) => ({
+      id,
+      title: id,
+      ownerId,
+      joinCode,
+      templateShareId: null,
+      locked: false,
+      students: [],
+      createdAt: new Date(1),
+      expiresAt: new Date(Date.now() + minutes * MINUTE),
+    });
+    // A 60-minute window: a 60-minute margin and a 55-minute deadline.
+    for (const [elapsed, failed] of [
+      [55 * MINUTE - 1, false],
+      [55 * MINUTE, true],
+    ] as const) {
+      const clocks = fakeClocks();
+      const source = createMemoryStores();
+      const destination = createMemoryStores();
+      await source.labs.create(lab("LabSoon1", "100001", 59));
+      await source.labs.create(lab("LabLate1", "100002", 61));
+      wrapTransfer(destination, (actual) => ({
+        async uploadCounter() {
+          clocks.monotonic = elapsed;
+          return actual.uploadCounter();
+        },
+      }));
+      const outcome = await copyDatabase("memory:", "memory://", {
+        openStores: openPair(source, destination),
+        windowMinutes: 60,
+      }).catch((caught: unknown) => caught);
+      if (failed) {
+        expect(outcome).toBeInstanceOf(CopyDeadlineError);
+        expect(outcome).toMatchObject({ minutes: 55, counts: { labs: 1 } });
+      } else expect(outcome).toMatchObject({ counts: { labs: 1 } });
+      expect(await destination.labs.get("LabSoon1")).toBeNull();
+      expect((await destination.labs.get("LabLate1"))?.title).toBe("LabLate1");
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("refuses a copy window outside 15 to 1440 whole minutes", async () => {
+    const neverOpen = async (): Promise<OpenedStores> => {
+      throw new Error("must not open");
+    };
+    for (const windowMinutes of [14, 1441, 15.5, Number.NaN, -15])
+      await expect(
+        copyDatabase("memory:", "memory://", { openStores: neverOpen, windowMinutes }),
+      ).rejects.toThrow(
+        new CopyRefusedError("Copy window must be a whole number of minutes from 15 to 1440"),
+      );
+    for (const windowMinutes of [15, 1440]) {
+      const source = createMemoryStores();
+      await source.shares.create(sampleShare());
+      const result = await copyDatabase("memory:", "memory://", {
+        openStores: openPair(source, createMemoryStores()),
+        windowMinutes,
+      });
+      expect(result.counts.shares).toBe(1);
+    }
+  });
+
+  it("fails a stalled SQL destination after the operation timeout instead of hanging", async () => {
+    const source = createMemoryStores();
+    await seed(source);
+    const url = `sqlite:${join(await tempDir(), "stalled.sqlite")}`;
+    const driver = await openSqlDriver(url);
+    let stalled = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const outcome = copyDatabase("memory:", url, {
+        openStores: async (target) => {
+          const opened = await openWithMemorySource(source)(target);
+          if (target === url)
+            // The destination answers reads but never finishes a write transaction.
+            registerTransferBackend(
+              opened.stores,
+              createSqlTransferBackend({
+                ...driver,
+                transaction: () => {
+                  stalled = true;
+                  return new Promise<never>(() => undefined);
+                },
+              }),
+            );
+          return opened;
+        },
+      }).catch((caught: unknown) => caught);
+      while (!stalled) await new Promise((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(OPERATION_TIMEOUT_MS);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(CopyFailureError);
+      expect(error).toMatchObject({ code: "ETIMEDOUT", destinationWritten: true });
+    } finally {
+      vi.useRealTimers();
+      await driver.close();
+    }
+  });
+
+  it("tells apart a failure before the first write to the destination", async () => {
+    const dir = await tempDir();
+    const source = `sqlite:${join(dir, "source.sqlite")}`;
+    await (await openStores(source)).close();
+    // The destination's directory is missing: opening it fails before anything is written.
+    const error = await copyDatabase(source, `sqlite:${join(dir, "missing", "x.sqlite")}`).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(CopyFailureError);
+    expect(error).toMatchObject({ code: "SQLITE_CANTOPEN", destinationWritten: false });
+  });
+
+  it("refuses in-memory databases outside the test seam", async () => {
+    const dir = await tempDir();
+    const file = `sqlite:${join(dir, "kept.sqlite")}`;
+    await (await openStores(file)).close();
+    const target = join(dir, "never.sqlite");
+    for (const [from, to] of [
+      ["memory:", `sqlite:${target}`],
+      [file, "memory://"],
+      ["sqlite::memory:", `sqlite:${target}`],
+      [file, "sqlite://:memory:"],
+      [file, "sqlite:"],
+      [file, "sqlite:file::memory:?cache=shared"],
+      [file, `sqlite:file:${target}?mode=memory`],
+    ] as const)
+      await expect(copyDatabase(from, to)).rejects.toThrow(
+        new CopyRefusedError("Source and destination must be persistent databases"),
+      );
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("applies MySQL query parameters that change the server or the database", async () => {
+    const neverOpen = async (): Promise<OpenedStores> => {
+      throw new Error("must not open");
+    };
+    for (const [from, to] of [
+      ["mysql://root@db1/gp", "mysql://root@db9/other?host=db1&database=gp"],
+      ["mysql://root@db1:3307/gp", "mariadb://root@db1/gp?port=3307"],
+      ["mysql://root@db1/gp", "mysql://root@db1/other?database=%22gp%22"],
+      ["mysql://root@db1/gp?database=a&database=gp", "mysql://root@db1/gp"],
+    ] as const)
+      await expect(copyDatabase(from, to, { openStores: neverOpen })).rejects.toThrow(
+        new CopyRefusedError("Source and destination are the same"),
+      );
+    for (const [from, to] of [
+      ["mysql://root@db1/gp", "mysql://root@db1/gp?database=other"],
+      ["mysql://root@db1/gp", "mysql://root@db1/gp?host=db2"],
+      ["mysql://root@db1/gp?port=3307", "mysql://root@db1/gp"],
+    ] as const) {
+      const source = createMemoryStores();
+      await source.shares.create(sampleShare());
+      const result = await copyDatabase(from, to, {
+        openStores: openMemory({ [from]: source, [to]: createMemoryStores() }),
+      });
+      expect(result.counts.shares).toBe(1);
+    }
+  });
+
+  it("opens a SQL source as it is and refuses a missing or unknown schema version", async () => {
+    const dir = await tempDir();
+    const destination = `sqlite:${join(dir, "destination.sqlite")}`;
+    const refused = new CopyRefusedError("SQL source schema version is missing or not supported");
+    // Without a schema: opening it through the stores opener would create every table in it.
+    const bare = `sqlite:${join(dir, "bare.sqlite")}`;
+    await sqlRun(bare, "CREATE TABLE unrelated (id INTEGER)");
+    await expect(copyDatabase(bare, destination)).rejects.toThrow(refused);
+    expect(
+      await sqlAll(bare, "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"),
+    ).toEqual([{ name: "unrelated" }]);
+    // A schema version this code does not know, alone or after its own.
+    for (const versions of [[2], [1, 2]]) {
+      const url = `sqlite:${join(dir, `v${versions.join("-")}.sqlite`)}`;
+      await (await openStores(url)).close();
+      await sqlRun(url, "DELETE FROM schema_version");
+      for (const version of versions)
+        await sqlRun(
+          url,
+          `INSERT INTO schema_version (version, applied_at) VALUES (${version}, 0)`,
+        );
+      await expect(copyDatabase(url, destination)).rejects.toThrow(refused);
+      expect(
+        (await sqlAll(url, "SELECT version FROM schema_version ORDER BY version")).map((row) =>
+          Number(row.version),
+        ),
+      ).toEqual(versions);
+    }
+    // A missing file is not created.
+    const missing = join(dir, "missing.sqlite");
+    await expect(copyDatabase(`sqlite:${missing}`, destination)).rejects.toThrow(refused);
+    expect(existsSync(missing)).toBe(false);
+    expect(existsSync(join(dir, "destination.sqlite"))).toBe(false);
   });
 });

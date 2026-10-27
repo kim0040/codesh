@@ -1,12 +1,13 @@
 import { createHash, type Hash } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { access, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Document, MongoClient, MongoClientOptions } from "mongodb";
 import type { OpenedStores } from "../open.js";
 import { openStores, storageKindFromUrl } from "../open.js";
 import { openSqlDriver, sqlErrorCode } from "../sql/driver.js";
 import { transferBackend } from "./registry.js";
-import { createSqlTransferBackend } from "./sql.js";
+import { createSqlTransferBackend, supportedSqlSchema } from "./sql.js";
+import { OPERATION_TIMEOUT_MS, withTimeout } from "./timeout.js";
 import {
   type AuditItem,
   type ShareMembers,
@@ -21,16 +22,30 @@ import {
 const BATCH_RECORDS = 64;
 const BATCH_BYTES = 2 * 1024 * 1024;
 const DIGEST_MODULUS = 1n << 256n;
-/** Records expiring within this time after the start are skipped like expired ones. */
-const EXPIRY_MARGIN_MS = 15 * 60_000;
-/** Everything from the first count to the last verification read must finish within this time. */
-const COPY_DEADLINE_MS = 10 * 60_000;
+/**
+ * The copy window in minutes. Records expiring within the window after the start are skipped like
+ * expired ones, and everything from the first count to the last verification read must finish
+ * within the window minus DEADLINE_RESERVE_MS.
+ */
+export const COPY_WINDOW_MINUTES = { default: 15, min: 15, max: 1440 } as const;
+/** Larger than MAX_CLOCK_SKEW_MS, so deadline + skew stays below the expiry margin. */
+const DEADLINE_RESERVE_MS = 5 * 60_000;
 /** Largest accepted difference between this host's clock and a MongoDB server's clock. */
 const MAX_CLOCK_SKEW_MS = 2 * 60_000;
+/** Waits before each repeated check of a source whose newest writes are not majority-committed. */
+const MAJORITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+/** How long a majority write may wait for replication before it fails. */
+const WRITE_CONCERN_TIMEOUT_MS = 60_000;
+/** How long closing a connection may take after the copy ended. */
+const CLOSE_TIMEOUT_MS = 10_000;
 const SAME_DATABASE = "Source and destination are the same";
 const NOT_EMPTY = "Destination is not empty";
 const NOT_PRIMARY = "MongoDB source is not the primary";
+const NOT_MAJORITY = "MongoDB source has writes not yet replicated to a majority";
 const CLOCK_SKEW = "MongoDB server clock differs from this host by more than 2 minutes";
+const NOT_PERSISTENT = "Source and destination must be persistent databases";
+const SQL_SCHEMA = "SQL source schema version is missing or not supported";
+const WINDOW_RANGE = `Copy window must be a whole number of minutes from ${COPY_WINDOW_MINUTES.min} to ${COPY_WINDOW_MINUTES.max}`;
 
 export class CopyRefusedError extends Error {
   constructor(message: string) {
@@ -50,16 +65,21 @@ export class CopyFailureError extends Error {
   constructor(
     readonly counts: TransferCounts,
     readonly code?: string,
+    /** false when the run failed before its first write to the destination. */
+    readonly destinationWritten = true,
   ) {
     super("Database copy failed");
     this.name = "CopyFailureError";
   }
 }
 
-/** The copy outlasted COPY_DEADLINE_MS, so a TTL deletion may have gone unnoticed. */
+/** The copy outlasted its deadline, so a TTL deletion may have gone unnoticed. */
 export class CopyDeadlineError extends Error {
-  constructor(readonly counts: TransferCounts) {
-    super("Copy took longer than 10 minutes");
+  constructor(
+    readonly counts: TransferCounts,
+    readonly minutes: number,
+  ) {
+    super(`Copy took longer than ${minutes} minutes`);
     this.name = "CopyDeadlineError";
   }
 }
@@ -67,6 +87,8 @@ export class CopyDeadlineError extends Error {
 export interface CopyDatabaseOptions {
   /** Test seam; production callers use the configured storage opener. */
   openStores?: (url: string) => Promise<OpenedStores>;
+  /** The copy window in minutes, COPY_WINDOW_MINUTES.default when omitted. */
+  windowMinutes?: number;
   batchRecords?: number;
   batchBytes?: number;
 }
@@ -271,6 +293,25 @@ function sqlitePath(url: string): string {
   return decodeURIComponent(new URL(url).pathname);
 }
 
+/** In-memory and temporary SQLite databases end with their connection. */
+function persistentDatabase(kind: ReturnType<typeof storageKindFromUrl>, url: string): boolean {
+  if (kind === "memory") return false;
+  if (kind !== "sqlite") return true;
+  let path: string;
+  try {
+    path = sqlitePath(url);
+  } catch {
+    // The driver rejects this URL with its own error.
+    return true;
+  }
+  return !(
+    path === "" ||
+    path === ":memory:" ||
+    /^file::memory:/i.test(path) ||
+    (/^file:/i.test(path) && /[?&](?:mode=memory|vfs=memdb)(?:[&#]|$)/i.test(path))
+  );
+}
+
 /** The file behind a path, following symlinks of the file or, before it exists, its directory. */
 async function fileIdentity(path: string): Promise<string> {
   const absolute = resolve(path);
@@ -304,21 +345,24 @@ async function sqlIdentity(
     // A repeated query parameter takes its last value in both drivers.
     const param = (name: string) => parsed.searchParams.getAll(name).at(-1);
     if (kind === "mysql") {
-      // mysql2: host, port and database come from the URL only; a socketPath parameter (JSON or
-      // plain text) replaces host and port.
-      const database = decodeURIComponent(parsed.pathname.slice(1));
-      const socket = param("socketPath");
-      if (socket) {
-        let socketPath: unknown = socket;
+      // mysql2 (ConnectionConfig.parseUrl): every query parameter, JSON or plain text, overrides
+      // the URL's own host, port and database; a socketPath replaces host and port.
+      const config: Record<string, unknown> = {
+        host: hostname,
+        port: parsed.port,
+        database: decodeURIComponent(parsed.pathname.slice(1)),
+      };
+      for (const [key, value] of parsed.searchParams) {
         try {
-          socketPath = JSON.parse(socket);
+          config[key] = JSON.parse(value);
         } catch {
-          // mysql2 keeps the plain text.
+          config[key] = value;
         }
-        if (socketPath) return `mysql:socket:${String(socketPath)}:${database}`;
       }
-      const port = Number.parseInt(parsed.port, 10) || 3306;
-      return `mysql:${(hostname || "localhost").toLowerCase()}:${port}:${database}`;
+      const database = String(config.database ?? "");
+      if (config.socketPath) return `mysql:socket:${String(config.socketPath)}:${database}`;
+      const port = Number.parseInt(String(config.port), 10) || 3306;
+      return `mysql:${(String(config.host ?? "") || "localhost").toLowerCase()}:${port}:${database}`;
     }
     // pg: query parameters, then the URL, then PG* variables, then defaults. The database
     // defaults to the user name. A host starting with "/" is a socket directory: a
@@ -366,6 +410,8 @@ interface MongoServer {
   identity: MongoIdentity;
   /** The answering server is a writable primary. */
   primary: boolean;
+  /** A replica set member whose newest write is not majority-committed, or that does not say. */
+  behindMajority: boolean;
   /** How far the server's clock lies outside this host's clock around the request, in ms. */
   skew: number;
 }
@@ -382,6 +428,7 @@ async function mongoServer(client: MongoClient): Promise<MongoServer> {
   const members: unknown[] = [hello.hosts, hello.passives, hello.arbiters, hello.primary, hello.me]
     .flat()
     .filter((host) => typeof host === "string");
+  const { opTime, majorityOpTime } = hello.lastWrite ?? {};
   return {
     identity: {
       database: client.db().databaseName,
@@ -390,6 +437,10 @@ async function mongoServer(client: MongoClient): Promise<MongoServer> {
       hosts: [...new Set(members.map((host) => String(host).toLowerCase()))],
     },
     primary: hello.isWritablePrimary === true,
+    // Standalone servers and mongos routers carry no setName; their reads see every write.
+    behindMajority:
+      typeof hello.setName === "string" &&
+      !(opTime && majorityOpTime && canonical(opTime) === canonical(majorityOpTime)),
     skew: !Number.isFinite(serverTime)
       ? Number.POSITIVE_INFINITY
       : Math.max(0, before - serverTime, serverTime - after),
@@ -420,20 +471,30 @@ function refuseClockSkew(server: MongoServer): void {
   if (!(server.skew <= MAX_CLOCK_SKEW_MS)) throw new CopyRefusedError(CLOCK_SKEW);
 }
 
-/** Copy reads are only as complete as the server they reach: refuse anything but a primary. */
+/**
+ * Copy reads are only as complete as the server they reach: refuse anything but a primary, and a
+ * primary whose newest writes are not majority-committed yet, which majority reads cannot see.
+ * Writers are stopped, so a lag that lasts through the repeated checks is a degraded set.
+ */
 async function checkMongoSource(client: MongoClient): Promise<MongoServer> {
-  let server: MongoServer;
-  try {
-    server = await mongoServer(client);
-  } catch (error) {
-    // Connected, but no primary could be selected for the hello.
-    if (error instanceof Error && error.name === "MongoServerSelectionError")
-      throw new CopyRefusedError(NOT_PRIMARY);
-    throw error;
+  for (const delay of [...MAJORITY_RETRY_DELAYS_MS, undefined]) {
+    let server: MongoServer;
+    try {
+      server = await mongoServer(client);
+    } catch (error) {
+      // Connected, but no primary could be selected for the hello.
+      if (error instanceof Error && error.name === "MongoServerSelectionError")
+        throw new CopyRefusedError(NOT_PRIMARY);
+      throw error;
+    }
+    if (!server.primary) throw new CopyRefusedError(NOT_PRIMARY);
+    if (!server.behindMajority) {
+      refuseClockSkew(server);
+      return server;
+    }
+    if (delay !== undefined) await new Promise((resolve) => setTimeout(resolve, delay));
   }
-  if (!server.primary) throw new CopyRefusedError(NOT_PRIMARY);
-  refuseClockSkew(server);
-  return server;
+  throw new CopyRefusedError(NOT_MAJORITY);
 }
 
 async function checkMongoDestination(client: MongoClient, source?: MongoServer): Promise<void> {
@@ -448,7 +509,12 @@ async function connectMongoClient(url: string, options: MongoClientOptions): Pro
   const { MongoClient } = await import("mongodb");
   let client: MongoClient | undefined;
   try {
-    client = new MongoClient(url, { serverSelectionTimeoutMS: 10_000, ...options });
+    // A server that stops answering fails the operation instead of stalling the copy.
+    client = new MongoClient(url, {
+      serverSelectionTimeoutMS: 10_000,
+      socketTimeoutMS: OPERATION_TIMEOUT_MS,
+      ...options,
+    });
     await client.connect();
     return client;
   } catch {
@@ -457,12 +523,35 @@ async function connectMongoClient(url: string, options: MongoClientOptions): Pro
   }
 }
 
-/** Opens the source; unlike the stores opener, it builds no indexes on a MongoDB source. */
+/**
+ * Opens the source as it is: unlike the stores opener, it builds no indexes on a MongoDB source
+ * and runs no migration on a SQL source, which must have exactly the schema this code knows.
+ */
 async function openSource(
   url: string,
   kind: ReturnType<typeof storageKindFromUrl>,
 ): Promise<OpenedStores> {
-  if (kind !== "mongodb") return openStores(url);
+  if (kind !== "mongodb") {
+    // Opening a missing SQLite file would create it.
+    if (kind === "sqlite") {
+      const path = sqlitePath(url);
+      if (
+        !/^file:/i.test(path) &&
+        !(await access(path).then(
+          () => true,
+          () => false,
+        ))
+      )
+        throw new CopyRefusedError(SQL_SCHEMA);
+    }
+    const driver = await openSqlDriver(url);
+    try {
+      if (!(await supportedSqlSchema(driver))) throw new CopyRefusedError(SQL_SCHEMA);
+    } finally {
+      await driver.close();
+    }
+    return withTimeout(openStores(url, { migrate: false }));
+  }
   const { createMongoStores } = await import("../mongo.js");
   const client = await connectMongoClient(url, {});
   return {
@@ -473,24 +562,30 @@ async function openSource(
   };
 }
 
-/** Opens the destination after the same-database and emptiness checks, before any write. */
+/**
+ * Opens the destination after the same-database and emptiness checks. `writing` runs right before
+ * its first write (index or schema creation).
+ */
 async function openDestination(
   url: string,
   kind: ReturnType<typeof storageKindFromUrl>,
+  writing: () => void,
   source?: MongoServer,
 ): Promise<OpenedStores> {
   if (kind === "mongodb") {
     const [{ createMongoStores, ensureIndexes }, { createMongoTransferBackend }] =
       await Promise.all([import("../mongo.js"), import("./mongo.js")]);
-    // No retried writes; majority writes, so the majority reads of verification see them.
+    // No retried writes; majority writes, so the majority reads of verification see them, with a
+    // bounded wait for replication.
     const client = await connectMongoClient(url, {
       retryWrites: false,
-      writeConcern: { w: "majority" },
+      writeConcern: { w: "majority", wtimeoutMS: WRITE_CONCERN_TIMEOUT_MS },
     });
     try {
       await checkMongoDestination(client, source);
       const db = client.db();
       if (!(await createMongoTransferBackend(db).isEmpty())) throw new CopyRefusedError(NOT_EMPTY);
+      writing();
       await ensureIndexes(db);
       return {
         stores: createMongoStores(db),
@@ -512,7 +607,8 @@ async function openDestination(
       await driver.close();
     }
   }
-  return openStores(url);
+  writing();
+  return withTimeout(openStores(url));
 }
 
 async function readAll(
@@ -574,6 +670,13 @@ export async function copyDatabase(
   toUrl: string,
   options: CopyDatabaseOptions = {},
 ): Promise<CopyDatabaseResult> {
+  const windowMinutes = options.windowMinutes ?? COPY_WINDOW_MINUTES.default;
+  if (
+    !Number.isInteger(windowMinutes) ||
+    windowMinutes < COPY_WINDOW_MINUTES.min ||
+    windowMinutes > COPY_WINDOW_MINUTES.max
+  )
+    throw new CopyRefusedError(WINDOW_RANGE);
   let fromKind: ReturnType<typeof storageKindFromUrl>;
   let toKind: ReturnType<typeof storageKindFromUrl>;
   try {
@@ -584,9 +687,16 @@ export async function copyDatabase(
   }
 
   const open = options.openStores;
+  // The test seam may open in-memory stores; real runs must leave a database behind.
+  if (!open && !(persistentDatabase(fromKind, fromUrl) && persistentDatabase(toKind, toUrl)))
+    throw new CopyRefusedError(NOT_PERSISTENT);
   let source: OpenedStores | undefined;
   let destination: OpenedStores | undefined;
   let copiedCounts = emptyCounts();
+  let destinationWritten = false;
+  const writing = () => {
+    destinationWritten = true;
+  };
   try {
     if (await sameDatabase(fromKind, fromUrl, toKind, toUrl))
       throw new CopyRefusedError(SAME_DATABASE);
@@ -599,10 +709,11 @@ export async function copyDatabase(
         `Audit details are not plain JSON in ${unsupported} ${unsupported === 1 ? "record" : "records"}`,
       );
     if (open) {
+      writing();
       destination = await open(toUrl);
       if (destination.mongoClient)
         await checkMongoDestination(destination.mongoClient, sourceServer);
-    } else destination = await openDestination(toUrl, toKind, sourceServer);
+    } else destination = await openDestination(toUrl, toKind, writing, sourceServer);
     const destinationTransfer = transferBackend(destination.stores);
     if (!(await destinationTransfer.isEmpty())) throw new CopyRefusedError(NOT_EMPTY);
 
@@ -610,11 +721,13 @@ export async function copyDatabase(
     // expired ones, and the run must end well before it (allowing for clock skew), so no record
     // the reads include can reach its expiry, and a TTL deletion, while they run. Elapsed time
     // comes from the monotonic clock, which wall-clock changes do not move.
+    const margin = windowMinutes * 60_000;
+    const deadline = margin - DEADLINE_RESERVE_MS;
     const started = performance.now();
-    const cutoff = new Date(Date.now() + EXPIRY_MARGIN_MS);
+    const cutoff = new Date(Date.now() + margin);
     const inTime = () => {
-      if (performance.now() - started >= COPY_DEADLINE_MS)
-        throw new CopyDeadlineError({ ...copiedCounts });
+      if (performance.now() - started >= deadline)
+        throw new CopyDeadlineError({ ...copiedCounts }, deadline / 60_000);
     };
     const live = await sourceTransfer.countLive(cutoff);
     const copied = new TransferDigest();
@@ -651,16 +764,22 @@ export async function copyDatabase(
     if (error instanceof CopyRefusedError || error instanceof CopyVerificationError) throw error;
     if (error instanceof CopyFailureError || error instanceof CopyDeadlineError) throw error;
     const code = safeDriverCode(error);
-    throw new CopyFailureError({ ...copiedCounts }, code);
+    throw new CopyFailureError({ ...copiedCounts }, code, destinationWritten);
   } finally {
-    await destination?.close().catch(() => undefined);
-    await source?.close().catch(() => undefined);
+    // A connection stuck in a timed-out operation must not hold the result back.
+    await withTimeout(destination?.close() ?? Promise.resolve(), CLOSE_TIMEOUT_MS).catch(
+      () => undefined,
+    );
+    await withTimeout(source?.close() ?? Promise.resolve(), CLOSE_TIMEOUT_MS).catch(
+      () => undefined,
+    );
   }
 }
 
 function safeDriverCode(error: unknown, seen = new Set<object>()): string | undefined {
   const sqlCode = sqlErrorCode(error);
   if (sqlCode) return sqlCode;
+  if (error instanceof Error && error.name === "MongoNetworkTimeoutError") return "ETIMEDOUT";
   if (error instanceof Error) {
     const match =
       /^(?:sqlite|postgresql|mysql) storage (?:connection|migration) failed(?: \(([A-Z0-9_]{1,64})\))?$/.exec(

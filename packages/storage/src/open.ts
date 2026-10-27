@@ -17,6 +17,8 @@ export interface OpenedStores {
 
 export interface OpenStoresOptions {
   mongoServerSelectionTimeoutMS?: number;
+  /** false opens an existing SQL database as it is, without migrating it (for the copy's source). */
+  migrate?: boolean;
 }
 
 export function storageKindFromUrl(url: string): StorageKind {
@@ -65,8 +67,10 @@ export async function openStores(
   try {
     driver = await openSqlDriver(url);
     await driver.all("SELECT 1");
-    step = "migration";
-    await ensureSqlSchema(driver);
+    if (options.migrate !== false) {
+      step = "migration";
+      await ensureSqlSchema(driver);
+    }
     return {
       stores: createSqlStores(driver),
       close: () => driver?.close() ?? Promise.resolve(),

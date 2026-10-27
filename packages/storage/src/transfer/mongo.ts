@@ -25,6 +25,23 @@ import { COLLECTIONS, UPLOADS_BUCKET } from "../mongo.js";
 import { splitShare } from "./members.js";
 import type { AuditItem, TransferBackend, TransferItem, TransferRecord } from "./types.js";
 
+/**
+ * Every collection that holds data besides the upload quota; a destination must have them all
+ * empty. A function, because mongo.ts and this module import each other.
+ */
+export const mongoDataCollections = () => [
+  COLLECTIONS.shares,
+  COLLECTIONS.updates,
+  COLLECTIONS.snapshots,
+  COLLECTIONS.labs,
+  COLLECTIONS.labels,
+  COLLECTIONS.settings,
+  COLLECTIONS.audit,
+  "diagnostics",
+  `${UPLOADS_BUCKET}.files`,
+  `${UPLOADS_BUCKET}.chunks`,
+];
+
 const PAGE_SIZE = 128;
 const binaryBytes = (value: Binary) => Uint8Array.from(value.buffer.subarray(0, value.position));
 const binary = (value: Uint8Array) => new Binary(Uint8Array.from(value));
@@ -379,19 +396,7 @@ export function createMongoTransferBackend(storesDb: Db): TransferBackend {
     },
 
     async isEmpty() {
-      const collections = [
-        COLLECTIONS.shares,
-        COLLECTIONS.updates,
-        COLLECTIONS.snapshots,
-        COLLECTIONS.labs,
-        COLLECTIONS.labels,
-        COLLECTIONS.settings,
-        COLLECTIONS.audit,
-        "diagnostics",
-        `${UPLOADS_BUCKET}.files`,
-        `${UPLOADS_BUCKET}.chunks`,
-      ];
-      for (const collection of collections)
+      for (const collection of mongoDataCollections())
         if (await db.collection(collection).findOne({}, { projection: { _id: 1 } })) return false;
       if (await quota.findOne({ _id: { $ne: "uploads" } }, { projection: { _id: 1 } }))
         return false;
