@@ -28,6 +28,8 @@ import {
   MongoClient,
   ObjectId,
 } from "mongodb";
+import { createMongoTransferBackend } from "./transfer/mongo.js";
+import { registerTransferBackend } from "./transfer/registry.js";
 import {
   type AuditQuery,
   type AuditStore,
@@ -968,7 +970,7 @@ export function createMongoStores(db: Db): Stores {
     audit: new MongoAuditStore(db.collection<AuditDoc>(COLLECTIONS.audit)),
   };
   stores.maintenance = new MongoMaintenance(db, stores, files);
-  return stores;
+  return registerTransferBackend(stores, createMongoTransferBackend(db));
 }
 
 /**

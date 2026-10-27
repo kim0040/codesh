@@ -17,4 +17,12 @@ export {
 } from "./mongo.js";
 export { type OpenedStores, openStores, type StorageKind, storageKindFromUrl } from "./open.js";
 export { sqlErrorCode } from "./sql/driver.js";
+export {
+  CopyFailureError,
+  CopyRefusedError,
+  CopyVerificationError,
+  copyDatabase,
+  countsForCli,
+} from "./transfer/copy.js";
+export { TRANSFER_KINDS, type TransferCounts, type TransferKind } from "./transfer/types.js";
 export * from "./types.js";

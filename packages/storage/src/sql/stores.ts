@@ -17,6 +17,8 @@ import {
   settingsSchema,
   type UploadRecord,
 } from "@gachipad/shared";
+import { registerTransferBackend } from "../transfer/registry.js";
+import { createSqlTransferBackend } from "../transfer/sql.js";
 import {
   type AuditQuery,
   DuplicateSeqError,
@@ -1195,7 +1197,7 @@ class SqlDiagnosticsStore {
 }
 
 export function createSqlStores(driver: SqlDriver): Stores {
-  return {
+  const stores: Stores = {
     diagnostics: new SqlDiagnosticsStore(driver),
     shares: new SqlShareStore(driver),
     updates: new SqlUpdateLog(driver),
@@ -1206,4 +1208,5 @@ export function createSqlStores(driver: SqlDriver): Stores {
     settings: new SqlSettingsStore(driver),
     audit: new SqlAuditStore(driver),
   };
+  return registerTransferBackend(stores, createSqlTransferBackend(driver));
 }
