@@ -119,6 +119,8 @@ tmp_get() {
   if [[ "$value" == \'*\' ]]; then
     value="${value:1:${#value}-2}"
     value="${value//\\\'/\'}"
+  elif [[ "$value" == \"*\" ]]; then
+    value="${value:1:${#value}-2}"
   fi
   printf '%s' "$value"
 }
@@ -148,10 +150,20 @@ if [ -n "$database_url" ]; then
   [ -z "${DATABASE_URL:-}" ] || set_tmp DATABASE_URL "$DATABASE_URL"
   if [ "$scheme" = sqlite ]; then db=sqlite; else db=external; fi
 else
-  if [ "$pin_mongo" = 1 ]; then db=mongodb; else db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"; fi
+  if [ "$pin_mongo" = 1 ]; then
+    if [ -n "$(tmp_get GACHIPAD_DB)" ] && [ "$(tmp_get GACHIPAD_DB)" != mongodb ]; then
+      echo "generate-secrets: database backend change refused (mongodb -> requested backend); data copy is not available yet. Keep the existing backend until the future copy tool is available." >&2
+    fi
+    db=mongodb
+  else db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"; fi
   if [ -z "$db" ]; then
     if [ "$had_mongo" = 1 ]; then db=mongodb; else db=sqlite; fi
   fi
+fi
+marker="$(cat state/database-kind 2>/dev/null || true)"
+if [ -n "$marker" ] && [ "$marker" != "$db" ]; then
+  echo "generate-secrets: database backend change refused ($marker -> $db); data copy is not available yet. Keep the existing backend until the future copy tool is available." >&2
+  exit 1
 fi
 case "$db" in
   sqlite)
@@ -186,23 +198,23 @@ set_tmp GACHIPAD_DATABASE_URL "$compose_database_url"
 profiles="${COMPOSE_PROFILES:-$(tmp_get COMPOSE_PROFILES)}"
 profile_list=()
 IFS=',' read -r -a existing_profiles <<<"$profiles"
-for profile in "${existing_profiles[@]}"; do
+for profile in ${existing_profiles[@]+"${existing_profiles[@]}"}; do
   profile="${profile#"${profile%%[![:space:]]*}"}"
   profile="${profile%"${profile##*[![:space:]]}"}"
   [ -n "$profile" ] || continue
   case "$profile" in mongodb | postgres) continue ;; esac
   found=0
-  for existing in "${profile_list[@]}"; do [ "$existing" = "$profile" ] && found=1; done
+  for existing in ${profile_list[@]+"${profile_list[@]}"}; do [ "$existing" = "$profile" ] && found=1; done
   [ "$found" = 1 ] || profile_list+=("$profile")
 done
 case "$db" in mongodb | postgres)
   found=0
-  for existing in "${profile_list[@]}"; do [ "$existing" = "$db" ] && found=1; done
+  for existing in ${profile_list[@]+"${profile_list[@]}"}; do [ "$existing" = "$db" ] && found=1; done
   [ "$found" = 1 ] || profile_list+=("$db")
   ;;
 esac
 profiles=""
-for profile in "${profile_list[@]}"; do
+for profile in ${profile_list[@]+"${profile_list[@]}"}; do
   [ -z "$profiles" ] || profiles+=,
   profiles+="$profile"
 done

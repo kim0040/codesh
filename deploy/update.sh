@@ -439,6 +439,7 @@ rollback() {
   if [ "$DB_TOUCHED" = 1 ]; then
     if [ "$(database_kind)" = external ]; then
       say "external database was not restored; restore its external backup before starting the previous application"
+      say "after restoring the external backup, run: cd $(printf '%q' "$(pwd -P)") && docker compose up -d --wait --wait-timeout $HEALTH_TIMEOUT && rm -f state/transaction"
       return 1
     fi
     [ -n "$BACKUP" ] || return 1
@@ -491,7 +492,7 @@ update() {
   fi
   if [ "$mode" != check ]; then
     assert_database_backend
-    if [ "$(database_kind)" = external ] && [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-}" != 1 ]; then
+    if [ "$(database_kind)" = external ] && [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-$(env_get GACHIPAD_EXTERNAL_BACKUP_CONFIRMED)}" != 1 ]; then
       fail refused "DATABASE_URL uses an external database; back up that server first, then rerun with GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1"
     fi
   fi

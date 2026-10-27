@@ -59,7 +59,7 @@ host_database_options() {
     ')"
   fi
   [ -n "$memory" ] || memory=unknown
-  for label in "${detected[@]}"; do [ -z "$output" ] || output+=", "; output+="$label"; done
+  for label in ${detected[@]+"${detected[@]}"}; do [ -z "$output" ] || output+=", "; output+="$label"; done
   [ -n "$output" ] || output=none
   local client_text="none"
   if [ "${#clients[@]}" -gt 0 ]; then
@@ -83,13 +83,12 @@ select_database() {
     validate_database_url "$DATABASE_URL" 2>/dev/null || die "DATABASE_URL has an unsupported scheme"
     scheme="${DATABASE_URL%%:*}"
     if [ "$scheme" = sqlite ]; then selected=sqlite; else selected=external; fi
-    env_set DATABASE_URL "$DATABASE_URL"
     if [ "$selected" = external ]; then reason="DATABASE_URL was supplied; using its external database"
     else reason="DATABASE_URL was supplied; using its SQLite file"; fi
   elif [ -n "$DB_OPTION" ]; then
     valid_db_option "$DB_OPTION" || die "--db must be sqlite, postgres, mongodb or external"
     selected="$DB_OPTION"
-    env_set DATABASE_URL ""
+    DATABASE_URL=""
     reason="selected with --db $selected"
   elif [ -n "${GACHIPAD_DB:-}" ]; then
     valid_db_option "$GACHIPAD_DB" || die "GACHIPAD_DB must be sqlite, postgres, mongodb or external"
@@ -127,11 +126,9 @@ select_database() {
     printf '\n'
     export DATABASE_URL
     validate_database_url "$DATABASE_URL" 2>/dev/null || die "DATABASE_URL has an unsupported scheme"
-    env_set DATABASE_URL "$DATABASE_URL"
   fi
-  env_set GACHIPAD_DB "$selected"
   GACHIPAD_DB="$selected"
-  export GACHIPAD_DB
+  export GACHIPAD_DB DATABASE_URL
   echo "install: database $selected; $reason."
 }
 
@@ -154,23 +151,26 @@ if [ -f .env ]; then
   echo "install: keeping the existing .env"
 else
   FRESH=1
-  cp .env.example .env
 fi
+select_database "$FRESH"
+echo "install: loading images ($VERSION)"
+docker load -i images.tar
+assert_database_backend
+
+# Persist settings only after the backend guard has accepted the proposed selection.
+[ "$FRESH" = 0 ] || cp .env.example .env
 for name in PUBLIC_URL HTTP_PORT HTTPS_PORT SITE_ADDRESS COLLAB_REPLICAS; do
   value="${!name:-}"
   [ -n "$value" ] && env_set "$name" "$value"
 done
-select_database "$FRESH"
+env_set DATABASE_URL "${DATABASE_URL:-}"
+env_set GACHIPAD_DB "$GACHIPAD_DB"
 ./generate-secrets.sh .env
 env_set GACHIPAD_VERSION "$VERSION"
 # The loaded images carry the bundle's registry in their names.
 REGISTRY="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
 [ -n "$REGISTRY" ] && env_set GACHIPAD_REGISTRY "$REGISTRY"
 mkdir -p state && chmod 755 state
-
-echo "install: loading images ($VERSION)"
-docker load -i images.tar
-assert_database_backend
 
 echo "install: starting"
 docker compose up -d --wait

@@ -11,15 +11,17 @@ need_docker() {
 # env_get NAME [default]: value of NAME in .env (last assignment wins)
 env_get() {
   local value
-  value="$(sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1)"
+  value="$(sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1 || true)"
   # legacy codesh name (1.0.x); remove in 2.0
   if [ -z "$value" ] && [[ "$1" == GACHIPAD_* ]]; then
-    value="$(sed -n "s/^CODESH_${1#GACHIPAD_}=//p" .env 2>/dev/null | tail -n 1)"
+    value="$(sed -n "s/^CODESH_${1#GACHIPAD_}=//p" .env 2>/dev/null | tail -n 1 || true)"
   fi
   # Compose single quotes keep passwords containing $, # or spaces literal.
   if [[ "$value" == \'*\' ]]; then
     value="${value:1:${#value}-2}"
     value="${value//\\\'/\'}"
+  elif [[ "$value" == \"*\" ]]; then
+    value="${value:1:${#value}-2}"
   fi
   printf '%s' "${value:-${2:-}}"
 }
@@ -81,13 +83,20 @@ database_volume_suffix() {
 }
 
 database_volume_nonempty() {
-  local volume="$1" result
+  local volume="$1" kind="${2:-}" result
   docker volume inspect "$volume" >/dev/null 2>&1 || return 1
-  result="$(docker compose run --rm --no-deps -T --pull never --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" \
+  result="$(GACHIPAD_PROBE_SQLITE_URL="$(env_get GACHIPAD_DATABASE_URL)" docker compose run --rm --no-deps -T --pull never --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" -e GACHIPAD_PROBE_SQLITE_URL \
     --entrypoint node api -e '
-      const { readdirSync } = require("node:fs");
-      process.stdout.write(readdirSync("/probe").length ? "nonempty" : "empty");
-    ' 2>/dev/null)" || die "cannot inspect existing database volume $volume; refusing to change the database backend"
+      const { readdirSync, existsSync } = require("node:fs");
+      const url = process.env.GACHIPAD_PROBE_SQLITE_URL ?? "";
+      const path = url.startsWith("sqlite:") ? (url.startsWith("sqlite://")
+        ? decodeURIComponent(new URL(url).pathname) : url.slice(7)) : "/data/gachipad.db";
+      const relative = path.startsWith("/data/") ? path.slice(6) : "gachipad.db";
+      const nonempty = process.argv[1] === "sqlite"
+        ? existsSync("/probe/gachipad.db") || existsSync(`/probe/${relative}`)
+        : readdirSync("/probe").length > 0;
+      process.stdout.write(nonempty ? "nonempty" : "empty");
+    ' "$kind" 2>/dev/null)" || die "cannot inspect existing database volume $volume; refusing to change the database backend"
   [ "$result" = nonempty ]
 }
 
@@ -103,7 +112,7 @@ assert_database_backend() {
   for kind in sqlite postgres mongodb; do
     [ "$kind" = "$selected" ] && continue
     volume="${project}_$(database_volume_suffix "$kind")"
-    if database_volume_nonempty "$volume"; then
+    if database_volume_nonempty "$volume" "$kind"; then
       die "database backend change refused: non-empty $kind volume $volume exists while $selected is selected. Keep the existing backend until the future copy tool is available."
     fi
   done
@@ -318,15 +327,23 @@ sqlite_backup() (
   trap 'rm -f "$part"' EXIT
   docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    import { createReadStream } from "node:fs";
+    import { createReadStream, mkdtempSync, rmSync } from "node:fs";
+    import { dirname, join } from "node:path";
     import { pipeline } from "node:stream/promises";
     const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
     const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
-    const db = new DatabaseSync(source);
-    try { db.exec("PRAGMA busy_timeout=5000; VACUUM INTO '\''/tmp/gachipad-backup.db'\''"); }
-    finally { db.close(); }
-    await pipeline(createReadStream("/tmp/gachipad-backup.db"), process.stdout);
+    const directory = mkdtempSync(join(dirname(source), ".gachipad-backup-"));
+    const path = join(directory, "snapshot.db");
+    const cleanup = () => rmSync(directory, { recursive: true, force: true });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.once(signal, () => { cleanup(); process.exit(1); });
+    try {
+      const db = new DatabaseSync(source);
+      try { db.exec("PRAGMA busy_timeout=5000"); db.prepare("VACUUM INTO ?").run(path); }
+      finally { db.close(); }
+      await pipeline(createReadStream(path), process.stdout);
+    } finally { cleanup(); }
   ' | gzip -c >"$part" || return 1
   [ -s "$part" ] || { echo "SQLite backup is empty; backup not published" >&2; return 1; }
   gzip -t -- "$part" || { echo "SQLite backup is corrupt; backup not published" >&2; return 1; }
@@ -354,11 +371,19 @@ postgres_backup() (
 sqlite_validate() {
   gzip -dc -- "$1" | docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    import { createWriteStream, openSync, readSync, closeSync, rmSync } from "node:fs";
+    import { createWriteStream, mkdtempSync, openSync, readSync, closeSync, rmSync } from "node:fs";
     import { pipeline } from "node:stream/promises";
-    const path = "/tmp/gachipad-validate.db";
-    await pipeline(process.stdin, createWriteStream(path, { mode: 0o600 }));
+    import { dirname, join } from "node:path";
+    const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
+    const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
+      ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
+    const directory = mkdtempSync(join(dirname(source), ".gachipad-validate-"));
+    const path = join(directory, "snapshot.db");
+    const cleanup = () => rmSync(directory, { recursive: true, force: true });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.once(signal, () => { cleanup(); process.exit(1); });
     try {
+      await pipeline(process.stdin, createWriteStream(path, { mode: 0o600 }));
       const header = Buffer.alloc(16), fd = openSync(path, "r");
       try { readSync(fd, header, 0, 16, 0); } finally { closeSync(fd); }
       if (header.toString() !== "SQLite format 3\0")
@@ -367,7 +392,7 @@ sqlite_validate() {
       const result = db.prepare("PRAGMA integrity_check").get();
       db.close();
       if (Object.values(result ?? {})[0] !== "ok") throw new Error("SQLite integrity check failed");
-    } finally { rmSync(path, { force: true }); }
+    } finally { cleanup(); }
   '
 }
 
@@ -382,16 +407,19 @@ sqlite_restore() {
     const destination = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
     const path = `${destination}.restore`;
+    const cleanup = () => rmSync(path, { force: true });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.once(signal, () => { cleanup(); process.exit(1); });
     try {
       await pipeline(process.stdin, createWriteStream(path, { mode: 0o600 }));
       const db = new DatabaseSync(path);
       const result = db.prepare("PRAGMA integrity_check").get();
       db.close();
       if (Object.values(result ?? {})[0] !== "ok") throw new Error("SQLite integrity check failed");
-      renameSync(path, destination);
       rmSync(`${destination}-wal`, { force: true });
       rmSync(`${destination}-shm`, { force: true });
-    } catch (error) { rmSync(path, { force: true }); throw error; }
+      renameSync(path, destination);
+    } finally { cleanup(); }
   '
 }
 
@@ -409,17 +437,34 @@ postgres_validate() {
 }
 
 postgres_restore() {
+  local safety
   postgres_validate "$1" || { echo "PostgreSQL backup validation failed; database unchanged" >&2; return 1; }
-  postgres_backup ./backups >&2 || return 1
-  # Recreate this bundled DB so objects added after the backup cannot survive a restore.
-  # Writers are stopped and a validated safety backup has already been published.
+  safety="$(postgres_backup ./backups)" || return 1
+  printf '%s\n' "$safety" >&2
+  # Restore away from the live DB, then rename both databases in one transaction.
+  # Writers are stopped; a failed restore or swap leaves the live database intact.
   # shellcheck disable=SC2016 # expanded only inside the database container
-  gzip -dc -- "$1" | docker compose exec -T postgres sh -c '
+  if ! gzip -dc -- "$1" | docker compose exec -T postgres sh -c '
     set -eu
-    dropdb --if-exists --force --maintenance-db=template1 --username="$POSTGRES_USER" -- "$POSTGRES_DB"
-    createdb --maintenance-db=template1 --username="$POSTGRES_USER" --owner="$POSTGRES_USER" -- "$POSTGRES_DB"
-    pg_restore --exit-on-error --no-owner --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --single-transaction
-  '
+    stage="gp_restore_$(date +%s)_$$"
+    old="gp_previous_$(date +%s)_$$"
+    trap '\''dropdb --if-exists --force --maintenance-db=template1 --username="$POSTGRES_USER" -- "$stage" >/dev/null 2>&1 || true'\'' EXIT
+    createdb --maintenance-db=template1 --username="$POSTGRES_USER" --owner="$POSTGRES_USER" -- "$stage"
+    pg_restore --exit-on-error --no-owner --username="$POSTGRES_USER" --dbname="$stage" --single-transaction
+    psql --no-psqlrc --set=ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname=template1 \
+      --set=live="$POSTGRES_DB" --set=stage="$stage" --set=old="$old" <<'\''SQL'\''
+BEGIN;
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'\''live'\'' AND pid <> pg_backend_pid();
+ALTER DATABASE :"live" RENAME TO :"old";
+ALTER DATABASE :"stage" RENAME TO :"live";
+COMMIT;
+SQL
+    dropdb --force --maintenance-db=template1 --username="$POSTGRES_USER" -- "$old" ||
+      echo "PostgreSQL restored; could not remove previous database $old" >&2
+  '; then
+    echo "PostgreSQL restore failed; live database unchanged; safety $safety" >&2
+    return 1
+  fi
 }
 
 database_backup() {
@@ -429,7 +474,7 @@ database_backup() {
     sqlite) sqlite_backup "$1" ;;
     external)
       echo "backup: DATABASE_URL uses an external database; no local backup was made. Back up the external server with its own tools before updates or restores." >&2
-      [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-}" = 1 ]
+      [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-$(env_get GACHIPAD_EXTERNAL_BACKUP_CONFIRMED)}" = 1 ]
       ;;
   esac
 }
