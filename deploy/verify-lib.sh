@@ -24,3 +24,14 @@ verification_cleanup_mongo_dirs() {
     done
   ' _ "$project"
 }
+
+# A failed old updater can restore a Compose file that omits a newly created volume.
+verification_cleanup_unused_volumes() {
+  local project="$1" volume
+  case "$project" in gp-dbdeploy-*) ;; *) return 1 ;; esac
+  while IFS= read -r volume; do
+    case "$volume" in "${project}_"*) ;; *) continue ;; esac
+    [ -z "$(docker ps -aq --filter "volume=$volume")" ] || continue
+    docker volume rm "$volume" >/dev/null || return 1
+  done < <(docker volume ls -q --filter "label=com.docker.compose.project=$project")
+}

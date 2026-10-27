@@ -8,6 +8,7 @@ ROOT="$(pwd)"
 . "$ROOT/deploy/verify-lib.sh"
 WORK="${VERIFY_DIR:-/data/workspace/gp-dbdeploy-rename}"
 PROJECT="${VERIFY_PROJECT:-gp-dbdeploy-rename}"
+case "$PROJECT" in gp-dbdeploy-*) ;; *) echo "verification requires a gp-dbdeploy- project" >&2; exit 1 ;; esac
 P="${VERIFY_HTTP_PORT:-18080}"
 TLS_P="${VERIFY_HTTPS_PORT:-18443}"
 REG_PORT="${VERIFY_REGISTRY_PORT:-5056}"
@@ -80,6 +81,7 @@ sys.stdout.write(text)
   if [ -f "$INSTALL/docker-compose.yml" ]; then
     in_install docker compose down -v --remove-orphans >/dev/null 2>&1 || true
   fi
+  verification_cleanup_unused_volumes "$PROJECT" || true
   if [ "$REGISTRY_STARTED" = 1 ]; then
     docker rm -fv "$PROJECT-registry" >/dev/null 2>&1 || true
   fi
