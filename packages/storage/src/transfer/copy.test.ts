@@ -1,6 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { closeSync, constants, existsSync, openSync, readdirSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { type AddressInfo, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -289,12 +290,14 @@ function openMemory(
   };
 }
 
-/** Moves the monotonic clock, and optionally the wall clock, by the returned offsets. */
+/**
+ * Moves the monotonic clock, and optionally the wall clock, by the returned offsets. The monotonic
+ * clock reads only its offset, so a boundary case does not depend on how long the run takes.
+ */
 function fakeClocks() {
   const clocks = { monotonic: 0, wall: 0 };
-  const now = performance.now.bind(performance);
   const wall = Date.now.bind(Date);
-  vi.spyOn(performance, "now").mockImplementation(() => now() + clocks.monotonic);
+  vi.spyOn(performance, "now").mockImplementation(() => clocks.monotonic);
   vi.spyOn(Date, "now").mockImplementation(() => wall() + clocks.wall);
   return clocks;
 }
@@ -1560,6 +1563,106 @@ describe("database transfer", () => {
       expect(other).toBeDefined();
     } finally {
       other?.close();
+    }
+  });
+
+  it("fails when another connection changes a SQLite source and closes before the verification", async () => {
+    // The destination's counter query runs after the copy, before the source is read again.
+    const afterCopy = "SELECT COALESCE(SUM(size),0) AS total FROM uploads WHERE complete=TRUE";
+    const prepare = DatabaseSync.prototype.prepare;
+    for (const journal of ["WAL", "DELETE"] as const)
+      for (const change of [
+        `UPDATE shares SET title='changed meanwhile' WHERE id='${shareId}'`,
+        `DELETE FROM share_labels WHERE share_id='${shareId}'`,
+        // A write to nothing the copy reads: only the file shows it.
+        "PRAGMA user_version=7",
+      ]) {
+        // Small enough for every page to stay in the source connection's cache.
+        const dir = await tempDir();
+        const path = join(dir, "source.sqlite");
+        const opened = await openStores(`sqlite:${path}`);
+        await opened.stores.shares.create(sampleShare());
+        await opened.stores.labels.set(
+          labelClientId,
+          shareId,
+          { folder: null, tags: ["x"] },
+          new Date("2026-10-22T09:08:07.006Z"),
+        );
+        await opened.close();
+        const db = new DatabaseSync(path);
+        db.exec(`PRAGMA journal_mode=${journal}`);
+        db.close();
+        let files: string[] | undefined;
+        vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+          this: DatabaseSync,
+          ...args: Parameters<DatabaseSync["prepare"]>
+        ) {
+          if (!files && args[0] === afterCopy) {
+            // A service commits a change and closes cleanly, which removes any -wal and -shm file.
+            const other = new DatabaseSync(path);
+            other.exec(change);
+            other.close();
+            files = readdirSync(dir).sort();
+          }
+          return prepare.apply(this, args);
+        });
+        const destination = join(await tempDir(), "destination.sqlite");
+        await expect(
+          copyDatabase(`sqlite:${path}`, `sqlite:${destination}`),
+          `${journal}: ${change}`,
+        ).rejects.toBeInstanceOf(CopyVerificationError);
+        expect(files).toEqual(["source.sqlite"]);
+        vi.restoreAllMocks();
+      }
+  });
+
+  it("refuses a SQLite source that is not a regular file before opening it", async () => {
+    const dir = await tempDir();
+    const fifo = join(dir, "fifo.sqlite");
+    execFileSync("mkfifo", [fifo]);
+    const folder = join(dir, "folder.sqlite");
+    await mkdir(folder);
+    const socket = join(dir, "socket.sqlite");
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    for (const [link, target] of [
+      ["fifo-link.sqlite", fifo],
+      ["device-link.sqlite", "/dev/null"],
+      ["folder-link.sqlite", folder],
+    ] as const)
+      await symlink(target, join(dir, link));
+    const destinations = await tempDir();
+    try {
+      for (const path of [
+        fifo,
+        folder,
+        socket,
+        "/dev/null",
+        ...["fifo-link", "device-link", "folder-link"].map((link) => join(dir, `${link}.sqlite`)),
+      ])
+        await expect(
+          copyDatabase(`sqlite:${path}`, `sqlite:${join(destinations, "destination.sqlite")}`),
+          path,
+        ).rejects.toThrow(new CopyRefusedError("SQLite source must be a regular file"));
+      // Nothing holds the FIFO open for reading, and nothing was created.
+      let code: unknown;
+      try {
+        closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+      } catch (error) {
+        code = (error as NodeJS.ErrnoException).code;
+      }
+      expect(code).toBe("ENXIO");
+      expect(readdirSync(destinations)).toEqual([]);
+      expect(readdirSync(dir).sort()).toEqual([
+        "device-link.sqlite",
+        "fifo-link.sqlite",
+        "fifo.sqlite",
+        "folder-link.sqlite",
+        "folder.sqlite",
+        "socket.sqlite",
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 

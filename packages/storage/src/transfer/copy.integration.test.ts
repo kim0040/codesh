@@ -883,6 +883,20 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         await other.close();
       }
 
+      // A FIFO source, whose open would wait for a writer forever, is refused before any open.
+      const fifo = `/tmp/${name}_fifo.sqlite`;
+      expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+      try {
+        const run = runCli(`sqlite:${fifo}`, `sqlite:/tmp/${name}_window.sqlite`);
+        expect(run.output.trim().split("\n").at(-1)).toBe(
+          "Result: refused (SQLite source must be a regular file).",
+        );
+        expect(run.status).toBe(2);
+        expect(existsSync(`/tmp/${name}_window.sqlite`)).toBe(false);
+      } finally {
+        await rm(fifo, { force: true });
+      }
+
       // An empty copy window counts as unset: a deploy wrapper may pass the variable empty.
       const unset = runCli(empty, filled, undefined, "");
       expect(unset.output).toContain(
@@ -971,29 +985,40 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
   it("fails a copy that takes longer than 10 minutes through the CLI", async () => {
     const name = "gp_copy_cli_deadline";
     const destination = `sqlite:/tmp/${name}_dst.sqlite`;
-    // The copier's monotonic clock jumps 10 minutes after its start. Only calls made by copy.ts
-    // itself (the caller frame) move; driver calls further down keep the real clock.
-    const preload = await preloadModule(
-      [
-        "const now = performance.now.bind(performance);",
-        "let started = false;",
-        "performance.now = () => {",
-        '  if (!new Error().stack?.split("\\n")[2]?.includes("transfer/copy.ts")) return now();',
-        "  if (!started) {",
-        "    started = true;",
-        "    return now();",
-        "  }",
-        "  return now() + 10 * 60_000;",
-        "};",
-        "",
-      ].join("\n"),
-    );
+    // The copier's monotonic clock jumps 10 minutes after its start, once the given file exists.
+    // Only calls made by copy.ts itself (the caller frame) move; driver calls further down keep
+    // the real clock.
+    const jumpOnce = (file: string) =>
+      preloadModule(
+        [
+          'import { existsSync } from "node:fs";',
+          "const now = performance.now.bind(performance);",
+          "let started = false;",
+          "performance.now = () => {",
+          '  if (!new Error().stack?.split("\\n")[2]?.includes("transfer/copy.ts")) return now();',
+          `  if (started && existsSync(${JSON.stringify(file)})) return now() + 10 * 60_000;`,
+          "  started = true;",
+          "  return now();",
+          "};",
+          "",
+        ].join("\n"),
+      );
     const sources = [
       ["sqlite", `sqlite:/tmp/${name}_src.sqlite`],
       ["mongodb", databaseUrl("mongodb", `${name}_src`)],
     ] as const;
+    const preloads = await Promise.all([
+      // Once the destination exists the copy has written to it.
+      jumpOnce(`/tmp/${name}_dst.sqlite`),
+      // The source exists from the start: the reads of its file already count.
+      jumpOnce(`/tmp/${name}_src.sqlite`),
+    ]);
     try {
-      for (const [kind, source] of sources) {
+      for (const [[kind, source], preload, written] of [
+        [sources[0], preloads[0], true],
+        [sources[1], preloads[0], true],
+        [sources[0], preloads[1], false],
+      ] as const) {
         await prepareDatabase(kind, `${name}_src`, source);
         await prepareDatabase("sqlite", `${name}_dst`, destination);
         const opened = await openStores(source);
@@ -1001,15 +1026,17 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         await opened.close();
         const run = runCli(source, destination, preload.url);
         expect(run.output.trim().split("\n").at(-1)).toBe(
-          "Result: failed (took longer than 10 minutes); drop the destination before retrying.",
+          written
+            ? "Result: failed (took longer than 10 minutes); drop the destination before retrying."
+            : "Result: failed (took longer than 10 minutes); nothing was copied.",
         );
         expect(run.status).toBe(1);
         expect(run.output).not.toContain("/tmp/");
-        // The destination is left for the operator to drop.
-        expect(existsSync(`/tmp/${name}_dst.sqlite`)).toBe(true);
+        // A destination written to is left for the operator to drop.
+        expect(existsSync(`/tmp/${name}_dst.sqlite`)).toBe(written);
       }
     } finally {
-      await rm(preload.dir, { recursive: true, force: true });
+      for (const preload of preloads) await rm(preload.dir, { recursive: true, force: true });
       for (const [kind, source] of sources) await dropDatabase(kind, `${name}_src`, source);
       await dropDatabase("sqlite", `${name}_dst`, destination);
     }

@@ -18,10 +18,12 @@ const windowMinutes = /^\d{1,4}$/.test(windowSetting) ? Number(windowSetting) : 
 const windowValid =
   windowMinutes >= COPY_WINDOW_MINUTES.min && windowMinutes <= COPY_WINDOW_MINUTES.max;
 
+const quiescent =
+  "Source must be quiescent: stop the API and collab service first, and do not move, replace or relink a SQLite source until the copy ends.";
 console.log(
   windowValid
-    ? `Source must be quiescent: stop the API and collab service first. Copy window: ${windowMinutes} minutes (GACHIPAD_COPY_WINDOW_MINUTES, ${COPY_WINDOW_MINUTES.min} to ${COPY_WINDOW_MINUTES.max}; unset or empty means ${COPY_WINDOW_MINUTES.default}). Not copied: diagnostics, records that expired or expire within ${windowMinutes} minutes, and records of such or missing shares. The copy must finish within ${windowMinutes - 5} minutes.`
-    : "Source must be quiescent: stop the API and collab service first.",
+    ? `${quiescent} Copy window: ${windowMinutes} minutes (GACHIPAD_COPY_WINDOW_MINUTES, ${COPY_WINDOW_MINUTES.min} to ${COPY_WINDOW_MINUTES.max}; unset or empty means ${COPY_WINDOW_MINUTES.default}). Not copied: diagnostics, records that expired or expire within ${windowMinutes} minutes, and records of such or missing shares. The copy must finish within ${windowMinutes - 5} minutes.`
+    : quiescent,
 );
 
 let counts: TransferCounts = countsForCli();
@@ -51,7 +53,9 @@ try {
     process.exitCode = 2;
   } else if (error instanceof CopyDeadlineError) {
     console.log(
-      `Result: failed (took longer than ${error.minutes} minutes); drop the destination before retrying.`,
+      error.destinationWritten
+        ? `Result: failed (took longer than ${error.minutes} minutes); drop the destination before retrying.`
+        : `Result: failed (took longer than ${error.minutes} minutes); nothing was copied.`,
     );
     process.exitCode = 1;
   } else {
