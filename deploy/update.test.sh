@@ -496,6 +496,20 @@ grep -q 'database backend change refused: non-empty mongodb volume volume-switch
 unset FAKE_NONEMPTY_VOLUME
 ok "non-empty old MongoDB volume refuses a switch even without the state marker"
 
+step "external checks are read-only; updates require external backup acknowledgement"
+cp "$I/.env" "$F/external-original.env"
+# shellcheck source=/dev/null
+(cd "$I" && source ./lib.sh; env_set DATABASE_URL 'postgresql://fixture:private@external.invalid/db'; env_set GACHIPAD_DB external)
+printf 'external\n' >"$I/state/database-kind"
+: >"$DOCKER_CALLS"
+run ./update.sh --check || fail "external --check required a backup"
+if run ./update.sh --version 1.1.0 --yes; then fail "external update without acknowledgement accepted"; fi
+grep -q 'GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1' "$F/run.log" || fail "external backup guidance missing"
+grep -q 'stop\|dump\|pull$' "$DOCKER_CALLS" && fail "external refusal mutated the stack"
+cp "$F/external-original.env" "$I/.env"
+printf 'mongodb\n' >"$I/state/database-kind"
+ok "external --check works and unacknowledged update refuses before maintenance"
+
 step "Mongo image changes are refused before maintenance and backup"
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.6 --yes && fail "Mongo major change accepted"

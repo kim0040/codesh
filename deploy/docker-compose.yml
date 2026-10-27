@@ -24,7 +24,9 @@ x-hardening: &hardening
 
 x-app-env: &app-env
   NODE_ENV: production
-  DATABASE_URL: ${DATABASE_URL:-${GACHIPAD_DATABASE_URL:-sqlite:///data/gachipad.db}}
+  # A pre-selection .env has no derived URL: retain its MongoDB connection even before the
+  # operator runs generate-secrets.sh. Fresh templates explicitly select the SQLite file.
+  DATABASE_URL: ${DATABASE_URL:-${GACHIPAD_DATABASE_URL:-mongodb://${MONGO_APP_USER:-gachipad_app}:${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}@mongo:27017/${MONGO_DATABASE:-gachipad}?authSource=${MONGO_DATABASE:-gachipad}}}
   # Used as the MongoDB fallback for older app configurations and MongoDB deployments.
   MONGO_URL: mongodb://${MONGO_APP_USER:-gachipad_app}:${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}@mongo:27017/${MONGO_DATABASE:-gachipad}?authSource=${MONGO_DATABASE:-gachipad}
   VALKEY_URL: redis://:${VALKEY_PASSWORD:?run ./generate-secrets.sh}@valkey:6379
@@ -212,6 +214,7 @@ services:
   postgres:
     profiles: [postgres]
     <<: *hardening
+    cap_drop: []
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DATABASE:-gachipad}

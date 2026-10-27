@@ -41,9 +41,9 @@ host_database_options() {
   done
   while IFS= read -r image; do
     case "$image" in
-      postgres:* | postgres@*) detected+=("PostgreSQL container") ;;
-      mysql:* | mariadb:* | mysql@* | mariadb@*) detected+=("MySQL/MariaDB container") ;;
-      mongo:* | mongo@*) detected+=("MongoDB container") ;;
+      postgres:* | postgres@* | */postgres:* | */postgres@*) detected+=("PostgreSQL container") ;;
+      mysql:* | mariadb:* | mysql@* | mariadb@* | */mysql:* | */mariadb:* | */mysql@* | */mariadb@*) detected+=("MySQL/MariaDB container") ;;
+      mongo:* | mongo@* | */mongo:* | */mongo@*) detected+=("MongoDB container") ;;
     esac
   done < <(docker ps --format '{{.Image}}' 2>/dev/null)
   if command -v psql >/dev/null 2>&1; then clients+=(psql); fi
@@ -51,8 +51,12 @@ host_database_options() {
   if command -v mongosh >/dev/null 2>&1 || command -v mongodump >/dev/null 2>&1; then clients+=(MongoDB); fi
   if [ -r /proc/meminfo ]; then
     memory="$(awk '$1 == "MemAvailable:" {printf "%.1f GiB", $2 / 1048576}' /proc/meminfo)"
-  elif command -v sysctl >/dev/null 2>&1; then
-    memory="$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.1f GiB", $1 / 1073741824}')"
+  elif command -v vm_stat >/dev/null 2>&1; then
+    memory="$(vm_stat | awk '
+      NR == 1 {for (i = 1; i < NF; i++) if ($i == "of") size = $(i + 1)}
+      /Pages (free|inactive|speculative):/ {gsub(/\./, "", $3); pages += $3}
+      END {if (size) printf "%.1f GiB", pages * size / 1073741824}
+    ')"
   fi
   [ -n "$memory" ] || memory=unknown
   for label in "${detected[@]}"; do [ -z "$output" ] || output+=", "; output+="$label"; done

@@ -26,8 +26,18 @@ random_hex() {
 TMP="$(mktemp "$FILE.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 cp "$FILE" "$TMP"
+# Check the operator's settings before filling the compatibility Mongo secrets.
+had_mongo=0
+if grep -Eq '^MONGO_[A-Z0-9_]+=' "$TMP"; then had_mongo=1; fi
 set_tmp() {
   local name="$1" value="$2" next="$TMP.next" line found=0
+  case "$name" in DATABASE_URL | GACHIPAD_DATABASE_URL)
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || {
+      echo "generate-secrets: $name must be a single line" >&2; exit 1;
+    }
+    [ -z "$value" ] || value="'${value//\'/\\\'}'"
+    ;;
+  esac
   while IFS= read -r line || [ -n "$line" ]; do
     if [[ "$line" == "$name="* ]]; then
       if [ "$found" = 0 ]; then printf '%s=%s\n' "$name" "$value" >>"$next"; found=1; fi
@@ -103,8 +113,30 @@ if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' 
   echo "warning: migrated legacy installation settings; existing data locations retained" >&2
 fi
 
-tmp_get() { sed -n "s/^$1=//p" "$TMP" | tail -n 1; }
+tmp_get() {
+  local value
+  value="$(sed -n "s/^$1=//p" "$TMP" | tail -n 1)"
+  if [[ "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\\\'/\'}"
+  fi
+  printf '%s' "$value"
+}
+# Pre-selection renamed updaters append every new template key, including the SQLite
+# default, before calling this staged helper. Read their unchanged live env to pin MongoDB.
+pin_mongo=0
+live_lock="${GACHIPAD_LOCK_PATH:-${CODESH_LOCK_PATH:-}}"
+if [ -n "$live_lock" ]; then
+  live_env="$(dirname "$(dirname "$live_lock")")/.env"
+  if [ -f "$live_env" ] && ! grep -q '^GACHIPAD_DB=' "$live_env" &&
+    grep -Eq '^MONGO_[A-Z0-9_]+=' "$live_env"; then pin_mongo=1; fi
+fi
+if [ "$(tmp_get GACHIPAD_LEGACY_INSTALL)" = 1 ]; then pin_mongo=1; fi
 database_url="${DATABASE_URL:-$(tmp_get DATABASE_URL)}"
+if [ "$pin_mongo" = 1 ] && { [ -n "$database_url" ] || { [ -n "${GACHIPAD_DB:-}" ] && [ "$GACHIPAD_DB" != mongodb ]; }; }; then
+  echo "generate-secrets: database backend change refused (mongodb -> requested backend); data copy is not available yet. Keep the existing backend until the future copy tool is available." >&2
+  exit 1
+fi
 if [ -n "$database_url" ]; then
   [[ "$database_url" != *$'\n'* && "$database_url" != *$'\r'* ]] || {
     echo "generate-secrets: DATABASE_URL must be a single line" >&2; exit 1;
@@ -116,14 +148,14 @@ if [ -n "$database_url" ]; then
   [ -z "${DATABASE_URL:-}" ] || set_tmp DATABASE_URL "$DATABASE_URL"
   if [ "$scheme" = sqlite ]; then db=sqlite; else db=external; fi
 else
-  db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"
+  if [ "$pin_mongo" = 1 ]; then db=mongodb; else db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"; fi
   if [ -z "$db" ]; then
-    if grep -Eq '^MONGO_[A-Z0-9_]+=' "$TMP"; then db=mongodb; else db=sqlite; fi
+    if [ "$had_mongo" = 1 ]; then db=mongodb; else db=sqlite; fi
   fi
 fi
 case "$db" in
   sqlite)
-    compose_database_url=sqlite:///data/gachipad.db
+    compose_database_url="${database_url:-sqlite:///data/gachipad.db}"
     ;;
   postgres)
     if grep -Eq '^POSTGRES_PASSWORD=[[:space:]]*$' "$TMP" || ! grep -Eq '^POSTGRES_PASSWORD=' "$TMP"; then

@@ -68,7 +68,7 @@ for choice in sqlite postgres mongodb; do
     if grep -qF "$password" "$fixture/$choice.log"; then echo 'PostgreSQL password was printed' >&2; exit 1; fi
   elif [ "$choice" = mongodb ]; then grep -qx 'COMPOSE_PROFILES=mongodb' "$dir/.env"
   else
-    grep -qx 'GACHIPAD_DATABASE_URL=sqlite:///data/gachipad.db' "$dir/.env"
+    grep -qx "GACHIPAD_DATABASE_URL='sqlite:///data/gachipad.db'" "$dir/.env"
     grep -qx 'COMPOSE_PROFILES=' "$dir/.env"
   fi
   [ "$(cat "$dir/state/database-kind")" = "$choice" ]
@@ -79,14 +79,14 @@ dir="$fixture/external"
 make_install "$dir"
 (cd "$dir" && ./install.sh --database-url "$url") >"$fixture/external.log" 2>&1
 grep -qx 'GACHIPAD_DB=external' "$dir/.env"
-grep -qxF "DATABASE_URL=$url" "$dir/.env"
+grep -qxF "DATABASE_URL='$url'" "$dir/.env"
 grep -qx 'GACHIPAD_DATABASE_URL=' "$dir/.env"
 grep -q 'install: database external; DATABASE_URL was supplied' "$fixture/external.log"
 if grep -qF 'p%40ss' "$fixture/external.log"; then echo 'external URL was printed' >&2; exit 1; fi
 dir="$fixture/external-env"
 make_install "$dir"
 (cd "$dir" && DATABASE_URL="$url" ./install.sh) >"$fixture/external-env.log" 2>&1
-grep -qxF "DATABASE_URL=$url" "$dir/.env"
+grep -qxF "DATABASE_URL='$url'" "$dir/.env"
 grep -qx 'GACHIPAD_DB=external' "$dir/.env"
 if grep -qF 'p%40ss' "$fixture/external-env.log"; then echo 'environment DATABASE_URL was printed' >&2; exit 1; fi
 
@@ -113,3 +113,32 @@ grep -q 'database backend change refused (mongodb -> postgres)' "$fixture/switch
 grep -q 'future copy tool' "$fixture/switch.log"
 if grep -q '^compose up' "$DOCKER_CALLS"; then echo 'backend switch started Compose' >&2; exit 1; fi
 echo 'L12: install selects sqlite, postgres, mongodb or external without printing URLs or secrets; backend switches are refused'
+
+# No flags means the recommendation, independent of host detection results.
+dir="$fixture/default"
+make_install "$dir"
+(cd "$dir" && ./install.sh) >"$fixture/default.log" 2>&1
+grep -qx GACHIPAD_DB=sqlite "$dir/.env"
+grep -q 'recommended because' "$fixture/default.log"
+
+# Literal Compose values must survive env_get and repeat secret generation, without evaluation.
+dir="$fixture/literal"
+make_install "$dir"
+url="postgresql://user:literal\$TOKEN#password@db.local/db?label=it's-literal"
+(cd "$dir" && DATABASE_URL="$url" ./install.sh) >"$fixture/literal.log" 2>&1
+(
+  cd "$dir"
+  # shellcheck source=/dev/null
+  source ./lib.sh
+  [ "$(env_get DATABASE_URL)" = "$url" ]
+  ./generate-secrets.sh >/dev/null
+  [ "$(env_get DATABASE_URL)" = "$url" ]
+)
+# shellcheck disable=SC2016 # the password deliberately contains a literal dollar sign
+if grep -qF 'literal$TOKEN#password' "$fixture/literal.log"; then echo 'literal URL leaked' >&2; exit 1; fi
+url=$'postgresql://user:secret@db.local/db\nINJECTED=value'
+if (cd "$dir" && DATABASE_URL="$url" ./install.sh) >"$fixture/newline.log" 2>&1; then
+  echo 'multiline DATABASE_URL was accepted' >&2; exit 1
+fi
+if grep -q '^INJECTED=' "$dir/.env"; then echo 'DATABASE_URL injected an env setting' >&2; exit 1; fi
+echo 'L13: no-flag SQLite recommendation, literal URL roundtrip and newline rejection passed'

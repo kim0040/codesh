@@ -81,7 +81,7 @@ rm .env
 bash generate-secrets.sh >/dev/null
 if grep -qi codesh .env; then exit 1; fi
 grep -qx 'GACHIPAD_DB=sqlite' .env
-grep -qx 'GACHIPAD_DATABASE_URL=sqlite:///data/gachipad.db' .env
+grep -qx "GACHIPAD_DATABASE_URL='sqlite:///data/gachipad.db'" .env
 mkdir choices
 cp generate-secrets.sh .env.example choices/
 (cd choices && ./generate-secrets.sh sqlite.env >/dev/null)
@@ -109,13 +109,32 @@ ENV
 (cd choices && ./generate-secrets.sh legacy11.env >/dev/null)
 grep -qx 'GACHIPAD_DB=mongodb' choices/legacy11.env
 grep -qx 'COMPOSE_PROFILES=mdns,mongodb' choices/legacy11.env
+# The old renamed updater appends GACHIPAD_DB=sqlite from the new template before
+# invoking the staged helper. Its original live env must still pin MongoDB.
+mkdir -p choices/live/state choices/staged
+cp choices/legacy11.env choices/live/.env
+sed -i '/^GACHIPAD_DB=/d; /^GACHIPAD_DATABASE_URL=/d' choices/live/.env
+cp generate-secrets.sh .env.example choices/staged/
+cp choices/live/.env choices/staged/.env
+printf 'GACHIPAD_DB=sqlite\n' >>choices/staged/.env
+(cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" ./generate-secrets.sh >/dev/null)
+grep -qx 'GACHIPAD_DB=mongodb' choices/staged/.env
+grep -qx 'COMPOSE_PROFILES=mdns,mongodb' choices/staged/.env
+if (cd choices/staged && GACHIPAD_LOCK_PATH="$WORK/choices/live/state/install.lock" GACHIPAD_DB=postgres ./generate-secrets.sh >refusal.log 2>&1); then
+  echo 'legacy staged helper accepted a backend switch' >&2; exit 1
+fi
+grep -q 'future copy tool' choices/staged/refusal.log
 cp choices/.env.example choices/external.env
 url='mysql://user:p%40ss@db.local/gachipad?ssl=true&charset=utf8mb4'
 (cd choices && DATABASE_URL="$url" ./generate-secrets.sh external.env >external.log)
 grep -qx 'GACHIPAD_DB=external' choices/external.env
-grep -qxF "DATABASE_URL=$url" choices/external.env
+grep -qxF "DATABASE_URL='$url'" choices/external.env
 grep -q '^GACHIPAD_DATABASE_URL=$' choices/external.env
 if grep -qF 'p%40ss' choices/external.log; then echo 'external URL was printed' >&2; exit 1; fi
+# Empty non-legacy settings must not become MongoDB after compatibility secrets are filled.
+: >choices/empty.env
+(cd choices && ./generate-secrets.sh empty.env >/dev/null)
+grep -qx 'GACHIPAD_DB=sqlite' choices/empty.env
 cp choices/.env.example choices/invalid-url.env
 if (cd choices && DATABASE_URL='file:///private/secret' ./generate-secrets.sh invalid-url.env >invalid.log 2>&1); then
   echo 'unsupported URL scheme accepted' >&2; exit 1

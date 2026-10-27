@@ -489,9 +489,11 @@ update() {
   if [ -e ../.git ] && [ -f ../package.json ] && [ "$mode" != check ]; then
     die "this is a source checkout: update it with git pull && docker compose build && docker compose up -d"
   fi
-  assert_database_backend
-  if [ "$(database_kind)" = external ] && [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-}" != 1 ]; then
-    fail refused "DATABASE_URL uses an external database; back up that server first, then rerun with GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1"
+  if [ "$mode" != check ]; then
+    assert_database_backend
+    if [ "$(database_kind)" = external ] && [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-}" != 1 ]; then
+      fail refused "DATABASE_URL uses an external database; back up that server first, then rerun with GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1"
+    fi
   fi
   if [ -n "$BUNDLE" ]; then
     verify_archive "$BUNDLE"

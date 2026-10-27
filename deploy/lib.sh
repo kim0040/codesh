@@ -16,12 +16,22 @@ env_get() {
   if [ -z "$value" ] && [[ "$1" == GACHIPAD_* ]]; then
     value="$(sed -n "s/^CODESH_${1#GACHIPAD_}=//p" .env 2>/dev/null | tail -n 1)"
   fi
+  # Compose single quotes keep passwords containing $, # or spaces literal.
+  if [[ "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\\\'/\'}"
+  fi
   printf '%s' "${value:-${2:-}}"
 }
 
 # env_set NAME VALUE: replaces or appends NAME in .env
 env_set() {
   local name="$1" value="$2" tmp line found=0
+  case "$name" in DATABASE_URL | GACHIPAD_DATABASE_URL)
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || die "$name must be a single line"
+    [ -z "$value" ] || value="'${value//\'/\\\'}'"
+    ;;
+  esac
   tmp="$(mktemp .env.XXXXXX)" || return 1
   if [ -f .env ]; then
     while IFS= read -r line || [ -n "$line" ]; do
@@ -53,6 +63,7 @@ database_kind() {
 }
 
 validate_database_url() {
+  [[ "$1" != *$'\n'* && "$1" != *$'\r'* && "$1" == *:* ]] || return 1
   local scheme="${1%%:*}"
   case "$scheme" in
     sqlite | postgres | postgresql | mysql | mariadb | mongodb | mongodb+srv) return 0 ;;
@@ -72,7 +83,7 @@ database_volume_suffix() {
 database_volume_nonempty() {
   local volume="$1" result
   docker volume inspect "$volume" >/dev/null 2>&1 || return 1
-  result="$(docker compose run --rm --no-deps -T --pull never -v "$volume:/probe:ro" \
+  result="$(docker compose run --rm --no-deps -T --pull never --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" \
     --entrypoint node api -e '
       const { readdirSync } = require("node:fs");
       process.stdout.write(readdirSync("/probe").length ? "nonempty" : "empty");
@@ -313,7 +324,7 @@ sqlite_backup() (
     const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
       ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
     const db = new DatabaseSync(source);
-    try { db.exec("VACUUM INTO '\''/tmp/gachipad-backup.db'\''"); }
+    try { db.exec("PRAGMA busy_timeout=5000; VACUUM INTO '\''/tmp/gachipad-backup.db'\''"); }
     finally { db.close(); }
     await pipeline(createReadStream("/tmp/gachipad-backup.db"), process.stdout);
   ' | gzip -c >"$part" || return 1
@@ -343,11 +354,15 @@ postgres_backup() (
 sqlite_validate() {
   gzip -dc -- "$1" | docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    import { createWriteStream, rmSync } from "node:fs";
+    import { createWriteStream, openSync, readSync, closeSync, rmSync } from "node:fs";
     import { pipeline } from "node:stream/promises";
     const path = "/tmp/gachipad-validate.db";
     await pipeline(process.stdin, createWriteStream(path, { mode: 0o600 }));
     try {
+      const header = Buffer.alloc(16), fd = openSync(path, "r");
+      try { readSync(fd, header, 0, 16, 0); } finally { closeSync(fd); }
+      if (header.toString() !== "SQLite format 3\0")
+        throw new Error("Not a SQLite backup");
       const db = new DatabaseSync(path);
       const result = db.prepare("PRAGMA integrity_check").get();
       db.close();
@@ -381,14 +396,30 @@ sqlite_restore() {
 }
 
 postgres_validate() {
-  gzip -dc -- "$1" | docker compose exec -T postgres pg_restore --list - >/dev/null
+  # Consume the full stream before listing the TOC, which may otherwise close stdin early.
+  # shellcheck disable=SC2016 # expanded only inside the database container
+  gzip -dc -- "$1" | docker compose exec -T postgres sh -c '
+    set -eu
+    umask 077
+    archive="$(mktemp)"
+    trap '\''rm -f "$archive"'\'' EXIT
+    cat >"$archive"
+    pg_restore --list "$archive" >/dev/null
+  '
 }
 
 postgres_restore() {
   postgres_validate "$1" || { echo "PostgreSQL backup validation failed; database unchanged" >&2; return 1; }
   postgres_backup ./backups >&2 || return 1
-  gzip -dc -- "$1" | docker compose exec -T postgres sh -c \
-    'pg_restore --exit-on-error --clean --if-exists --no-owner --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -'
+  # Recreate this bundled DB so objects added after the backup cannot survive a restore.
+  # Writers are stopped and a validated safety backup has already been published.
+  # shellcheck disable=SC2016 # expanded only inside the database container
+  gzip -dc -- "$1" | docker compose exec -T postgres sh -c '
+    set -eu
+    dropdb --if-exists --force --maintenance-db=template1 --username="$POSTGRES_USER" -- "$POSTGRES_DB"
+    createdb --maintenance-db=template1 --username="$POSTGRES_USER" --owner="$POSTGRES_USER" -- "$POSTGRES_DB"
+    pg_restore --exit-on-error --no-owner --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --single-transaction
+  '
 }
 
 database_backup() {
