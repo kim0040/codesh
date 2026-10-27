@@ -1,12 +1,15 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AuditRecord, defaultSettings, type ShareRecord } from "@gachipad/shared";
-import { afterEach, describe, expect, it } from "vitest";
+import type { MongoClient } from "mongodb";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryStores } from "../memory.js";
 import { type OpenedStores, openStores } from "../open.js";
 import { openSqlDriver } from "../sql/driver.js";
 import {
+  CopyDeadlineError,
   CopyFailureError,
   CopyRefusedError,
   CopyVerificationError,
@@ -201,14 +204,65 @@ function openWithMemorySource(source: ReturnType<typeof createMemoryStores>) {
 /** Replaces the transfer backend's export, keeping its other operations. */
 function wrapExport(
   stores: ReturnType<typeof createMemoryStores>,
-  exportAll: (actual: TransferBackend, liveAt: Date, call: number) => AsyncIterable<TransferItem>,
+  exportAll: (actual: TransferBackend, cutoff: Date, call: number) => AsyncIterable<TransferItem>,
 ) {
   const actual = transferBackend(stores);
   let calls = 0;
   registerTransferBackend(stores, {
     ...actual,
-    exportAll: (liveAt) => exportAll(actual, liveAt, ++calls),
+    exportAll: (cutoff) => exportAll(actual, cutoff, ++calls),
   });
+}
+
+/** Replaces some transfer backend operations, keeping the others. */
+function wrapTransfer(
+  stores: ReturnType<typeof createMemoryStores>,
+  wrap: (actual: TransferBackend) => Partial<TransferBackend>,
+) {
+  const actual = transferBackend(stores);
+  registerTransferBackend(stores, { ...actual, ...wrap(actual) });
+}
+
+const MINUTE = 60_000;
+const MARGIN = 15 * MINUTE;
+const DEADLINE = 10 * MINUTE;
+
+/** A MongoDB client whose only use is the copy's hello command. */
+function helloClient(reply: Record<string, unknown>, database = "gp"): MongoClient {
+  return {
+    db: () => ({
+      databaseName: database,
+      command: async () => ({ localTime: new Date(), isWritablePrimary: true, ...reply }),
+    }),
+  } as unknown as MongoClient;
+}
+
+/** Memory stores per URL, with an optional MongoDB client to answer hello. */
+function openMemory(
+  stores: Record<string, ReturnType<typeof createMemoryStores>>,
+  clients: Record<string, MongoClient> = {},
+) {
+  return async (url: string): Promise<OpenedStores> => {
+    const opened = stores[url];
+    if (!opened) throw new Error("unexpected URL");
+    const mongoClient = clients[url];
+    return {
+      stores: opened,
+      close: async () => undefined,
+      kind: "memory",
+      ...(mongoClient ? { mongoClient } : {}),
+    };
+  };
+}
+
+/** Moves the monotonic clock, and optionally the wall clock, by the returned offsets. */
+function fakeClocks() {
+  const clocks = { monotonic: 0, wall: 0 };
+  const now = performance.now.bind(performance);
+  const wall = Date.now.bind(Date);
+  vi.spyOn(performance, "now").mockImplementation(() => now() + clocks.monotonic);
+  vi.spyOn(Date, "now").mockImplementation(() => wall() + clocks.wall);
+  return clocks;
 }
 
 const tempDirs: string[] = [];
@@ -218,6 +272,7 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -332,8 +387,8 @@ describe("database transfer", () => {
     const actual = transferBackend(destination);
     const mismatching: TransferBackend = {
       ...actual,
-      async *exportAll(liveAt) {
-        for await (const item of actual.exportAll(liveAt)) {
+      async *exportAll(cutoff) {
+        for await (const item of actual.exportAll(cutoff)) {
           if (item.kind === "shares") yield { ...item, record: { ...item.record, title: "wrong" } };
           else yield item;
         }
@@ -390,9 +445,9 @@ describe("database transfer", () => {
       await source.shares.create({ ...sampleShare(), id });
     await source.audit.append({ at: new Date(1), actor: ownerId, ip: "192.0.2.1", action: "a" });
     await source.audit.append({ at: new Date(2), actor: ownerId, ip: "192.0.2.1", action: "b" });
-    wrapExport(destination, async function* (actual, liveAt) {
+    wrapExport(destination, async function* (actual, cutoff) {
       const items: TransferItem[] = [];
-      for await (const item of actual.exportAll(liveAt)) items.push(item);
+      for await (const item of actual.exportAll(cutoff)) items.push(item);
       yield* items.reverse();
     });
     const result = await copyDatabase("memory:", "memory://", {
@@ -405,10 +460,10 @@ describe("database transfer", () => {
     const source = createMemoryStores();
     const destination = createMemoryStores();
     await seed(source);
-    wrapExport(source, async function* (actual, liveAt, call) {
-      // A TTL deletion after the copy read the share.
+    wrapExport(source, async function* (actual, cutoff, call) {
+      // A deletion after the copy read the share.
       if (call === 2) await source.shares.delete(shareId);
-      yield* actual.exportAll(liveAt);
+      yield* actual.exportAll(cutoff);
     });
     await expect(
       copyDatabase("memory:", "memory://", { openStores: openPair(source, destination) }),
@@ -420,19 +475,53 @@ describe("database transfer", () => {
     const source = createMemoryStores();
     const destination = createMemoryStores();
     await seed(source);
-    wrapExport(source, async function* (actual, liveAt, call) {
-      // A TTL deletion after the copy started but before both source reads.
+    wrapExport(source, async function* (actual, cutoff, call) {
+      // A deletion after the initial count but before both source reads.
       if (call === 1) await source.labs.delete("Lab00001");
-      yield* actual.exportAll(liveAt);
+      yield* actual.exportAll(cutoff);
     });
     await expect(
       copyDatabase("memory:", "memory://", { openStores: openPair(source, destination) }),
     ).rejects.toBeInstanceOf(CopyVerificationError);
   });
 
-  it("fails verification when an audit detail is not plain JSON", async () => {
-    for (const detail of [{ value: Number.NaN }, { list: [1, undefined] }, { at: new Date(5) }]) {
+  it("refuses audit details that are not plain JSON before writing", async () => {
+    // biome-ignore lint/suspicious/noSparseArray: a hole is one of the refused shapes.
+    const sparse = [1, , 3];
+    for (const detail of [
+      { value: Number.NaN },
+      { value: Number.POSITIVE_INFINITY },
+      { value: -0 },
+      { list: [1, undefined] },
+      { list: sparse },
+      { retained: 1, dropped: undefined },
+      { at: new Date(5) },
+      { nested: [{ id: new Uint8Array(2) }] },
+      { nested: new Map([["kept", 1]]) },
+      { value: 1n },
+    ]) {
       const source = createMemoryStores();
+      await source.shares.create(sampleShare());
+      const append = (detail: unknown) =>
+        source.audit.append({
+          at: new Date(1),
+          actor: ownerId,
+          ip: "192.0.2.1",
+          action: "x",
+          detail,
+        });
+      await append(detail);
+      await append({ plain: [true, null, 1.5, "text", { deep: {} }] });
+      const path = join(await tempDir(), "audit.sqlite");
+      await expect(
+        copyDatabase("memory:", `sqlite:${path}`, { openStores: openWithMemorySource(source) }),
+      ).rejects.toThrow(new CopyRefusedError("Audit details are not plain JSON in 1 record"));
+      // Refused before the destination was even opened.
+      expect(existsSync(path)).toBe(false);
+    }
+
+    const source = createMemoryStores();
+    for (const detail of [{ a: undefined }, [undefined], { ok: 1 }, Number.NaN])
       await source.audit.append({
         at: new Date(1),
         actor: ownerId,
@@ -440,11 +529,32 @@ describe("database transfer", () => {
         action: "x",
         detail,
       });
-      const url = `sqlite:${join(await tempDir(), "audit.sqlite")}`;
-      await expect(
-        copyDatabase("memory:", url, { openStores: openWithMemorySource(source) }),
-      ).rejects.toBeInstanceOf(CopyVerificationError);
-    }
+    const destination = createMemoryStores();
+    await expect(
+      copyDatabase("memory:", "memory://", { openStores: openPair(source, destination) }),
+    ).rejects.toThrow(new CopyRefusedError("Audit details are not plain JSON in 3 records"));
+    expect(await transferBackend(destination).isEmpty()).toBe(true);
+  });
+
+  it("fails when an unsupported audit detail appears after the check", async () => {
+    const source = createMemoryStores();
+    const destination = createMemoryStores();
+    await seed(source);
+    wrapExport(source, async function* (actual, cutoff, call) {
+      if (call === 1)
+        await source.audit.append({
+          at: new Date(2),
+          actor: ownerId,
+          ip: "192.0.2.1",
+          action: "x",
+          detail: { dropped: undefined },
+        });
+      yield* actual.exportAll(cutoff);
+    });
+    await expect(
+      copyDatabase("memory:", "memory://", { openStores: openPair(source, destination) }),
+    ).rejects.toBeInstanceOf(CopyVerificationError);
+    expect(await destination.audit.list({ limit: 10 })).toEqual([]);
   });
 
   it("recreates a missing upload capacity row and checks its value", async () => {
@@ -591,5 +701,350 @@ describe("database transfer", () => {
       }),
     });
     expect(result.counts.shares).toBe(1);
+  });
+
+  it("skips records expiring within the margin, with one cutoff for every read", async () => {
+    const t0 = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(t0);
+    const at = (offset: number) => new Date(t0 + MARGIN + offset);
+    const source = createMemoryStores();
+    const destination = createMemoryStores();
+    const uploads = new Map<string, string>();
+    const putUpload = async (name: string, expiresAt: Date, shareId?: string) => {
+      const meta = await source.files.put({
+        name,
+        contentType: null,
+        ownerId,
+        ...(shareId ? { shareId } : {}),
+        expiresAt,
+        data: new Uint8Array([name.length]),
+      });
+      uploads.set(name, meta.id);
+    };
+    const shares = { ShBelow1: at(-1), ShEqual1: at(0), ShAbove1: at(1), ShNull01: null };
+    for (const [id, expiresAt] of Object.entries(shares)) {
+      await source.shares.create({
+        ...sampleShare(),
+        id,
+        saved: expiresAt === null,
+        savedBy: [],
+        expiresAt,
+      });
+      await source.updates.append(id, [{ seq: 1, data: new Uint8Array([1]) }], new Date(t0));
+      await source.labels.set(labelClientId, id, { folder: null, tags: [] }, new Date(t0));
+      // A child upload that outlives the cutoff itself goes or stays with its share.
+      await putUpload(`${id}.bin`, new Date("2099-01-01T00:00:00.000Z"), id);
+    }
+    for (const [name, offset] of [
+      ["loose-below", -1],
+      ["loose-equal", 0],
+      ["loose-above", 1],
+    ] as const)
+      await putUpload(name, at(offset));
+    await putUpload("own-equal", at(0), "ShAbove1");
+    await putUpload("own-above", at(1), "ShAbove1");
+    for (const [id, offset] of [
+      ["LabBelow", -1],
+      ["LabEqual", 0],
+      ["LabAbove", 1],
+    ] as const)
+      await source.labs.create({
+        id,
+        title: id,
+        ownerId,
+        joinCode: "123456",
+        templateShareId: null,
+        locked: false,
+        students: [],
+        createdAt: new Date(t0),
+        expiresAt: at(offset),
+      });
+    const cutoffs: number[] = [];
+    for (const stores of [source, destination])
+      wrapTransfer(stores, (actual) => ({
+        exportAll: (cutoff) => {
+          cutoffs.push(cutoff.getTime());
+          return actual.exportAll(cutoff);
+        },
+        countLive: (cutoff) => {
+          cutoffs.push(cutoff.getTime());
+          return actual.countLive(cutoff);
+        },
+      }));
+
+    const result = await copyDatabase("memory:", "memory://", {
+      openStores: openPair(source, destination),
+    });
+    // Initial count, copy, second source read and destination read share the cutoff.
+    expect(cutoffs).toEqual(Array(4).fill(t0 + MARGIN));
+    expect(result.counts).toMatchObject({ shares: 2, updates: 2, labels: 2, labs: 1, uploads: 4 });
+    for (const [id, copied] of [
+      ["ShBelow1", false],
+      ["ShEqual1", false],
+      ["ShAbove1", true],
+      ["ShNull01", true],
+    ] as const) {
+      expect(await destination.shares.get(id)).toEqual(copied ? await source.shares.get(id) : null);
+      expect((await destination.updates.read(id, 0)).length).toBe(copied ? 1 : 0);
+      expect(await destination.labels.get(labelClientId, id)).toEqual(
+        copied ? await source.labels.get(labelClientId, id) : null,
+      );
+    }
+    for (const [id, copied] of [
+      ["LabBelow", false],
+      ["LabEqual", false],
+      ["LabAbove", true],
+    ] as const)
+      expect(await destination.labs.get(id)).toEqual(copied ? await source.labs.get(id) : null);
+    const copiedUploads: string[] = [];
+    for (const [name, id] of uploads)
+      if (await destination.files.meta(id)) copiedUploads.push(name);
+    expect(copiedUploads.sort()).toEqual([
+      "ShAbove1.bin",
+      "ShNull01.bin",
+      "loose-above",
+      "own-above",
+    ]);
+  });
+
+  it("ignores records within the margin that disappear during the count or a later read", async () => {
+    const source = createMemoryStores();
+    const destination = createMemoryStores();
+    await seed(source);
+    const soon = new Date(Date.now() + 5_000);
+    const soonShare = {
+      ...sampleShare(),
+      id: "Soon0001",
+      saved: false,
+      savedBy: [],
+      expiresAt: soon,
+    };
+    await source.shares.create(soonShare);
+    await source.shares.create({ ...soonShare, id: "Soon0002" });
+    await source.labs.create({
+      id: "LabSoon1",
+      title: "expiring",
+      ownerId,
+      joinCode: "222222",
+      templateShareId: null,
+      locked: false,
+      students: [],
+      createdAt: new Date(),
+      expiresAt: soon,
+    });
+    const actual = transferBackend(source);
+    let calls = 0;
+    registerTransferBackend(source, {
+      ...actual,
+      // TTL deletions between the share count and the lab count, and before the second read.
+      async countLive(cutoff) {
+        const { shares } = await actual.countLive(cutoff);
+        await source.labs.delete("LabSoon1");
+        await source.shares.delete("Soon0001");
+        const { labs } = await actual.countLive(cutoff);
+        return { shares, labs };
+      },
+      exportAll: async function* (cutoff) {
+        if (++calls === 2) await source.shares.delete("Soon0002");
+        yield* actual.exportAll(cutoff);
+      },
+    });
+    const result = await copyDatabase("memory:", "memory://", {
+      openStores: openPair(source, destination),
+    });
+    expect(result.counts).toMatchObject({ shares: 1, labs: 1 });
+    expect(await destination.labs.get("LabSoon1")).toBeNull();
+    expect(await destination.shares.get("Soon0002")).toBeNull();
+  });
+
+  it("fails at the deadline even when every read matches", async () => {
+    for (const [elapsed, wall, failed] of [
+      [DEADLINE - 1, 0, false],
+      [DEADLINE, 0, true],
+      // A wall clock set back an hour does not hide the elapsed time.
+      [DEADLINE, -60 * MINUTE, true],
+    ] as const) {
+      const clocks = fakeClocks();
+      const source = createMemoryStores();
+      const destination = createMemoryStores();
+      await seed(source);
+      wrapTransfer(destination, (actual) => ({
+        // The last read of the run ends here.
+        async uploadCounter() {
+          clocks.monotonic = elapsed;
+          clocks.wall = wall;
+          return actual.uploadCounter();
+        },
+      }));
+      const outcome = await copyDatabase("memory:", "memory://", {
+        openStores: openPair(source, destination),
+      }).catch((caught: unknown) => caught);
+      if (failed) {
+        expect(outcome).toBeInstanceOf(CopyDeadlineError);
+        expect((outcome as CopyDeadlineError).counts).toMatchObject({ shares: 1, audit: 1 });
+      } else expect(outcome).toMatchObject({ counts: { shares: 1, audit: 1 } });
+      // The destination is left for the operator either way.
+      expect((await destination.shares.get(shareId))?.title).toBe(sampleShare().title);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("stops copying once the deadline has passed", async () => {
+    const clocks = fakeClocks();
+    const source = createMemoryStores();
+    const destination = createMemoryStores();
+    await seed(source);
+    let reads = 0;
+    wrapExport(source, async function* (actual, cutoff) {
+      reads++;
+      for await (const item of actual.exportAll(cutoff)) {
+        yield item;
+        if (item.kind === "shares") clocks.monotonic = DEADLINE + MINUTE;
+      }
+    });
+    await expect(
+      copyDatabase("memory:", "memory://", { openStores: openPair(source, destination) }),
+    ).rejects.toBeInstanceOf(CopyDeadlineError);
+    expect(reads).toBe(1);
+  });
+
+  it("refuses a MongoDB server whose clock is more than 2 minutes off", async () => {
+    for (const [role, localTime, refused] of [
+      ["memory:", 3 * MINUTE, true],
+      ["memory:", -3 * MINUTE, true],
+      ["memory://", 2 * MINUTE + 5_000, true],
+      ["memory://", undefined, true],
+      ["memory:", 90_000, false],
+      ["memory://", -90_000, false],
+    ] as const) {
+      const source = createMemoryStores();
+      const destination = createMemoryStores();
+      await source.shares.create(sampleShare());
+      const client = helloClient({
+        localTime: localTime === undefined ? undefined : new Date(Date.now() + localTime),
+      });
+      const copy = copyDatabase("memory:", "memory://", {
+        openStores: openMemory({ "memory:": source, "memory://": destination }, { [role]: client }),
+      });
+      if (refused) {
+        await expect(copy).rejects.toThrow(
+          new CopyRefusedError(
+            "MongoDB server clock differs from this host by more than 2 minutes",
+          ),
+        );
+        expect(await transferBackend(destination).isEmpty()).toBe(true);
+      } else expect((await copy).counts.shares).toBe(1);
+    }
+  });
+
+  it("refuses a MongoDB source that is not the primary before opening the destination", async () => {
+    const source = createMemoryStores();
+    await source.shares.create(sampleShare());
+    const open = openMemory(
+      { "memory:": source, "memory://": createMemoryStores() },
+      { "memory:": helloClient({ isWritablePrimary: false, secondary: true, setName: "rs0" }) },
+    );
+    const opened: string[] = [];
+    await expect(
+      copyDatabase("memory:", "memory://", {
+        openStores: (url) => {
+          opened.push(url);
+          return open(url);
+        },
+      }),
+    ).rejects.toThrow(new CopyRefusedError("MongoDB source is not the primary"));
+    expect(opened).toEqual(["memory:"]);
+  });
+
+  it("compares every advertised replica set member", async () => {
+    const copy = async (
+      from: Record<string, unknown>,
+      to: Record<string, unknown>,
+      toDb = "gp",
+    ) => {
+      const source = createMemoryStores();
+      await source.shares.create(sampleShare());
+      return copyDatabase("memory:", "memory://", {
+        openStores: openMemory(
+          { "memory:": source, "memory://": createMemoryStores() },
+          { "memory:": helloClient(from), "memory://": helloClient(to, toDb) },
+        ),
+      });
+    };
+    const process = (processId: string) => ({ topologyVersion: { processId } });
+    const same = new CopyRefusedError("Source and destination are the same");
+    const primary = {
+      ...process("p1"),
+      setName: "rs0",
+      hosts: ["db1:27017"],
+      passives: ["db2:27017"],
+      primary: "db1:27017",
+      me: "db1:27017",
+    };
+    // A passive answering as an arbiter's peer: only the passive and the arbiter list overlap.
+    await expect(
+      copy(primary, {
+        ...process("p2"),
+        setName: "rs0",
+        hosts: ["db3:27017"],
+        arbiters: ["DB2:27017"],
+      }),
+    ).rejects.toThrow(same);
+    // A hidden member lists no hosts, only itself and the primary.
+    await expect(
+      copy(primary, { ...process("p3"), setName: "rs0", me: "hidden:27017", primary: "db1:27017" }),
+    ).rejects.toThrow(same);
+    // The same process under any name.
+    await expect(copy(process("p1"), process("p1"))).rejects.toThrow(same);
+    // Copied: another database on the same process, a set of the same name with no member in
+    // common, and two mongos routers (not detected; the emptiness check still applies).
+    expect((await copy(process("p1"), process("p1"), "other")).counts.shares).toBe(1);
+    expect(
+      (await copy(primary, { ...process("p4"), setName: "rs0", hosts: ["db9:27017"] })).counts
+        .shares,
+    ).toBe(1);
+    expect(
+      (await copy({ ...process("r1"), msg: "isdbgrid" }, { ...process("r2"), msg: "isdbgrid" }))
+        .counts.shares,
+    ).toBe(1);
+  });
+
+  it("keeps socket paths case-sensitive and follows MySQL socketPath", async () => {
+    const neverOpen = async (): Promise<OpenedStores> => {
+      throw new Error("must not open");
+    };
+    for (const [from, to] of [
+      [
+        "postgres://gp@localhost/gp?host=/run/gp-a",
+        "postgresql://gp@db.invalid:5432/gp?host=%2Frun%2Fgp-a",
+      ],
+      ["postgres://gp@%2Frun%2Fgp-a/gp", "postgres://gp@localhost/gp?host=/run/gp-a"],
+      [
+        "postgres://gp@localhost/gp?host=/run/b&host=/run/gp-a",
+        "postgres://gp@localhost/gp?host=/run/gp-a",
+      ],
+      [
+        "mysql://root@db1/gp?socketPath=/run/mysqld/gp.sock",
+        "mariadb://root@db2:3307/gp?socketPath=%22/run/mysqld/gp.sock%22",
+      ],
+    ] as const)
+      await expect(copyDatabase(from, to, { openStores: neverOpen })).rejects.toThrow(
+        new CopyRefusedError("Source and destination are the same"),
+      );
+    for (const [from, to] of [
+      ["postgres://gp@localhost/gp?host=/run/GP-A", "postgres://gp@localhost/gp?host=/run/gp-a"],
+      [
+        "mysql://root@localhost/gp?socketPath=/run/mysqld/A.sock",
+        "mysql://root@localhost/gp?socketPath=/run/mysqld/a.sock",
+      ],
+      ["mysql://root@localhost/gp?socketPath=/run/mysqld/a.sock", "mysql://root@localhost/gp"],
+    ] as const) {
+      const source = createMemoryStores();
+      await source.shares.create(sampleShare());
+      const result = await copyDatabase(from, to, {
+        openStores: openMemory({ [from]: source, [to]: createMemoryStores() }),
+      });
+      expect(result.counts.shares).toBe(1);
+    }
   });
 });

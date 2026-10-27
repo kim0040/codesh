@@ -672,10 +672,10 @@ export function createMemoryStores(): Stores {
     audit,
   };
   const transfer: TransferBackend = {
-    async *exportAll(liveAt: Date): AsyncIterable<TransferItem> {
+    async *exportAll(cutoff: Date): AsyncIterable<TransferItem> {
       const live = new Set<string>();
       for (const record of shares.transferRecords()) {
-        if (record.expiresAt && record.expiresAt < liveAt) continue;
+        if (record.expiresAt && record.expiresAt <= cutoff) continue;
         live.add(record.id);
         yield* splitShare(record);
         for (const update of updates.transferRecords(record.id))
@@ -685,25 +685,28 @@ export function createMemoryStores(): Stores {
       }
       for await (const item of files.transferRecords())
         if (
-          item.record.expiresAt >= liveAt &&
+          item.record.expiresAt > cutoff &&
           (item.record.shareId === undefined || live.has(item.record.shareId))
         )
           yield { kind: "uploads", ...item };
       for (const record of labs.transferRecords())
-        if (record.expiresAt >= liveAt) yield { kind: "labs", record };
+        if (record.expiresAt > cutoff) yield { kind: "labs", record };
       for (const record of labels.transferRecords())
         if (live.has(record.shareId)) yield { kind: "labels", record };
       const setting = settings.transferRecord();
       if (setting) yield { kind: "settings", record: setting };
+      yield* transfer.exportAudit();
+    },
+    async *exportAudit() {
       for (const entry of audit.transferRecords())
         yield { kind: "audit", id: entry.id, record: entry.record };
     },
-    async countLive(liveAt: Date) {
+    async countLive(cutoff: Date) {
       let liveShares = 0;
       for (const record of shares.transferRecords())
-        if (!record.expiresAt || record.expiresAt >= liveAt) liveShares++;
+        if (!record.expiresAt || record.expiresAt > cutoff) liveShares++;
       let liveLabs = 0;
-      for (const record of labs.transferRecords()) if (record.expiresAt >= liveAt) liveLabs++;
+      for (const record of labs.transferRecords()) if (record.expiresAt > cutoff) liveLabs++;
       return { shares: liveShares, labs: liveLabs };
     },
     async importBatch(items: readonly TransferRecord[]) {

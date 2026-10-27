@@ -1,18 +1,25 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { defaultSettings, type ShareRecord } from "@gachipad/shared";
-import { describe, expect, it } from "vitest";
-import { connectMongo } from "../mongo.js";
+import type { CommandStartedEvent } from "mongodb";
+import { describe, expect, it, vi } from "vitest";
+import { COLLECTIONS, connectMongo, createMongoStores, UPLOADS_BUCKET } from "../mongo.js";
 import { openStores } from "../open.js";
 import { openSqlDriver } from "../sql/driver.js";
 import { CopyRefusedError, copyDatabase } from "./copy.js";
+import { transferBackend } from "./registry.js";
 
 const enabled = process.env.GACHIPAD_COPY_INTEGRATION === "1";
 const mongoBase = process.env.TEST_MONGO_URL ?? "mongodb://localhost:27017/gp_copy_base";
-type Backend = "mongodb" | "sqlite" | "postgresql" | "mysql" | "mariadb";
+// A replica set seed list and a direct connection to one of its secondaries, when available.
+const replicaSetBase = process.env.TEST_MONGO_RS_URL;
+const secondaryBase = process.env.TEST_MONGO_SECONDARY_URL;
+type Backend = "mongodb" | "mongors" | "sqlite" | "postgresql" | "mysql" | "mariadb";
 type Pair = { from: Backend; to: Backend; cli?: boolean };
 const pairs: Pair[] = [
   { from: "mongodb", to: "sqlite", cli: true },
@@ -23,7 +30,10 @@ const pairs: Pair[] = [
   { from: "postgresql", to: "mongodb" },
   { from: "mariadb", to: "sqlite" },
   { from: "postgresql", to: "mysql" },
+  { from: "mongors", to: "postgresql", cli: true },
+  { from: "sqlite", to: "mongors" },
 ];
+const isMongo = (kind: Backend) => kind === "mongodb" || kind === "mongors";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../");
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
@@ -93,16 +103,26 @@ const updateBytes = (seq: number) =>
     ? Uint8Array.from({ length: 256 }, (_, index) => index)
     : Uint8Array.from({ length: 64 + (seq % 50) }, (_, index) => (seq * 7 + index) % 256);
 
+/** Selects a database in a MongoDB connection string without URL parsing: it may list hosts. */
+function mongoDatabaseUrl(base: string, name: string): string {
+  const match = /^(mongodb(?:\+srv)?:\/\/[^/?]+)(?:\/[^?]*)?(\?.*)?$/.exec(base);
+  if (!match) throw new Error("Unsupported MongoDB test URL");
+  return `${match[1]}/${name}${match[2] ?? ""}`;
+}
+
 function databaseUrl(kind: Backend, name: string): string {
   if (kind === "sqlite") return `sqlite:/tmp/${name}.sqlite`;
+  if (kind === "mongodb") return mongoDatabaseUrl(mongoBase, name);
+  if (kind === "mongors") {
+    if (!replicaSetBase) throw new Error("Missing integration URL for mongors");
+    return mongoDatabaseUrl(replicaSetBase, name);
+  }
   const base =
-    kind === "mongodb"
-      ? mongoBase
-      : kind === "postgresql"
-        ? process.env.TEST_POSTGRES_URL
-        : kind === "mysql"
-          ? process.env.TEST_MYSQL_URL
-          : process.env.TEST_MARIADB_URL;
+    kind === "postgresql"
+      ? process.env.TEST_POSTGRES_URL
+      : kind === "mysql"
+        ? process.env.TEST_MYSQL_URL
+        : process.env.TEST_MARIADB_URL;
   if (!base) throw new Error(`Missing integration URL for ${kind}`);
   const url = new URL(base);
   url.pathname = `/${name}`;
@@ -115,7 +135,7 @@ async function prepareDatabase(kind: Backend, name: string, url: string): Promis
     await rm(`/tmp/${name}.sqlite`, { force: true });
     return;
   }
-  if (kind === "mongodb") {
+  if (isMongo(kind)) {
     const { MongoClient } = await import("mongodb");
     const client = new MongoClient(url);
     await client.connect();
@@ -163,7 +183,7 @@ async function dropDatabase(kind: Backend, name: string, url: string): Promise<v
     ]);
     return;
   }
-  if (kind === "mongodb") {
+  if (isMongo(kind)) {
     const { MongoClient } = await import("mongodb");
     const client = new MongoClient(url);
     await client.connect();
@@ -474,7 +494,7 @@ async function compare(
 }
 
 async function assertUploadCounter(kind: Backend, url: string, expected: number): Promise<void> {
-  if (kind === "mongodb") {
+  if (isMongo(kind)) {
     const connection = await connectMongo(url);
     try {
       const row = await connection.db
@@ -497,12 +517,124 @@ async function assertUploadCounter(kind: Backend, url: string, expected: number)
   }
 }
 
-function runCli(from?: string, to?: string) {
+const margin = 15 * 60_000;
+const farFuture = new Date("2099-01-02T03:04:05.678Z");
+
+/**
+ * Records on both sides of the cutoff (t0 + 15 minutes): shares, labs and uploads expiring 1 ms
+ * before, at and 1 ms after it, a share without expiry, and child records of every share.
+ */
+async function seedBoundary(stores: Awaited<ReturnType<typeof openStores>>["stores"], t0: number) {
+  const at = (offset: number) => new Date(t0 + margin + offset);
+  const uploads = new Map<string, string>();
+  const putUpload = async (name: string, expiresAt: Date, shareId?: string) => {
+    const meta = await stores.files.put({
+      name,
+      contentType: null,
+      ownerId,
+      ...(shareId ? { shareId } : {}),
+      expiresAt,
+      data: updateBytes(name.length),
+    });
+    uploads.set(name, meta.id);
+  };
+  const shares = { ShBelow1: at(-1), ShEqual1: at(0), ShAbove1: at(1), ShNull01: null };
+  for (const [id, expiresAt] of Object.entries(shares)) {
+    await stores.shares.create({
+      ...shareFixture(),
+      id,
+      saved: expiresAt === null,
+      savedBy: [],
+      bans: [],
+      expiresAt,
+    });
+    await stores.updates.append(id, [{ seq: 1, data: updateBytes(2) }], new Date(t0));
+    await stores.labels.set(labelClientId, id, { folder: null, tags: [] }, new Date(t0));
+    await putUpload(`${id}.bin`, farFuture, id);
+  }
+  for (const [name, offset] of [
+    ["loose-below", -1],
+    ["loose-equal", 0],
+    ["loose-above", 1],
+  ] as const)
+    await putUpload(name, at(offset));
+  await putUpload("own-equal", at(0), "ShAbove1");
+  await putUpload("own-above", at(1), "ShAbove1");
+  for (const [id, offset] of [
+    ["LabBelow", -1],
+    ["LabEqual", 0],
+    ["LabAbove", 1],
+  ] as const)
+    await stores.labs.create({
+      id,
+      title: id,
+      ownerId,
+      joinCode: "123456",
+      templateShareId: null,
+      locked: false,
+      students: [],
+      createdAt: new Date(t0),
+      expiresAt: at(offset),
+    });
+  return uploads;
+}
+
+async function compareBoundary(
+  source: Awaited<ReturnType<typeof openStores>>["stores"],
+  destination: Awaited<ReturnType<typeof openStores>>["stores"],
+  uploads: Map<string, string>,
+) {
+  for (const [id, copied] of [
+    ["ShBelow1", false],
+    ["ShEqual1", false],
+    ["ShAbove1", true],
+    ["ShNull01", true],
+  ] as const) {
+    expect(await destination.shares.get(id)).toEqual(copied ? await source.shares.get(id) : null);
+    expect(await destination.updates.read(id, 0)).toEqual(
+      copied ? await source.updates.read(id, 0) : [],
+    );
+    expect(await destination.labels.get(labelClientId, id)).toEqual(
+      copied ? await source.labels.get(labelClientId, id) : null,
+    );
+  }
+  for (const [id, copied] of [
+    ["LabBelow", false],
+    ["LabEqual", false],
+    ["LabAbove", true],
+  ] as const)
+    expect(await destination.labs.get(id)).toEqual(copied ? await source.labs.get(id) : null);
+  const copiedUploads: string[] = [];
+  for (const [name, id] of uploads) {
+    const meta = await destination.files.meta(id);
+    if (!meta) continue;
+    expect(meta).toEqual(await source.files.meta(id));
+    copiedUploads.push(name);
+  }
+  expect(copiedUploads.sort()).toEqual([
+    "ShAbove1.bin",
+    "ShNull01.bin",
+    "loose-above",
+    "own-above",
+  ]);
+}
+
+/** A module for the CLI's NODE_OPTIONS, written to a temporary directory. */
+async function preloadModule(source: string): Promise<{ url: string; dir: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "gp-copy-preload-"));
+  const file = join(dir, "preload.mjs");
+  await writeFile(file, source);
+  return { url: pathToFileURL(file).href, dir };
+}
+
+function runCli(from?: string, to?: string, preload?: string) {
   const env = { ...process.env };
   delete env.GACHIPAD_COPY_FROM;
   delete env.GACHIPAD_COPY_TO;
   if (from !== undefined) env.GACHIPAD_COPY_FROM = from;
   if (to !== undefined) env.GACHIPAD_COPY_TO = to;
+  // A module loaded before the CLI, to move its clocks.
+  if (preload) env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --import=${preload}`.trim();
   // As in the API image: npm keeps the CLI's exit code (pnpm --filter reports any failure as 1).
   const result = spawnSync("npm", ["run", "--silent", "copy-db"], {
     cwd: resolve(repoRoot, "apps/api"),
@@ -514,45 +646,50 @@ function runCli(from?: string, to?: string) {
 
 describe.skipIf(!enabled)("real backend database transfer", () => {
   for (const [index, pair] of pairs.entries()) {
-    it(`${pair.from} to ${pair.to}${pair.cli ? " through the API CLI" : ""}`, async () => {
-      const prefix = `gp_copy_${pair.from}_${pair.to}_${index}`;
-      const sourceName = `${prefix}_src`;
-      const destinationName = `${prefix}_dst`;
-      const sourceUrl = databaseUrl(pair.from, sourceName);
-      const destinationUrl = databaseUrl(pair.to, destinationName);
-      let sourceDb: Awaited<ReturnType<typeof openStores>> | undefined;
-      let destinationDb: Awaited<ReturnType<typeof openStores>> | undefined;
-      try {
-        await prepareDatabase(pair.from, sourceName, sourceUrl);
-        await prepareDatabase(pair.to, destinationName, destinationUrl);
-        sourceDb = await openStores(sourceUrl);
-        const fixture = await seed(sourceDb.stores);
-        await sourceDb.close();
-        sourceDb = undefined;
+    const needsReplicaSet = pair.from === "mongors" || pair.to === "mongors";
+    it.skipIf(needsReplicaSet && !replicaSetBase)(
+      `${pair.from} to ${pair.to}${pair.cli ? " through the API CLI" : ""}`,
+      async () => {
+        const prefix = `gp_copy_${pair.from}_${pair.to}_${index}`;
+        const sourceName = `${prefix}_src`;
+        const destinationName = `${prefix}_dst`;
+        const sourceUrl = databaseUrl(pair.from, sourceName);
+        const destinationUrl = databaseUrl(pair.to, destinationName);
+        let sourceDb: Awaited<ReturnType<typeof openStores>> | undefined;
+        let destinationDb: Awaited<ReturnType<typeof openStores>> | undefined;
+        try {
+          await prepareDatabase(pair.from, sourceName, sourceUrl);
+          await prepareDatabase(pair.to, destinationName, destinationUrl);
+          sourceDb = await openStores(sourceUrl);
+          const fixture = await seed(sourceDb.stores);
+          await sourceDb.close();
+          sourceDb = undefined;
 
-        if (pair.cli) {
-          const { status, output } = runCli(sourceUrl, destinationUrl);
-          console.log(output.trim());
-          expect(status).toBe(0);
-          expect(output).toContain("Result: success");
-          for (const [kind, count] of Object.entries(expectedCopyCounts))
-            expect(output).toContain(`${kind}: ${count}\n`);
-        } else {
-          const result = await copyDatabase(sourceUrl, destinationUrl);
-          expect(result.counts).toEqual(expectedCopyCounts);
+          if (pair.cli) {
+            const { status, output } = runCli(sourceUrl, destinationUrl);
+            console.log(output.trim());
+            expect(status).toBe(0);
+            expect(output).toContain("Result: success");
+            for (const [kind, count] of Object.entries(expectedCopyCounts))
+              expect(output).toContain(`${kind}: ${count}\n`);
+          } else {
+            const result = await copyDatabase(sourceUrl, destinationUrl);
+            expect(result.counts).toEqual(expectedCopyCounts);
+          }
+
+          sourceDb = await openStores(sourceUrl);
+          destinationDb = await openStores(destinationUrl);
+          await compare(sourceDb.stores, destinationDb.stores, fixture);
+          await assertUploadCounter(pair.to, destinationUrl, fixture.uploadBytes);
+        } finally {
+          await sourceDb?.close().catch(() => undefined);
+          await destinationDb?.close().catch(() => undefined);
+          await dropDatabase(pair.from, sourceName, sourceUrl);
+          await dropDatabase(pair.to, destinationName, destinationUrl);
         }
-
-        sourceDb = await openStores(sourceUrl);
-        destinationDb = await openStores(destinationUrl);
-        await compare(sourceDb.stores, destinationDb.stores, fixture);
-        await assertUploadCounter(pair.to, destinationUrl, fixture.uploadBytes);
-      } finally {
-        await sourceDb?.close().catch(() => undefined);
-        await destinationDb?.close().catch(() => undefined);
-        await dropDatabase(pair.from, sourceName, sourceUrl);
-        await dropDatabase(pair.to, destinationName, destinationUrl);
-      }
-    }, 300_000);
+      },
+      300_000,
+    );
   }
 
   it("refuses the same MongoDB database under another connection string", async () => {
@@ -654,6 +791,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         expect(run.output.trim().split("\n").at(-1)).toBe(result);
         expect(run.status).toBe(status);
         expect(run.output).toContain("Source must be quiescent");
+        expect(run.output).toContain("records that expired or expire within 15 minutes");
         expect(run.output).not.toContain("cli-secret");
         expect(run.output).not.toContain("/tmp/");
       }
@@ -663,4 +801,222 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
       await dropDatabase("mongodb", `${name}_mongo`, mongo);
     }
   }, 120_000);
+
+  it("refuses MongoDB clocks more than 2 minutes off through the CLI", async () => {
+    const name = "gp_copy_cli_clock";
+    const mongo = databaseUrl("mongodb", name);
+    const sqlite = `sqlite:/tmp/${name}.sqlite`;
+    const sqliteSource = `sqlite:/tmp/${name}_src.sqlite`;
+    const mongoDestination = databaseUrl("mongodb", `${name}_dst`);
+    const refused =
+      "Result: refused (MongoDB server clock differs from this host by more than 2 minutes).";
+    // This host's clock runs 3 minutes ahead of the servers'.
+    const preload = await preloadModule(
+      "const now = Date.now.bind(Date);\nDate.now = () => now() + 3 * 60_000;\n",
+    );
+    try {
+      await prepareDatabase("sqlite", name, sqlite);
+      await prepareDatabase("sqlite", `${name}_src`, sqliteSource);
+      await prepareDatabase("mongodb", name, mongo);
+      await prepareDatabase("mongodb", `${name}_dst`, mongoDestination);
+      for (const url of [mongo, sqliteSource]) {
+        const opened = await openStores(url);
+        await opened.stores.settings.put({
+          ...defaultSettings(),
+          contact: "clock@example.invalid",
+        });
+        await opened.close();
+      }
+      // MongoDB source: refused before the destination is opened.
+      const fromMongo = runCli(mongo, sqlite, preload.url);
+      expect(fromMongo.output.trim().split("\n").at(-1)).toBe(refused);
+      expect(fromMongo.status).toBe(2);
+      expect(existsSync(`/tmp/${name}.sqlite`)).toBe(false);
+      // MongoDB destination: refused before any index or record is written.
+      const toMongo = runCli(sqliteSource, mongoDestination, preload.url);
+      expect(toMongo.output.trim().split("\n").at(-1)).toBe(refused);
+      expect(toMongo.status).toBe(2);
+      const connection = await connectMongo(mongoDestination);
+      try {
+        expect(await connection.db.listCollections().toArray()).toEqual([]);
+      } finally {
+        await connection.close();
+      }
+    } finally {
+      await rm(preload.dir, { recursive: true, force: true });
+      await dropDatabase("sqlite", name, sqlite);
+      await dropDatabase("sqlite", `${name}_src`, sqliteSource);
+      await dropDatabase("mongodb", name, mongo);
+      await dropDatabase("mongodb", `${name}_dst`, mongoDestination);
+    }
+  }, 120_000);
+
+  it("fails a copy that takes longer than 10 minutes through the CLI", async () => {
+    const name = "gp_copy_cli_deadline";
+    const source = `sqlite:/tmp/${name}_src.sqlite`;
+    const destination = `sqlite:/tmp/${name}_dst.sqlite`;
+    // The copier's monotonic clock jumps 10 minutes after its start.
+    const preload = await preloadModule(
+      [
+        "const now = performance.now.bind(performance);",
+        "let started = false;",
+        "performance.now = () => {",
+        '  if (!new Error().stack?.includes("transfer/copy.ts")) return now();',
+        "  if (!started) {",
+        "    started = true;",
+        "    return now();",
+        "  }",
+        "  return now() + 10 * 60_000;",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    try {
+      await prepareDatabase("sqlite", `${name}_src`, source);
+      await prepareDatabase("sqlite", `${name}_dst`, destination);
+      const opened = await openStores(source);
+      await opened.stores.settings.put({ ...defaultSettings(), contact: "slow@example.invalid" });
+      await opened.close();
+      const run = runCli(source, destination, preload.url);
+      expect(run.output.trim().split("\n").at(-1)).toBe(
+        "Result: failed (took longer than 10 minutes); drop the destination before retrying.",
+      );
+      expect(run.status).toBe(1);
+      expect(run.output).not.toContain("/tmp/");
+      // The destination is left for the operator to drop.
+      expect(existsSync(`/tmp/${name}_dst.sqlite`)).toBe(true);
+    } finally {
+      await rm(preload.dir, { recursive: true, force: true });
+      await dropDatabase("sqlite", `${name}_src`, source);
+      await dropDatabase("sqlite", `${name}_dst`, destination);
+    }
+  }, 120_000);
+
+  for (const [from, to] of [
+    ["mongodb", "sqlite"],
+    ["postgresql", "mongodb"],
+    ["mariadb", "mysql"],
+  ] as const)
+    it(`copies exactly the records expiring after the cutoff: ${from} to ${to}`, async () => {
+      const sourceName = `gp_copy_cutoff_${from}_src`;
+      const destinationName = `gp_copy_cutoff_${to}_dst`;
+      const sourceUrl = databaseUrl(from, sourceName);
+      const destinationUrl = databaseUrl(to, destinationName);
+      const t0 = Date.now();
+      let sourceDb: Awaited<ReturnType<typeof openStores>> | undefined;
+      let destinationDb: Awaited<ReturnType<typeof openStores>> | undefined;
+      try {
+        await prepareDatabase(from, sourceName, sourceUrl);
+        await prepareDatabase(to, destinationName, destinationUrl);
+        sourceDb = await openStores(sourceUrl);
+        const uploads = await seedBoundary(sourceDb.stores, t0);
+        await sourceDb.close();
+        sourceDb = undefined;
+        // The copy takes t0 as its start, so its cutoff is exactly t0 + 15 minutes.
+        vi.spyOn(Date, "now").mockReturnValue(t0);
+        const result = await copyDatabase(sourceUrl, destinationUrl);
+        vi.restoreAllMocks();
+        expect(result.counts).toMatchObject({
+          shares: 2,
+          updates: 2,
+          labels: 2,
+          labs: 1,
+          uploads: 4,
+        });
+        sourceDb = await openStores(sourceUrl);
+        destinationDb = await openStores(destinationUrl);
+        await compareBoundary(sourceDb.stores, destinationDb.stores, uploads);
+      } finally {
+        vi.restoreAllMocks();
+        await sourceDb?.close().catch(() => undefined);
+        await destinationDb?.close().catch(() => undefined);
+        await dropDatabase(from, sourceName, sourceUrl);
+        await dropDatabase(to, destinationName, destinationUrl);
+      }
+    }, 120_000);
+
+  it("reads every MongoDB source record from the primary with majority read concern", async () => {
+    // A replica set shows the routing; a standalone server still shows the read concern.
+    const kind: Backend = replicaSetBase ? "mongors" : "mongodb";
+    const name = "gp_copy_read_options";
+    const url = databaseUrl(kind, name);
+    const { MongoClient } = await import("mongodb");
+    // The connection string asks for the opposite: a secondary and local read concern.
+    const client = new MongoClient(
+      `${url}${url.includes("?") ? "&" : "?"}readPreference=secondaryPreferred&readConcernLevel=local`,
+      { monitorCommands: true },
+    );
+    const reads: CommandStartedEvent[] = [];
+    client.on("commandStarted", (event) => {
+      if (["find", "aggregate", "count", "distinct"].includes(event.commandName)) reads.push(event);
+    });
+    try {
+      await prepareDatabase(kind, name, url);
+      const opened = await openStores(url);
+      await seed(opened.stores);
+      await opened.close();
+      await client.connect();
+      const backend = transferBackend(createMongoStores(client.db()));
+      const cutoff = new Date(Date.now() + margin);
+      await backend.countLive(cutoff);
+      for await (const _audit of backend.exportAudit());
+      for await (const item of backend.exportAll(cutoff))
+        if (item.kind === "uploads") for await (const _chunk of item.chunks);
+      await backend.uploadCounter();
+      const collections = new Set(reads.map((event) => event.command[event.commandName]));
+      // Every collection the copy reads, including GridFS metadata and chunks.
+      for (const collection of [
+        ...Object.values(COLLECTIONS),
+        `${UPLOADS_BUCKET}.files`,
+        `${UPLOADS_BUCKET}.chunks`,
+        "storage_quotas",
+      ])
+        expect(collections).toContain(collection);
+      // Events carry resolved addresses; the test members differ only by port.
+      const hello = await client.db("admin").command({ hello: 1 }, { readPreference: "primary" });
+      const primaryPort = `:${String(hello.primary).split(":").at(-1)}`;
+      for (const event of reads) {
+        expect(event.command.readConcern).toEqual({ level: "majority" });
+        if (kind === "mongors") expect(event.address.endsWith(primaryPort)).toBe(true);
+      }
+    } finally {
+      await client.close();
+      await dropDatabase(kind, name, url);
+    }
+  }, 120_000);
+
+  it.skipIf(!replicaSetBase || !secondaryBase)(
+    "refuses a secondary source and a replica set member under another name",
+    async () => {
+      const name = "gp_copy_rs_identity";
+      const primary = databaseUrl("mongors", name);
+      const secondary = mongoDatabaseUrl(secondaryBase ?? "", name);
+      const empty = `sqlite:/tmp/${name}.sqlite`;
+      try {
+        await prepareDatabase("mongors", name, primary);
+        await prepareDatabase("sqlite", name, empty);
+        const opened = await openStores(primary);
+        await opened.stores.settings.put({ ...defaultSettings(), contact: "rs@example.invalid" });
+        await opened.close();
+        // A direct connection to the secondary would read whatever it has replicated so far.
+        const run = runCli(secondary, empty);
+        expect(run.output.trim().split("\n").at(-1)).toBe(
+          "Result: refused (MongoDB source is not the primary).",
+        );
+        expect(run.status).toBe(2);
+        expect(existsSync(`/tmp/${name}.sqlite`)).toBe(false);
+        // The secondary answers with another process id, but the same set and members.
+        await expect(copyDatabase(primary, secondary)).rejects.toThrow(
+          new CopyRefusedError("Source and destination are the same"),
+        );
+        const check = await openStores(primary);
+        expect((await check.stores.settings.get()).contact).toBe("rs@example.invalid");
+        await check.close();
+      } finally {
+        await dropDatabase("sqlite", name, empty);
+        await dropDatabase("mongors", name, primary);
+      }
+    },
+    120_000,
+  );
 });

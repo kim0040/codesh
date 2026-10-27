@@ -8,7 +8,13 @@ import type {
 import { SETTINGS_DOC_ID } from "@gachipad/shared";
 import type { SqlDriver, SqlRow } from "../sql/driver.js";
 import { MEMBER_PAGE } from "./members.js";
-import type { ShareMembers, TransferBackend, TransferItem, TransferRecord } from "./types.js";
+import type {
+  AuditItem,
+  ShareMembers,
+  TransferBackend,
+  TransferItem,
+  TransferRecord,
+} from "./types.js";
 
 const PAGE_SIZE = 128;
 /** Update and snapshot bodies read at once; a single larger body is read on its own. */
@@ -279,16 +285,37 @@ async function tableExists(driver: SqlDriver, table: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+async function* auditItems(driver: SqlDriver): AsyncIterable<AuditItem> {
+  for await (const batch of pages<SqlRow & { id: string }>(
+    driver,
+    "SELECT id,at,actor,ip,action,share_id,detail_json FROM audit ORDER BY id LIMIT ?",
+    "SELECT id,at,actor,ip,action,share_id,detail_json FROM audit WHERE id>? ORDER BY id LIMIT ?",
+    (row) => [row.id],
+  )) {
+    for (const row of batch) {
+      const record: AuditRecord = {
+        at: new Date(number(row.at as number | string)),
+        actor: row.actor as string,
+        ip: row.ip as string,
+        action: row.action as string,
+        ...(row.share_id == null ? {} : { shareId: row.share_id as string }),
+        ...(row.detail_json == null ? {} : { detail: JSON.parse(row.detail_json as string) }),
+      };
+      yield { kind: "audit", id: row.id, record };
+    }
+  }
+}
+
 export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
   return {
-    async *exportAll(liveAt: Date): AsyncIterable<TransferItem> {
-      const live = liveAt.getTime();
+    async *exportAll(cutoff: Date): AsyncIterable<TransferItem> {
+      const cutoffMs = cutoff.getTime();
       for await (const batch of pages<ShareRow>(
         driver,
-        "SELECT * FROM shares WHERE (expires_at IS NULL OR expires_at>=?) ORDER BY id LIMIT ?",
-        "SELECT * FROM shares WHERE (expires_at IS NULL OR expires_at>=?) AND id>? ORDER BY id LIMIT ?",
+        "SELECT * FROM shares WHERE (expires_at IS NULL OR expires_at>?) ORDER BY id LIMIT ?",
+        "SELECT * FROM shares WHERE (expires_at IS NULL OR expires_at>?) AND id>? ORDER BY id LIMIT ?",
         (row) => [row.id],
-        [live],
+        [cutoffMs],
       )) {
         for (const row of batch) {
           const saved = await memberPage(driver, "savedBy", row.id);
@@ -310,10 +337,10 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
 
       for await (const batch of pages<SqlRow & { id: string }>(
         driver,
-        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs WHERE expires_at>=? ORDER BY id LIMIT ?",
-        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs WHERE expires_at>=? AND id>? ORDER BY id LIMIT ?",
+        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs WHERE expires_at>? ORDER BY id LIMIT ?",
+        "SELECT id,title,owner_id,join_code,template_share_id,locked,students_json,created_at,expires_at FROM labs WHERE expires_at>? AND id>? ORDER BY id LIMIT ?",
         (row) => [row.id],
-        [live],
+        [cutoffMs],
       )) {
         for (const row of batch) {
           const students = (
@@ -340,10 +367,10 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
 
       for await (const batch of pages<SqlRow & { client_id: string; share_id: string }>(
         driver,
-        "SELECT l.client_id,l.share_id,l.folder,l.tags_json,l.updated_at FROM share_labels l JOIN shares s ON s.id=l.share_id WHERE (s.expires_at IS NULL OR s.expires_at>=?) ORDER BY l.client_id,l.share_id LIMIT ?",
-        "SELECT l.client_id,l.share_id,l.folder,l.tags_json,l.updated_at FROM share_labels l JOIN shares s ON s.id=l.share_id WHERE (s.expires_at IS NULL OR s.expires_at>=?) AND (l.client_id>? OR (l.client_id=? AND l.share_id>?)) ORDER BY l.client_id,l.share_id LIMIT ?",
+        "SELECT l.client_id,l.share_id,l.folder,l.tags_json,l.updated_at FROM share_labels l JOIN shares s ON s.id=l.share_id WHERE (s.expires_at IS NULL OR s.expires_at>?) ORDER BY l.client_id,l.share_id LIMIT ?",
+        "SELECT l.client_id,l.share_id,l.folder,l.tags_json,l.updated_at FROM share_labels l JOIN shares s ON s.id=l.share_id WHERE (s.expires_at IS NULL OR s.expires_at>?) AND (l.client_id>? OR (l.client_id=? AND l.share_id>?)) ORDER BY l.client_id,l.share_id LIMIT ?",
         (row) => [row.client_id, row.client_id, row.share_id],
-        [live],
+        [cutoffMs],
       )) {
         for (const row of batch)
           yield {
@@ -364,33 +391,16 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
       );
       if (settings[0]) yield { kind: "settings", record: JSON.parse(settings[0].value_json) };
 
-      for await (const batch of pages<SqlRow & { id: string }>(
-        driver,
-        "SELECT id,at,actor,ip,action,share_id,detail_json FROM audit ORDER BY id LIMIT ?",
-        "SELECT id,at,actor,ip,action,share_id,detail_json FROM audit WHERE id>? ORDER BY id LIMIT ?",
-        (row) => [row.id],
-      )) {
-        for (const row of batch) {
-          const record: AuditRecord = {
-            at: new Date(number(row.at as number | string)),
-            actor: row.actor as string,
-            ip: row.ip as string,
-            action: row.action as string,
-            ...(row.share_id == null ? {} : { shareId: row.share_id as string }),
-            ...(row.detail_json == null ? {} : { detail: JSON.parse(row.detail_json as string) }),
-          };
-          yield { kind: "audit", id: row.id, record };
-        }
-      }
+      yield* auditItems(driver);
 
       const liveUploads =
-        "FROM uploads u LEFT JOIN shares s ON s.id=u.share_id WHERE u.complete=TRUE AND u.expires_at>=? AND (u.share_id IS NULL OR (s.id IS NOT NULL AND (s.expires_at IS NULL OR s.expires_at>=?)))";
+        "FROM uploads u LEFT JOIN shares s ON s.id=u.share_id WHERE u.complete=TRUE AND u.expires_at>? AND (u.share_id IS NULL OR (s.id IS NOT NULL AND (s.expires_at IS NULL OR s.expires_at>?)))";
       for await (const batch of pages<SqlRow & { id: string }>(
         driver,
         `SELECT u.id,u.name,u.size,u.content_type,u.owner_id,u.share_id,u.expires_at,u.created_at ${liveUploads} ORDER BY u.id LIMIT ?`,
         `SELECT u.id,u.name,u.size,u.content_type,u.owner_id,u.share_id,u.expires_at,u.created_at ${liveUploads} AND u.id>? ORDER BY u.id LIMIT ?`,
         (row) => [row.id],
-        [live, live],
+        [cutoffMs, cutoffMs],
       )) {
         for (const row of batch) {
           const size = number(row.size as number | string);
@@ -413,15 +423,17 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
       }
     },
 
-    async countLive(liveAt: Date) {
-      const live = liveAt.getTime();
+    exportAudit: () => auditItems(driver),
+
+    async countLive(cutoff: Date) {
+      const cutoffMs = cutoff.getTime();
       const [shares] = await driver.all<{ total: number | string }>(
-        "SELECT COUNT(*) AS total FROM shares WHERE expires_at IS NULL OR expires_at>=?",
-        [live],
+        "SELECT COUNT(*) AS total FROM shares WHERE expires_at IS NULL OR expires_at>?",
+        [cutoffMs],
       );
       const [labs] = await driver.all<{ total: number | string }>(
-        "SELECT COUNT(*) AS total FROM labs WHERE expires_at>=?",
-        [live],
+        "SELECT COUNT(*) AS total FROM labs WHERE expires_at>?",
+        [cutoffMs],
       );
       return { shares: number(shares?.total ?? 0), labs: number(labs?.total ?? 0) };
     },
