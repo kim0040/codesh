@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 export type SqlDialect = "sqlite" | "postgres" | "mysql";
@@ -139,18 +140,40 @@ export async function retryTransaction<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+export interface SqlDriverOptions {
+  /**
+   * SQLite only, for the copy's source: opens the file read-only, never creates it and leaves its
+   * journal mode alone. "immutable" also skips locking and the -wal and -shm files, which read-only
+   * access to a WAL-mode file would create or write; the file must not change while it is open.
+   */
+  readOnly?: boolean | "immutable";
+}
+
 /** Opens one driver connection. Database drivers are imported only for the selected URL scheme. */
-export async function openSqlDriver(url: string): Promise<SqlDriver> {
+export async function openSqlDriver(
+  url: string,
+  options: SqlDriverOptions = {},
+): Promise<SqlDriver> {
   if (url.startsWith("sqlite:")) {
     // Node 22.23 exposes node:sqlite without a flag; it currently emits its documented
     // ExperimentalWarning when the first DatabaseSync connection is created.
     const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(sqlitePath(url));
+    const path = sqlitePath(url);
+    const db = options.readOnly
+      ? new DatabaseSync(
+          options.readOnly === "immutable"
+            ? `file://${resolve(path).replace(/[%?#]/g, encodeURIComponent)}?immutable=1`
+            : path,
+          { readOnly: true },
+        )
+      : new DatabaseSync(path);
     try {
       db.exec("PRAGMA busy_timeout=3000");
-      // The WAL transition can return BUSY immediately despite the busy handler.
-      await retrySqliteBusy(() => db.exec("PRAGMA journal_mode=WAL"));
-      db.exec("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;");
+      if (!options.readOnly) {
+        // The WAL transition can return BUSY immediately despite the busy handler.
+        await retrySqliteBusy(() => db.exec("PRAGMA journal_mode=WAL"));
+        db.exec("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;");
+      }
     } catch (error) {
       db.close();
       throw error;
