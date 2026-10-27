@@ -1,5 +1,5 @@
 import { createHash, type Hash } from "node:crypto";
-import { access, open as openFile, realpath } from "node:fs/promises";
+import { access, lstat, open as openFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Document, MongoClient, MongoClientOptions } from "mongodb";
 import type { OpenedStores } from "../open.js";
@@ -8,7 +8,7 @@ import { openSqlDriver, sqlErrorCode } from "../sql/driver.js";
 import { createSqlStores } from "../sql/stores.js";
 import { transferBackend } from "./registry.js";
 import { createSqlTransferBackend, supportedSqlSchema } from "./sql.js";
-import { OPERATION_TIMEOUT_MS, withTimeout } from "./timeout.js";
+import { OPERATION_TIMEOUT_MS, OperationTimeoutError, withTimeout } from "./timeout.js";
 import {
   type AuditItem,
   type ShareMembers,
@@ -50,6 +50,9 @@ const NOT_PERSISTENT = "Source and destination must be persistent databases";
 const SQLITE_URI = "SQLite databases must be plain file paths, not file: URIs";
 const SQLITE_IN_USE =
   "SQLite source is open elsewhere or was not closed cleanly: it has -wal or -shm files";
+const SQLITE_NOT_FILE = "SQLite source must be a regular file";
+/** How much of a SQLite source file one bounded read hashes. */
+const FILE_READ_BYTES = 1024 * 1024;
 const SQL_SCHEMA = "SQL source schema version is missing or not supported";
 const WINDOW_RANGE = `Copy window must be a whole number of minutes from ${COPY_WINDOW_MINUTES.min} to ${COPY_WINDOW_MINUTES.max}`;
 
@@ -340,26 +343,62 @@ async function sqliteSidecars(path: string): Promise<boolean> {
 }
 
 /**
- * How a SQLite source opens without writing to it. A rollback-journal file opens read-only. A
- * WAL-mode file is read as immutable, since read-only access would create or write its -wal and
- * -shm files; those exist only while it is open or after it was not closed cleanly, and then the
- * source is refused.
+ * A SQLite file as seen without SQLite: the file its path resolves to, that file's identity, size
+ * and times before and after a SHA-256 of its bytes, and its first 20 bytes. Every step is bounded.
  */
-async function sqliteSourceMode(path: string): Promise<true | "immutable"> {
-  // Opening a missing file would create it.
-  if (!(await exists(path))) throw new CopyRefusedError(SQL_SCHEMA);
+async function sqliteFileState(path: string): Promise<{ state: string; header: Buffer }> {
+  const file = await withTimeout(realpath(path));
+  const identity = async () => {
+    const stats = await withTimeout(lstat(file, { bigint: true }));
+    return `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+  };
+  const before = await identity();
+  const hash = createHash("sha256");
   const header = Buffer.alloc(20);
-  const file = await openFile(path, "r");
+  const handle = await openWithin(openFile(file, "r"));
   try {
-    await file.read(header, 0, header.length, 0);
+    const buffer = Buffer.alloc(FILE_READ_BYTES);
+    for (let position = 0; ; ) {
+      const { bytesRead } = await withTimeout(handle.read(buffer, 0, buffer.length, position));
+      if (!bytesRead) break;
+      if (position < header.length) buffer.copy(header, position, 0, bytesRead);
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
   } finally {
-    await file.close();
+    await closeWithin(handle);
   }
+  return { state: `${file}\n${before}\n${hash.digest("hex")}\n${await identity()}`, header };
+}
+
+interface SqliteSource {
+  readOnly: true | "immutable";
+  /** sqliteFileState before the open. */
+  state: string;
+}
+
+/**
+ * How a SQLite source opens without writing to it, and its file before the open. Only a regular
+ * file, or a link to one, is opened: a FIFO, socket or device could block the open or the reads.
+ * A file with -wal or -shm files is open elsewhere or was not closed cleanly, and SQLite would use
+ * them whatever the header says, so it is refused. A rollback-journal file opens read-only. A
+ * WAL-mode file is read as immutable, since read-only access would create or write its -wal and
+ * -shm files.
+ */
+async function sqliteSource(path: string): Promise<SqliteSource> {
+  const stats = await withTimeout(stat(path)).catch((error: unknown) => {
+    if (error instanceof OperationTimeoutError) throw error;
+    // Opening a missing file would create it.
+    throw new CopyRefusedError(SQL_SCHEMA);
+  });
+  if (!stats.isFile()) throw new CopyRefusedError(SQLITE_NOT_FILE);
+  if (await withTimeout(sqliteSidecars(path))) throw new CopyRefusedError(SQLITE_IN_USE);
+  const { state, header } = await sqliteFileState(path);
   // Bytes 18 and 19 of a database header are 2 in WAL mode (sqlite.org/fileformat.html).
-  if (header.toString("latin1", 0, 16) !== "SQLite format 3\0") return true;
-  if (header[18] !== 2 && header[19] !== 2) return true;
-  if (await sqliteSidecars(path)) throw new CopyRefusedError(SQLITE_IN_USE);
-  return "immutable";
+  const wal =
+    header.toString("latin1", 0, 16) === "SQLite format 3\0" &&
+    (header[18] === 2 || header[19] === 2);
+  return { readOnly: wal ? "immutable" : true, state };
 }
 
 /** The URL the copy connects with: a PostgreSQL URL gains pg's query_timeout unless it sets one. */
@@ -574,7 +613,7 @@ async function connectMongoClient(url: string, options: MongoClientOptions): Pro
       socketTimeoutMS: OPERATION_TIMEOUT_MS,
       ...options,
     });
-    await client.connect();
+    await withTimeout(client.connect());
     return client;
   } catch {
     await closeWithin(client);
@@ -592,8 +631,11 @@ function closeWithin(connection?: { close(): Promise<void> }): Promise<void> {
   );
 }
 
-/** Waits for stores to open within the operation timeout; stores that open later are closed. */
-async function openWithin(opening: Promise<OpenedStores>): Promise<OpenedStores> {
+/**
+ * Waits for stores, a connection or a file to open within the operation timeout; one that opens
+ * later is closed. Synchronous work inside the opener, such as a node:sqlite open, is not bounded.
+ */
+async function openWithin<T extends { close(): Promise<void> }>(opening: Promise<T>): Promise<T> {
   try {
     return await withTimeout(opening);
   } catch (error) {
@@ -603,14 +645,15 @@ async function openWithin(opening: Promise<OpenedStores>): Promise<OpenedStores>
 }
 
 interface OpenedSource extends OpenedStores {
-  /** false when something else may have opened the source while the copy read it. */
+  /** false when something else may have opened or changed the source while the copy read it. */
   untouched?: () => Promise<boolean>;
 }
 
 /**
  * Opens the source as it is: unlike the stores opener, it builds no indexes on a MongoDB source
  * and runs no migration on a SQL source, which must have exactly the schema this code knows. A
- * SQLite source is opened read-only. Its schema check and, when that fails, its close are bounded.
+ * SQLite source is opened read-only. Its open, its schema check and, when that fails, its close
+ * are bounded.
  */
 async function openSource(
   url: string,
@@ -618,8 +661,10 @@ async function openSource(
 ): Promise<OpenedSource> {
   if (kind !== "mongodb") {
     const path = kind === "sqlite" ? sqlitePath(url) : undefined;
-    const readOnly = path === undefined ? undefined : await sqliteSourceMode(path);
-    const driver = await openSqlDriver(connectionUrl(kind, url), readOnly ? { readOnly } : {});
+    const sqlite = path === undefined ? undefined : await sqliteSource(path);
+    const driver = await openWithin(
+      openSqlDriver(connectionUrl(kind, url), sqlite ? { readOnly: sqlite.readOnly } : {}),
+    );
     try {
       if (!(await withTimeout(supportedSqlSchema(driver)))) throw new CopyRefusedError(SQL_SCHEMA);
     } catch (error) {
@@ -630,9 +675,15 @@ async function openSource(
       stores: createSqlStores(driver),
       close: () => driver.close(),
       kind,
-      // Nothing locks an immutable file: a service that opened it meanwhile left -wal or -shm files.
-      ...(path !== undefined && readOnly === "immutable"
-        ? { untouched: async () => !(await sqliteSidecars(path)) }
+      // An immutable connection holds no lock and may answer from pages it read before, so a
+      // service that opened, changed and cleanly closed the source meanwhile shows only in the
+      // file itself. Either mode: it must be the file read before the open, with no -wal or -shm.
+      ...(path !== undefined && sqlite
+        ? {
+            untouched: async () =>
+              (await sqliteFileState(path)).state === sqlite.state &&
+              !(await withTimeout(sqliteSidecars(path))),
+          }
         : {}),
     };
   }
@@ -682,9 +733,9 @@ async function openDestination(
       throw error;
     }
   }
-  // The emptiness check and the close of its connection are each bounded.
+  // The open, the emptiness check and the close of its connection are each bounded.
   if (kind !== "memory") {
-    const driver = await openSqlDriver(connectionUrl(kind, url));
+    const driver = await openWithin(openSqlDriver(connectionUrl(kind, url)));
     try {
       if (!(await withTimeout(createSqlTransferBackend(driver).isEmpty())))
         throw new CopyRefusedError(NOT_EMPTY);
@@ -785,7 +836,7 @@ export async function copyDatabase(
     destinationWritten = true;
   };
   try {
-    if (await sameDatabase(fromKind, fromUrl, toKind, toUrl))
+    if (await withTimeout(sameDatabase(fromKind, fromUrl, toKind, toUrl)))
       throw new CopyRefusedError(SAME_DATABASE);
     source = open ? await open(fromUrl) : await openSource(fromUrl, fromKind);
     const sourceServer = source.mongoClient && (await checkMongoSource(source.mongoClient));
@@ -836,6 +887,7 @@ export async function copyDatabase(
     const reread = await readAll(sourceTransfer, cutoff, inTime);
     const stored = await readAll(destinationTransfer, cutoff, inTime);
     const counter = await destinationTransfer.uploadCounter();
+    // A SQLite source's file is read and hashed once more for this, within the deadline.
     const untouched = (await source.untouched?.()) ?? true;
     // After the last read: matching reads prove nothing once a TTL deletion could have run.
     inTime();

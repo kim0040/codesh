@@ -883,6 +883,20 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         await other.close();
       }
 
+      // A FIFO source, whose open would wait for a writer forever, is refused before any open.
+      const fifo = `/tmp/${name}_fifo.sqlite`;
+      expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+      try {
+        const run = runCli(`sqlite:${fifo}`, `sqlite:/tmp/${name}_window.sqlite`);
+        expect(run.output.trim().split("\n").at(-1)).toBe(
+          "Result: refused (SQLite source must be a regular file).",
+        );
+        expect(run.status).toBe(2);
+        expect(existsSync(`/tmp/${name}_window.sqlite`)).toBe(false);
+      } finally {
+        await rm(fifo, { force: true });
+      }
+
       // An empty copy window counts as unset: a deploy wrapper may pass the variable empty.
       const unset = runCli(empty, filled, undefined, "");
       expect(unset.output).toContain(
