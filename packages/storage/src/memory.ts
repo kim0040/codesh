@@ -14,6 +14,14 @@ import {
   scrubDiagnosticSnapshot,
   type UploadRecord,
 } from "@gachipad/shared";
+import { splitShare } from "./transfer/members.js";
+import { registerTransferBackend } from "./transfer/registry.js";
+import type {
+  ShareMembers,
+  TransferBackend,
+  TransferItem,
+  TransferRecord,
+} from "./transfer/types.js";
 import {
   type AuditQuery,
   type AuditStore,
@@ -91,6 +99,22 @@ class MemoryShareStore implements ShareStore {
   }
 
   private readonly shares = new Map<string, ShareRecord>();
+
+  *transferRecords(): Iterable<ShareRecord> {
+    for (const share of this.shares.values()) yield copy(share);
+  }
+
+  transferImport(share: ShareRecord) {
+    this.shares.set(share.id, copy(share));
+  }
+
+  transferMembers({ shareId, list, offset, clientIds }: ShareMembers) {
+    this.shares.get(shareId)?.[list].splice(offset, 0, ...clientIds);
+  }
+
+  get transferSize() {
+    return this.shares.size;
+  }
 
   async create(share: ShareRecord) {
     if (this.shares.has(share.id)) throw new Error(`share ${share.id} already exists`);
@@ -182,6 +206,23 @@ class MemoryShareStore implements ShareStore {
 class MemoryUpdateLog implements UpdateLog {
   private readonly logs = new Map<string, Map<number, { data: Uint8Array; at: Date }>>();
 
+  *transferRecords(shareId: string) {
+    for (const [seq, entry] of this.logs.get(shareId) ?? [])
+      yield { shareId, seq, data: entry.data.slice(), at: new Date(entry.at) };
+  }
+
+  transferImport(record: { shareId: string; seq: number; data: Uint8Array; at: Date }) {
+    const log = this.logs.get(record.shareId) ?? new Map();
+    log.set(record.seq, { data: record.data.slice(), at: new Date(record.at) });
+    this.logs.set(record.shareId, log);
+  }
+
+  get transferSize() {
+    let count = 0;
+    for (const log of this.logs.values()) count += log.size;
+    return count;
+  }
+
   async append(shareId: string, entries: UpdateEntry[], at: Date) {
     const log = this.logs.get(shareId) ?? new Map();
     // All-or-nothing, like insertMany with a unique index.
@@ -229,6 +270,18 @@ class MemoryUpdateLog implements UpdateLog {
 
 class MemorySnapshotStore implements SnapshotStore {
   private snapshots: SnapshotRecord[] = [];
+
+  *transferRecords(shareId: string): Iterable<SnapshotRecord> {
+    for (const snapshot of this.snapshots) if (snapshot.shareId === shareId) yield copy(snapshot);
+  }
+
+  transferImport(snapshot: SnapshotRecord) {
+    this.snapshots.push(copy(snapshot));
+  }
+
+  get transferSize() {
+    return this.snapshots.length;
+  }
 
   async put(snapshot: SnapshotRecord) {
     this.snapshots = this.snapshots.filter(
@@ -295,14 +348,51 @@ class MemorySnapshotStore implements SnapshotStore {
 }
 
 class MemoryFileStore implements FileStore {
-  private readonly files = new Map<string, { meta: UploadRecord; data: Uint8Array }>();
+  private readonly files = new Map<
+    string,
+    { meta: UploadRecord; data: Uint8Array; createdAt: Date }
+  >();
   private reserved = 0;
 
   async put(upload: NewUpload) {
     const { data, ...rest } = upload;
     const meta = { ...rest, id: crypto.randomUUID(), size: data.byteLength };
-    this.files.set(meta.id, { meta: copy(meta), data: data.slice() });
+    this.files.set(meta.id, { meta: copy(meta), data: data.slice(), createdAt: new Date() });
     return copy(meta);
+  }
+
+  async *transferRecords(): AsyncIterable<{
+    record: UploadRecord;
+    createdAt: Date;
+    chunks: AsyncIterable<Uint8Array>;
+  }> {
+    for (const file of this.files.values()) {
+      const data = file.data;
+      yield {
+        record: copy(file.meta),
+        createdAt: new Date(file.createdAt),
+        chunks: (async function* () {
+          for (let offset = 0; offset < data.byteLength; offset += 256 * 1024)
+            yield data.subarray(offset, Math.min(data.byteLength, offset + 256 * 1024));
+        })(),
+      };
+    }
+  }
+
+  async transferImport(record: UploadRecord, createdAt: Date, chunks: AsyncIterable<Uint8Array>) {
+    const data = new Uint8Array(record.size);
+    let offset = 0;
+    for await (const chunk of chunks) {
+      if (offset + chunk.byteLength > data.byteLength) throw new Error("Invalid upload size");
+      data.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    if (offset !== data.byteLength) throw new Error("Invalid upload size");
+    this.files.set(record.id, { meta: copy(record), data, createdAt: new Date(createdAt) });
+  }
+
+  get transferSize() {
+    return this.files.size;
   }
 
   async putStream(upload: NewUploadStream, maxBytes?: number, maxTotalBytes?: number) {
@@ -379,6 +469,18 @@ class MemoryFileStore implements FileStore {
 class MemoryLabStore implements LabStore {
   private readonly labs = new Map<string, LabRecord>();
 
+  *transferRecords(): Iterable<LabRecord> {
+    for (const lab of this.labs.values()) yield copy(lab);
+  }
+
+  transferImport(lab: LabRecord) {
+    this.labs.set(lab.id, copy(lab));
+  }
+
+  get transferSize() {
+    return this.labs.size;
+  }
+
   async create(lab: LabRecord) {
     if (this.labs.has(lab.id)) throw new Error(`lab ${lab.id} already exists`);
     this.labs.set(lab.id, copy(lab));
@@ -421,6 +523,18 @@ class MemoryLabStore implements LabStore {
 
 class MemoryLabelStore implements LabelStore {
   private readonly entries = new Map<string, ShareLabelRecord>();
+
+  *transferRecords(): Iterable<ShareLabelRecord> {
+    for (const entry of this.entries.values()) yield copy(entry);
+  }
+
+  transferImport(entry: ShareLabelRecord) {
+    this.entries.set(this.key(entry.clientId, entry.shareId), copy(entry));
+  }
+
+  get transferSize() {
+    return this.entries.size;
+  }
 
   private key = (clientId: string, shareId: string) => `${clientId}:${shareId}`;
 
@@ -472,6 +586,14 @@ class MemoryLabelStore implements LabelStore {
 class MemorySettingsStore implements SettingsStore {
   private settings: Settings | null = null;
 
+  transferRecord() {
+    return this.settings ? copy(this.settings) : null;
+  }
+
+  transferImport(settings: Settings) {
+    this.settings = copy(settings);
+  }
+
   async get() {
     return this.settings ? copy(this.settings) : defaultSettings();
   }
@@ -482,29 +604,44 @@ class MemorySettingsStore implements SettingsStore {
 }
 
 class MemoryAuditStore implements AuditStore {
-  private entries: AuditRecord[] = [];
+  private entries: Array<{ id: string; record: AuditRecord }> = [];
+
+  *transferRecords() {
+    for (const entry of this.entries) yield copy(entry);
+  }
+
+  transferImport(entry: { id: string; record: AuditRecord }) {
+    this.entries.push(copy(entry));
+  }
+
+  get transferSize() {
+    return this.entries.length;
+  }
 
   async append(entry: AuditRecord) {
-    this.entries.push(copy(entry));
+    this.entries.push({ id: crypto.randomUUID(), record: copy(entry) });
   }
 
   async list({ limit, before }: AuditQuery) {
     return this.entries
-      .filter((e) => !before || e.at < before)
-      .sort((a, b) => b.at.getTime() - a.at.getTime())
+      .filter(({ record }) => !before || record.at < before)
+      .sort((a, b) => b.record.at.getTime() - a.record.at.getTime())
       .slice(0, limit)
-      .map(copy);
+      .map(({ record }) => copy(record));
   }
 
   async deleteOlderThan(before: Date) {
     const count = this.entries.length;
-    this.entries = this.entries.filter((e) => e.at >= before);
+    this.entries = this.entries.filter(({ record }) => record.at >= before);
     return count - this.entries.length;
   }
 }
 
 class MemoryDiagnosticsStore {
   private readonly slots = new Map<string, DiagnosticSnapshot>();
+  get transferSize() {
+    return this.slots.size;
+  }
   async replace(snapshot: DiagnosticSnapshot) {
     const clean = scrubDiagnosticSnapshot(snapshot);
     if (clean) this.slots.set(clean.slot, copy(clean));
@@ -514,15 +651,109 @@ class MemoryDiagnosticsStore {
   }
 }
 export function createMemoryStores(): Stores {
-  return {
-    diagnostics: new MemoryDiagnosticsStore(),
-    shares: new MemoryShareStore(),
-    updates: new MemoryUpdateLog(),
-    snapshots: new MemorySnapshotStore(),
-    files: new MemoryFileStore(),
-    labs: new MemoryLabStore(),
-    labels: new MemoryLabelStore(),
-    settings: new MemorySettingsStore(),
-    audit: new MemoryAuditStore(),
+  const diagnostics = new MemoryDiagnosticsStore();
+  const shares = new MemoryShareStore();
+  const updates = new MemoryUpdateLog();
+  const snapshots = new MemorySnapshotStore();
+  const files = new MemoryFileStore();
+  const labs = new MemoryLabStore();
+  const labels = new MemoryLabelStore();
+  const settings = new MemorySettingsStore();
+  const audit = new MemoryAuditStore();
+  const stores: Stores = {
+    diagnostics,
+    shares,
+    updates,
+    snapshots,
+    files,
+    labs,
+    labels,
+    settings,
+    audit,
   };
+  const transfer: TransferBackend = {
+    async *exportAll(liveAt: Date): AsyncIterable<TransferItem> {
+      const live = new Set<string>();
+      for (const record of shares.transferRecords()) {
+        if (record.expiresAt && record.expiresAt < liveAt) continue;
+        live.add(record.id);
+        yield* splitShare(record);
+        for (const update of updates.transferRecords(record.id))
+          yield { kind: "updates", record: update };
+        for (const snapshot of snapshots.transferRecords(record.id))
+          yield { kind: "snapshots", record: snapshot };
+      }
+      for await (const item of files.transferRecords())
+        if (
+          item.record.expiresAt >= liveAt &&
+          (item.record.shareId === undefined || live.has(item.record.shareId))
+        )
+          yield { kind: "uploads", ...item };
+      for (const record of labs.transferRecords())
+        if (record.expiresAt >= liveAt) yield { kind: "labs", record };
+      for (const record of labels.transferRecords())
+        if (live.has(record.shareId)) yield { kind: "labels", record };
+      const setting = settings.transferRecord();
+      if (setting) yield { kind: "settings", record: setting };
+      for (const entry of audit.transferRecords())
+        yield { kind: "audit", id: entry.id, record: entry.record };
+    },
+    async countLive(liveAt: Date) {
+      let liveShares = 0;
+      for (const record of shares.transferRecords())
+        if (!record.expiresAt || record.expiresAt >= liveAt) liveShares++;
+      let liveLabs = 0;
+      for (const record of labs.transferRecords()) if (record.expiresAt >= liveAt) liveLabs++;
+      return { shares: liveShares, labs: liveLabs };
+    },
+    async importBatch(items: readonly TransferRecord[]) {
+      for (const item of items) {
+        switch (item.kind) {
+          case "shares":
+            shares.transferImport(item.record);
+            break;
+          case "shareMembers":
+            shares.transferMembers(item.record);
+            break;
+          case "updates":
+            updates.transferImport(item.record);
+            break;
+          case "snapshots":
+            snapshots.transferImport(item.record);
+            break;
+          case "labs":
+            labs.transferImport(item.record);
+            break;
+          case "labels":
+            labels.transferImport(item.record);
+            break;
+          case "settings":
+            settings.transferImport(item.record);
+            break;
+          case "audit":
+            audit.transferImport({ id: item.id, record: item.record });
+            break;
+        }
+      }
+    },
+    importUpload: (record, createdAt, chunks) => files.transferImport(record, createdAt, chunks),
+    async isEmpty() {
+      return (
+        shares.transferSize +
+          updates.transferSize +
+          snapshots.transferSize +
+          files.transferSize +
+          labs.transferSize +
+          labels.transferSize +
+          audit.transferSize +
+          diagnostics.transferSize ===
+          0 && !settings.transferRecord()
+      );
+    },
+    async recomputeCounters() {},
+    async uploadCounter() {
+      return undefined;
+    },
+  };
+  return registerTransferBackend(stores, transfer);
 }
