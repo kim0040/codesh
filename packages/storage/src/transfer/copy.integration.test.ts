@@ -285,7 +285,11 @@ async function seed(stores: Awaited<ReturnType<typeof openStores>>["stores"]) {
     stream: (async function* () {
       for (let offset = 0; offset < uploadSize; offset += 333 * 1024) {
         const length = Math.min(333 * 1024, uploadSize - offset);
-        yield Uint8Array.from({ length }, (_, index) => (offset + index) % 256);
+        // Bytes that do not repeat with the 256 KiB chunk size of the SQL backends.
+        yield Uint8Array.from(
+          { length },
+          (_, index) => Math.imul(offset + index, 2654435761) >>> 24,
+        );
       }
     })(),
   });

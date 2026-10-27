@@ -613,13 +613,14 @@ export function createSqlTransferBackend(driver: SqlDriver): TransferBackend {
           filled += length;
           offset += length;
           if (filled === UPLOAD_CHUNK_BYTES) {
-            await saveChunk(pending.slice());
+            // A copy: Buffer#slice is a view, and pending is refilled before the batch is written.
+            await saveChunk(Uint8Array.from(pending));
             filled = 0;
           }
         }
       }
       if (size !== record.size) throw new Error("Upload content did not match its stored size");
-      if (filled) await saveChunk(pending.slice(0, filled));
+      if (filled) await saveChunk(Uint8Array.from(pending.subarray(0, filled)));
       await driver.transaction(async (tx) => {
         for (const entry of batch)
           await tx.run("INSERT INTO upload_chunks (upload_id,chunk_no,data) VALUES (?,?,?)", [

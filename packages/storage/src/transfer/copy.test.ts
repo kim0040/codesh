@@ -125,7 +125,11 @@ async function seed(stores: ReturnType<typeof createMemoryStores>) {
     stream: (async function* () {
       for (let offset = 0; offset < uploadSize; offset += 257 * 1024) {
         const length = Math.min(257 * 1024, uploadSize - offset);
-        yield Uint8Array.from({ length }, (_, index) => (offset + index) % 256);
+        // Bytes that do not repeat with the 256 KiB chunk size of the SQL backends.
+        yield Uint8Array.from(
+          { length },
+          (_, index) => Math.imul(offset + index, 2654435761) >>> 24,
+        );
       }
     })(),
   });
@@ -367,6 +371,23 @@ describe("database transfer", () => {
     const copiedBytes = await readStream(copiedUpload.stream);
     expect(copiedBytes.byteLength).toBe(fixture.uploadSize);
     expect(copiedBytes).toEqual(await readStream(originalUpload.stream));
+  });
+
+  it("stores every chunk of a multi-chunk upload unchanged in a SQL destination", async () => {
+    const source = createMemoryStores();
+    const fixture = await seed(source);
+    const url = `sqlite:${join(await tempDir(), "uploads.sqlite")}`;
+    const result = await copyDatabase("memory:", url, { openStores: openWithMemorySource(source) });
+    expect(result.counts.uploads).toBe(1);
+    const opened = await openStores(url);
+    try {
+      const copied = await opened.stores.files.openDownload(fixture.upload.id);
+      const original = await source.files.openDownload(fixture.upload.id);
+      if (!copied || !original) throw new Error("The upload was not copied");
+      expect(await readStream(copied.stream)).toEqual(await readStream(original.stream));
+    } finally {
+      await opened.close();
+    }
   });
 
   it("refuses a destination that already has a record", async () => {
