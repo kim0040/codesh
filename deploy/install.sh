@@ -173,10 +173,15 @@ FRESH=1
 [ ! -f .env ] || FRESH=0
 select_database "$FRESH"
 select_network "$FRESH"
-[ -r ./preflight.sh ] || die 'preflight.sh is missing: extract all files from the matching release before installing'
-# shellcheck source=preflight.sh
-. ./preflight.sh
-preflight_run || exit 1
+if [ -r ./preflight.sh ]; then
+  # shellcheck source=preflight.sh
+  . ./preflight.sh
+  preflight_run || exit 1
+else
+  # The 1.1.0 updater copies a fixed file list, so an installation it updated has no preflight.sh.
+  [ "$CHECK_ONLY" = 0 ] || die "preflight.sh is missing: copy it from gachipad-deploy-$VERSION.tar.gz of the matching release"
+  echo "warning: preflight.sh is missing (updated by an older update.sh); host checks skipped. Copy it from gachipad-deploy-$VERSION.tar.gz of the matching release to run them." >&2
+fi
 [ "$CHECK_ONLY" = 0 ] || exit 0
 ENV_SNAPSHOT=""
 ENV_SNAPSHOT_READY=0

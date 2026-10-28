@@ -239,6 +239,12 @@ finally:
     os.close(slave)
 PY
 [ ! -d state/install.lock.d ]
+# An installation updated by the 1.1.0 updater has the new install.sh but no preflight.sh.
+mv preflight.sh "$F/preflight.sh.saved"
+expect 1 'preflight.sh is missing' ./install.sh --check
+rm -rf .env state
+expect 0 'host checks skipped' ./install.sh --yes --db sqlite --no-mdns
+mv "$F/preflight.sh.saved" preflight.sh
 STUB_EXISTING=1 fingerprint >"$F/before"
 STUB_EXISTING=1 expect 0 '0 failure(s)' ./install.sh --check
 fingerprint >"$F/after"
