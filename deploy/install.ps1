@@ -236,6 +236,41 @@ function Get-WslDistributionList {
     return ,$distros
 }
 
+function Get-WslRegistryDistributionList {
+    $registryPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
+    try {
+        $registry = Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop
+        $keys = @(Get-ChildItem -LiteralPath $registryPath -ErrorAction Stop)
+        $entries = foreach ($key in $keys) {
+            $properties = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction Stop
+            $name = [string]$properties.DistributionName
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $version = $null
+            $versionProperty = $properties.PSObject.Properties['Version']
+            if ($null -ne $versionProperty) {
+                $parsedVersion = 0
+                if ([int]::TryParse([string]$versionProperty.Value, [ref]$parsedVersion)) { $version = $parsedVersion }
+            }
+            $defaultDistribution = [string]$registry.DefaultDistribution
+            $isDefault = $null
+            if (-not [string]::IsNullOrWhiteSpace($defaultDistribution)) {
+                $isDefault = [string]$key.PSChildName -eq $defaultDistribution
+            }
+            [pscustomobject]@{ Name = $name; Version = $version; IsDefault = $isDefault }
+        }
+        return [pscustomobject]@{ Available = $true; Entries = @($entries) }
+    } catch {
+        return [pscustomobject]@{ Available = $false; Entries = @() }
+    }
+}
+
+function Get-InstallableWslDistributionList {
+    param([string[]]$Names)
+    return @($Names | ForEach-Object { ([string]$_).Trim() } | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '(?i)^docker-desktop(?:-data)?$'
+    })
+}
+
 function Get-InstallStatePath {
     $base = $env:LOCALAPPDATA
     if ([string]::IsNullOrWhiteSpace($base)) {
@@ -267,7 +302,10 @@ function Get-BundleSource {
 function Test-BundleChecksum {
     param([string]$Path)
     $sidecar = "$Path.sha256"
-    if (-not (Test-Path -LiteralPath $sidecar -PathType Leaf)) { return }
+    if (-not (Test-Path -LiteralPath $sidecar -PathType Leaf)) {
+        Write-Warning "Bundle has no .sha256 sidecar; checksum was not verified: $Path"
+        return
+    }
     $line = Get-Content -LiteralPath $sidecar -TotalCount 1
     $match = [regex]::Match([string]$line, '^\s*(?<hash>[0-9a-fA-F]{64})(?:\s+\*?.+)?\s*$')
     if (-not $match.Success) { Write-InstallError "Invalid SHA-256 file: $sidecar" }
@@ -321,7 +359,7 @@ DEST="$(realpath -m -- "$DEST")"
 PARENT="$DEST"
 while [ ! -e "$PARENT" ]; do PARENT="$(dirname "$PARENT")"; done
 FSTYPE="$(stat -f -c %T -- "$PARENT")"
-case "$DEST:$FSTYPE" in /mnt:*|/mnt/*:*|*:9p|*:drvfs|*:v9fs)
+case "$DEST:$FSTYPE" in /mnt:*|/mnt/*:*|*:9p|*:drvfs|*:v9fs|*:virtiofs|*:fuseblk)
   echo "InstallDir resolves to a Windows filesystem; choose a Linux path such as ~/gachipad." >&2
   exit 42 ;;
 esac
@@ -346,7 +384,7 @@ elif [ "$KIND" = repository ]; then
     echo 'Repository source does not contain deploy/bundle.sh; run this installer from the repository deploy folder.' >&2
     exit 43
   fi
-  (cd "$BUILD_SOURCE/deploy" && ./bundle.sh)
+  (cd "$BUILD_SOURCE/deploy" && ./bundle.sh </dev/null)
   BUNDLE="$(find "$BUILD_SOURCE/deploy/dist" -maxdepth 1 -type f -name 'gachipad-*.tar.gz' ! -name 'gachipad-deploy-*' -print -quit)"
   if [ -z "$BUNDLE" ]; then
     echo 'deploy/bundle.sh completed without creating an offline gachipad bundle.' >&2
@@ -363,6 +401,15 @@ fi
 if [ ! -f "$STAGE/images.tar" ]; then
   echo 'images.tar is missing. Use the full offline gachipad bundle, including images.tar, rather than the update-only bundle.' >&2
   exit 44
+fi
+BAD=""
+for FILE in "$STAGE"/*.sh; do
+  [ -f "$FILE" ] || continue
+  if LC_ALL=C grep -q "$(printf '\r')" "$FILE"; then BAD="$BAD$FILE\n"; fi
+done
+if [ -n "$BAD" ]; then
+  printf '%b' "$BAD" >&2
+  exit 45
 fi
 for ITEM in "$STAGE"/* "$STAGE"/.[!.]* "$STAGE"/..?*; do
   [ -e "$ITEM" ] || continue
@@ -394,7 +441,8 @@ printf '%s\n' "$DEST"
         if (-not [string]::IsNullOrWhiteSpace($result.Output)) { Write-Output $result.Output }
         Write-InstallError 'Could not copy the installation into the WSL Linux filesystem. Check the source and available disk space, then retry.'
     }
-    $installedPath = ($result.Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 1).Trim()
+    $installedPath = $result.Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 1
+    if ($null -ne $installedPath) { $installedPath = $installedPath.Trim() }
     if ([string]::IsNullOrWhiteSpace($installedPath)) { $installedPath = $Destination }
     return $installedPath
 }
@@ -507,7 +555,7 @@ function Get-ForwardedInstallArgument {
     if (-not [string]::IsNullOrWhiteSpace($options.AcmeEmail)) { $arguments += @('--acme-email', $options.AcmeEmail) }
     if ($options.BehindProxy) { $arguments += '--behind-proxy' }
     if ($options.InstallArgs.Count -gt 0) { $arguments += $options.InstallArgs }
-    if (-not ($arguments -contains '--mdns')) { $arguments += '--no-mdns' }
+    if (-not ($arguments -contains '--mdns') -and -not ($arguments -contains '--no-mdns')) { $arguments += '--no-mdns' }
     return ,$arguments
 }
 
@@ -576,14 +624,25 @@ function Invoke-Installer {
         if ($options.InstallWsl) { Write-InstallError 'WSL installation needs an elevated PowerShell session. Run PowerShell as Administrator and use -InstallWsl.' }
         Write-InstallError 'WSL 2 is not available. Run PowerShell as Administrator and execute: wsl --install -d Ubuntu. Reboot, then rerun this installer.'
     }
-    $list = Invoke-Wsl -Arguments @('-l', '-v')
-    if ($list.ExitCode -ne 0) { Write-InstallError 'Could not list WSL distributions. Run wsl --update, then wsl --list --verbose and retry.' }
-    $quiet = Invoke-Wsl -Arguments @('-l', '-q')
-    if ($quiet.ExitCode -ne 0) { Write-InstallError 'Could not list WSL distribution names. Run wsl --update and retry.' }
-    $names = @($quiet.Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $distros = Get-WslDistributionList -Output $list.Output -Names $names
-    if ($names.Count -gt 0 -and $distros.Count -ne $names.Count) { Write-InstallError 'Could not read WSL distribution versions. Run wsl --update, then wsl --list --verbose and retry.' }
-    if ($distros.Count -eq 0) {
+    $registryList = Get-WslRegistryDistributionList
+    $registryAvailable = $null -ne $registryList -and $registryList.Available
+    $registryEntries = @()
+    if ($registryAvailable) {
+        $registryEntries = @($registryList.Entries)
+        $names = @(Get-InstallableWslDistributionList -Names @($registryEntries | ForEach-Object { $_.Name }))
+    } else {
+        $quiet = Invoke-Wsl -Arguments @('-l', '-q')
+        $names = @()
+        if ($quiet.ExitCode -eq 0) {
+            $quietNames = @($quiet.Output -split "`r?`n" | ForEach-Object { $_.Trim() })
+            $quietNames = @(Get-InstallableWslDistributionList -Names $quietNames)
+            foreach ($quietName in $quietNames) {
+                $probe = Invoke-Wsl -Arguments @('-d', $quietName, '--exec', 'true')
+                if ($probe.ExitCode -eq 0) { $names += $quietName }
+            }
+        }
+    }
+    if ($names.Count -eq 0) {
         if ($options.InstallWsl -and (Test-IsElevated)) {
             $installResult = Invoke-Wsl -Arguments @('--install', '-d', 'Ubuntu') -PassThruConsole
             if ($installResult.ExitCode -ne 0) { Write-InstallError 'WSL installation failed. Run wsl --install -d Ubuntu from an elevated PowerShell session, then reboot.' }
@@ -592,6 +651,27 @@ function Invoke-Installer {
         if ($options.InstallWsl) { Write-InstallError 'No WSL distribution is installed. Run PowerShell as Administrator and use -InstallWsl, then reboot and rerun.' }
         Write-InstallError 'No WSL distribution is installed. Run wsl --install -d Ubuntu, finish first-run setup, then rerun this installer.'
     }
+
+    $list = Invoke-Wsl -Arguments @('-l', '-v')
+    $listedDistros = @()
+    if ($list.ExitCode -eq 0) { $listedDistros = Get-WslDistributionList -Output $list.Output -Names $names }
+    if ($registryAvailable) {
+        $distros = @(foreach ($name in $names) {
+            $registryEntry = $registryEntries | Where-Object { $_.Name -ceq $name } | Select-Object -First 1
+            $listedEntry = $listedDistros | Where-Object { $_.Name -ceq $name } | Select-Object -First 1
+            $version = $null
+            if ($null -ne $registryEntry -and $null -ne $registryEntry.Version) { $version = [int]$registryEntry.Version }
+            elseif ($null -ne $listedEntry) { $version = [int]$listedEntry.Version }
+            $isDefault = $false
+            if ($null -ne $registryEntry -and $null -ne $registryEntry.IsDefault) { $isDefault = [bool]$registryEntry.IsDefault }
+            elseif ($null -ne $listedEntry) { $isDefault = [bool]$listedEntry.IsDefault }
+            if ($null -ne $version) { [pscustomobject]@{ Name = $name; Version = $version; IsDefault = $isDefault } }
+        })
+    } else {
+        if ($list.ExitCode -ne 0) { Write-InstallError 'Could not read WSL distribution versions. Run wsl --update, then wsl --list --verbose and retry.' }
+        $distros = $listedDistros
+    }
+    if ($distros.Count -ne $names.Count) { Write-InstallError 'Could not read WSL distribution versions. Run wsl --update, then wsl --list --verbose and retry.' }
 
     $selectedDistro = $options.Distro
     if ([string]::IsNullOrWhiteSpace($selectedDistro)) {

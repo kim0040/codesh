@@ -70,6 +70,18 @@ Describe 'Native argument and entrypoint regressions' {
         @($records[-1].Arguments) | Should -Contain '--exec'
     }
 
+    It 'forwards short flags and the end-of-options marker through the public wrapper script' {
+        $result = Invoke-Entrypoint -Arguments @('backup', '-d', '-v', '-e', 'x', '-f', '--', '--check')
+        $result.ExitCode | Should -Be 0
+        $records = @(Get-Content -LiteralPath $script:argvLog -Encoding UTF8 | ForEach-Object { ConvertFrom-Json $_ })
+        $arguments = @($records[-1].Arguments)
+        $scriptIndex = [Array]::IndexOf($arguments, './backup.sh')
+        $forwarded = @($arguments[($scriptIndex + 1)..($arguments.Count - 1)])
+        $expected = @('-d', '-v', '-e', 'x', '-f', '--', '--check')
+        $forwarded.Count | Should -Be $expected.Count
+        for ($index = 0; $index -lt $expected.Count; $index++) { $forwarded[$index] | Should -BeExactly $expected[$index] }
+    }
+
     It 'reads UTF-8 saved distro and directory names through the public wrapper script' {
         $distro = 'Ubuntu ' + $script:korean
         $directory = '/home/' + $script:korean + '/gachipad 1.2'
@@ -260,14 +272,14 @@ exit 17
         } finally { Remove-Item $link }
     }
 
-    It 'refuses 9p drvfs and v9fs at nonstandard mount points using the real copy shell' {
+    It 'refuses supported WSL mount types at nonstandard mount points using the real copy shell' {
         $bin = Join-Path $script:root 'bin'
         New-Item -ItemType Directory -Path $bin -Force | Out-Null
         $stat = Join-Path $bin 'stat'
         $oldPath = $env:PATH
         try {
             $env:PATH = $bin + ':' + $oldPath
-            foreach ($filesystem in @('9p', 'drvfs', 'v9fs')) {
+            foreach ($filesystem in @('9p', 'drvfs', 'v9fs', 'virtiofs', 'fuseblk')) {
                 [System.IO.File]::WriteAllText($stat, "#!/bin/sh`nprintf '%s' $filesystem`n")
                 & chmod +x $stat
                 { Copy-InstallSourceToWsl -SelectedDistro Ubuntu -SourcePath $script:source -SourceKind directory -Destination $script:destination } |
@@ -285,6 +297,7 @@ exit 17
         $bundleScript = @'
 #!/bin/bash
 set -eu
+cat >/dev/null
 [ ! -e ../.env ]
 mkdir -p dist stage/gachipad
 cp install.sh images.tar lib.sh stage/gachipad/
@@ -311,5 +324,43 @@ tar -czf dist/gachipad-fixture.tar.gz -C stage gachipad
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'LIVE-TTY'
         $result.Output | Should -Match 'STATUS-ONLY'
+    }
+
+    It 'refuses staged CR line endings before replacing an existing install' {
+        $destinationInstall = Join-Path $script:destination 'install.sh'
+        New-Item -ItemType Directory -Path $script:destination -Force | Out-Null
+        $working = "#!/bin/bash`nexit 7`n"
+        [System.IO.File]::WriteAllText($destinationInstall, $working)
+        $sourceInstall = Join-Path $script:source 'install.sh'
+        $originalBytes = [System.IO.File]::ReadAllBytes($sourceInstall)
+        try {
+            [System.IO.File]::WriteAllBytes($sourceInstall, [System.Text.Encoding]::UTF8.GetBytes("#!/bin/bash`r`nexit 0`r`n"))
+            { Copy-InstallSourceToWsl -SelectedDistro Ubuntu -SourcePath $script:source -SourceKind directory -Destination $script:destination } |
+                Should -Throw '*A copied .sh file has CR line endings*'
+            [System.IO.File]::ReadAllText($destinationInstall) | Should -BeExactly $working
+        } finally {
+            [System.IO.File]::WriteAllBytes($sourceInstall, $originalBytes)
+        }
+    }
+}
+
+Describe 'Windows batch entrypoint' -Skip:($env:OS -ne 'Windows_NT') {
+    It 'returns failure after the failure pause' {
+        $start = New-Object System.Diagnostics.ProcessStartInfo
+        $start.FileName = (Get-Command 'cmd.exe' -ErrorAction Stop).Source
+        $start.Arguments = '/d /c call "' + (Join-Path $PSScriptRoot '../install.cmd') + '"'
+        $start.UseShellExecute = $false
+        $start.RedirectStandardInput = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $start.EnvironmentVariables['GACHIPAD_WSL_EXE'] = $script:recorder
+        $start.EnvironmentVariables['GACHIPAD_WSL_FAKE_MODE'] = 'no-wsl'
+        $process = [System.Diagnostics.Process]::Start($start)
+        try {
+            $process.StandardInput.WriteLine('')
+            $process.StandardInput.Close()
+            $process.WaitForExit()
+            $process.ExitCode | Should -Be 1
+        } finally { $process.Dispose() }
     }
 }

@@ -1,9 +1,6 @@
-[CmdletBinding()]
-param(
-    [Parameter(Position = 0)][string]$ScriptName,
-    [Parameter(ValueFromRemainingArguments = $true)][string[]]$ScriptArgs = @(),
-    [switch]$WrapperNoRun
-)
+$wrapperArguments = @($args)
+$wrapperNoRun = $wrapperArguments.Count -gt 0 -and $wrapperArguments[0] -eq '-WrapperNoRun'
+if ($wrapperNoRun) { $wrapperArguments = @($wrapperArguments | Select-Object -Skip 1) }
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -55,16 +52,20 @@ find . -maxdepth 1 -type f -name '*.sh' -printf '%f\n'
     $list = Invoke-WslScript -SelectedDistro ([string]$state.Distro) -ScriptText $listScript -Arguments @([string]$state.InstallDir)
     if ($list.ExitCode -ne 0) { throw 'Could not read the installed deploy scripts. Check that the saved WSL distro and folder still exist.' }
     $available = @($list.Output -split "`r?`n" | ForEach-Object { $_ -replace '\.sh$', '' })
-    if ($available -notcontains $normalizedName) {
+    if ($available -cnotcontains $normalizedName) {
         throw "Unknown script '$Name'. Available scripts: $($available -join ', '); special command: logs."
     }
     $result = Invoke-Wsl -Arguments (@('-d', [string]$state.Distro, '--cd', [string]$state.InstallDir, '--exec', "./$normalizedName.sh") + $Arguments) -PassThruConsole
     if ($result.ExitCode -ne 0) { throw "$normalizedName.sh exited with code $($result.ExitCode)." }
 }
 
-if (-not $WrapperNoRun) {
+if (-not $wrapperNoRun) {
     try {
-        Invoke-GachipadCommand -Name $ScriptName -Arguments $ScriptArgs
+        if ($wrapperArguments.Count -eq 0) { throw 'Usage: .\gachipad.ps1 <script> [arguments], or .\gachipad.ps1 logs.' }
+        $scriptName = [string]$wrapperArguments[0]
+        $scriptArgs = @()
+        if ($wrapperArguments.Count -gt 1) { $scriptArgs = @($wrapperArguments[1..($wrapperArguments.Count - 1)]) }
+        Invoke-GachipadCommand -Name $scriptName -Arguments $scriptArgs
     } catch {
         Write-Error $_.Exception.Message
         exit 1
