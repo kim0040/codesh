@@ -5,6 +5,7 @@
 #   ./update.sh [--yes]                  the newest release (refuses a new major version)
 #   ./update.sh --version 1.4.2          that release
 #   ./update.sh --allow-major            also across a major version; read its notes first
+#   ./update.sh --mdns-tools <file.tar.gz>  install optional tools/images from a matching offline bundle
 #   ./update.sh --bundle <file.tar.gz>   no internet: the offline path, ./upgrade.sh <file>
 #   ./update.sh --enable-auto [--at 04:00] [--policy patch|minor]    opt-in daily updates
 #   ./update.sh --disable-auto
@@ -653,6 +654,7 @@ main() {
   MODE=update TARGET="" YES=0 ALLOW_MAJOR=0 DRY=0 AT=04:00 POLICY=patch BUNDLE="" BACKUP="" TRANSACTION=0 DB_TOUCHED=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --mdns-tools) mode=mdns-tools; BUNDLE="${2:?--mdns-tools needs a matching offline bundle}"; shift ;;
       --check) mode=check ;;
       --version) TARGET="${2:?--version needs X.Y.Z}"; TARGET="${TARGET#v}"; shift ;;
       --yes | -y) YES=1 ;;
@@ -683,6 +685,13 @@ main() {
     mv "$LOG" "$LOG.1"
   fi
   [ "$DRY" = 1 ] || exec > >(trap '' HUP INT TERM PIPE; exec tee -i -p -a "$LOG") 2>&1
+
+  if [ "$mode" = mdns-tools ]; then
+    need_docker
+    [ ! -e "$MARKER" ] || die 'unfinished transaction; recover it before installing mDNS tools'
+    mdns_install_tools "$BUNDLE"
+    return
+  fi
 
   CURRENT="$(env_get GACHIPAD_VERSION)"
   REPO="$(setting UPDATE_REPO kim0040/gachipad)"

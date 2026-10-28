@@ -27,6 +27,8 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+case "$MDNS_OPTION" in auto | 0 | 1) ;; *) die "GACHIPAD_MDNS must be 0 or 1" ;; esac
+
 valid_db_option() {
   case "$1" in sqlite | postgres | mongodb | external) return 0 ;; *) return 1 ;; esac
 }
@@ -203,12 +205,16 @@ env_set GACHIPAD_VERSION "$VERSION"
 # The loaded images carry the bundle's registry in their names.
 REGISTRY="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
 [ -n "$REGISTRY" ] && env_set GACHIPAD_REGISTRY "$REGISTRY"
-select_mdns "$MDNS_OPTION"
+if [ "$FRESH" = 0 ] && [ "$MDNS_OPTION" = auto ] && mdns_supported; then
+  echo 'mdns: keeping the existing choice and hostname.'
+else select_mdns "$MDNS_OPTION"; fi
 mkdir -p state && chmod 755 state
 
 echo "install: starting"
 ENV_READY=1
-if ! mdns_enabled; then docker compose --profile mdns stop mdns; fi
+if [ "$FRESH" = 0 ] && ! mdns_enabled; then
+  docker compose --profile mdns stop mdns || echo 'mdns: could not stop the existing service; inspect docker compose --profile mdns ps mdns.' >&2
+fi
 docker compose up -d --wait
 wait_healthy 120
 record_database_backend

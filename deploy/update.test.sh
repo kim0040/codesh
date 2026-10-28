@@ -239,12 +239,32 @@ ok "1.0.2 with a wrong checksum refused; no backup, no pull, .env unchanged"
 step "happy path 1.0.0 -> 1.0.1"
 # A fixed-file-list legacy updater can leave the new command absent until this update.
 rm -f "$I/migrate-db.sh"
+printf '\nCOMPOSE_PROFILES=mongodb,mdns\nMDNS_HOSTNAME=gachipad-2.local\n' >>"$I/.env"
+if [ -n "${MDNS_LEGACY_FIXTURE:-}" ]; then
+  cp "$MDNS_LEGACY_FIXTURE"/{update.sh,lib.sh} "$I/"
+  rm -f "$I/mdns.sh"
+fi
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.1 --yes || fail "update failed"
+if [ -n "${MDNS_LEGACY_FIXTURE:-}" ]; then
+  [ ! -e "$I/mdns.sh" ] || fail 'old updater unexpectedly copied the new helper'
+  grep -q './update.sh --mdns-tools /path/to/matching-bundle.tar.gz' "$F/run.log" || fail 'old updater did not print recovery command'
+  stage="$F/stage/gachipad-1.0.1"
+  printf 'offline images\n' >"$stage/images.tar"
+  # shellcheck disable=SC2094 # manifest is excluded from find
+  (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
+  tar czf "$F/legacy-offline.tar.gz" -C "$F/stage" gachipad-1.0.1
+  sha256sum "$F/legacy-offline.tar.gz" >"$F/legacy-offline.tar.gz.sha256"
+  run ./update.sh --mdns-tools "$F/legacy-offline.tar.gz" || fail 'first-update offline repair failed'
+  [ -x "$I/mdns.sh" ] || fail 'first-update repair did not install helper'
+  ok 'actual legacy updater omits helper, prints one-step command; offline command installs helper and images'
+fi
 [ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "GACHIPAD_VERSION not 1.0.1"
 [ "$(envv NEW_IN_1_0_1)" = yes ] || fail "new setting not added"
 [ "$(cat "$I/VERSION")" = 1.0.1 ] || fail "files not installed"
-[ -x "$I/migrate-db.sh" ] || fail "new migration command not installed"
+if [ -z "${MDNS_LEGACY_FIXTURE:-}" ]; then
+  [ -x "$I/migrate-db.sh" ] || fail "new migration command not installed"
+fi
 tail -n 1 "$I/update.sh" | grep -q '^# release 1.0.1' || fail "update.sh not replaced"
 grep -q 'exec -T .*mongo sh' "$DOCKER_CALLS" || fail "no backup"
 grep -q 'exec -T -e MONGO_DATABASE=gachipad -e MONGO_INITDB_ROOT_USERNAME=gachipad mongo' "$DOCKER_CALLS" || fail "backup did not name the database and user"
@@ -258,7 +278,9 @@ status | grep -q '"result":"updated","from":"1.0.0","to":"1.0.1"' || fail "statu
 [ -f "$I/rollback/.env" ] || fail "snapshot not preserved outside state"
 [ ! -e "$I/state/rollback" ] || fail "secrets remain in the API state mount"
 grep -q 'updating 1.0.0 -> 1.0.1' "$I/state/update.log" || fail "not logged"
-ok "1.0.1 installed: files, setting, backup, pull, up, status, log"
+[ "$(envv COMPOSE_PROFILES)" = mdns,mongodb ] || fail 'update changed the mDNS choice'
+[ "$(envv MDNS_HOSTNAME)" = gachipad-2.local ] || fail 'update changed the selected hostname'
+ok "1.0.1 installed: files, setting, backup, pull, up, status, log; mDNS choice and hostname retained"
 
 step "a downgrade is refused"
 run ./update.sh --version 1.0.0 --yes && fail "downgrade accepted"
@@ -747,6 +769,24 @@ parsers = [i for i, x in enumerate(s) if " run --rm --no-deps --pull never" in x
 assert parsers and all(i > load and "--env-file " in s[i] for i in parsers), s
 LOAD
 [ "$(envv GACHIPAD_VERSION)" = 1.1.0 ] || fail "offline update version"
+[ "$(envv COMPOSE_PROFILES)" = mdns,mongodb ] || fail 'upgrade changed the mDNS choice'
+[ "$(envv MDNS_HOSTNAME)" = gachipad-2.local ] || fail 'upgrade changed the selected hostname'
+# Fixed-list legacy updaters can omit the helper; same-version tools repair must be offline.
+rm "$I/mdns.sh"
+cp "$I/.env" "$F/mdns-tools.env"
+: >"$DOCKER_CALLS"
+run ./update.sh --mdns-tools "$F/offline.tar.gz" || fail 'offline mDNS tools repair failed'
+[ -x "$I/mdns.sh" ] || fail 'offline tools repair did not install helper'
+cmp "$I/.env" "$F/mdns-tools.env" || fail 'tools repair changed settings'
+calls | grep -q '^load -i ' || fail 'tools repair did not load offline image archive'
+calls | grep -q '^compose .*\(pull\|up\|stop\)' && fail 'tools repair changed services or used registry'
+# The new staged generator prints the repair command even when the old updater owns FILES.
+rm "$I/mdns.sh"
+mkdir -p "$F/hint/state"
+cp "$I/.env" "$F/hint/.env"
+GACHIPAD_LOCK_PATH="$I/state/install.lock" bash "$root/deploy/generate-secrets.sh" "$F/hint/.env" >"$F/hint.log" 2>&1
+grep -q './update.sh --mdns-tools /path/to/matching-bundle.tar.gz' "$F/hint.log" || fail 'legacy first-update tools hint missing'
+run ./update.sh --mdns-tools "$F/offline.tar.gz" || fail 'repeat tools repair failed'
 [ ! -e "$I/state/install.lock.d" ] || fail "nested mkdir lock leaked"
 ok "flock + mkdir contention, nested offline upgrade, released SHA256SUMS (no sidecar)"
 
