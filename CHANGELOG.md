@@ -7,6 +7,8 @@ text of its GitHub release (RELEASING.md).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-28
+
 ### Added
 
 - Linux installer preflight check and unattended options (`./install.sh --check` to verify host prerequisites without changing settings, and `--yes` for unattended execution), with support for online installations directly from a git clone deploy directory.
@@ -28,6 +30,13 @@ text of its GitHub release (RELEASING.md).
 ### Security
 
 - Public-mode security protections including enforced HTTPS and HSTS, default loopback and private admin CIDR restrictions, isolated client discovery, a shared fleet-wide join-code failure budget, and per-address upload pool caps.
+
+### Upgrade notes
+
+- Existing installations stay in internal network mode; nothing changes until `./install.sh --network public` is run. Switching to public mode needs a DNS name and ports 80/443, and writes stricter limits into .env (operator-changed values are kept).
+- Installations updated to 1.1.1 by the 1.1.0 `update.sh` do not receive `mdns.sh`; to use gachipad.local, run `./update.sh --mdns-tools /path/to/gachipad-1.1.1-linux-<arch>.tar.gz` with the matching offline bundle, then `./mdns.sh enable`.
+- Windows hosts: use `install.cmd` (WSL 2 and Docker Desktop); not yet verified on every Windows build.
+- Before a new Linux install, `./install.sh --check` reports missing prerequisites and changes nothing.
 
 ### Known issues
 
@@ -152,7 +161,8 @@ The first release: real-time code sharing for one network, with no outside servi
   edit keys in every open tab. Shares with a PIN or approval load their copy only after the server
   accepts the connection. Lab previews never keep copies.
 
-[Unreleased]: https://github.com/kim0040/gachipad/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/kim0040/gachipad/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/kim0040/gachipad/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/kim0040/gachipad/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/kim0040/codesh/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kim0040/codesh/releases/tag/v1.0.0
