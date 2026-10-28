@@ -4,7 +4,7 @@ param(
     [string]$Network,
     [string]$Domain,
     [string]$AcmeEmail,
-    [switch]$BehindProxy,
+    [string]$BehindProxy,
     [string[]]$InstallArgs = @(),
     [string]$Distro,
     [string]$InstallDir = '~/gachipad',
@@ -553,7 +553,7 @@ function Get-ForwardedInstallArgument {
     if (-not [string]::IsNullOrWhiteSpace($options.Network)) { $arguments += @('--network', $options.Network) }
     if (-not [string]::IsNullOrWhiteSpace($options.Domain)) { $arguments += @('--domain', $options.Domain) }
     if (-not [string]::IsNullOrWhiteSpace($options.AcmeEmail)) { $arguments += @('--acme-email', $options.AcmeEmail) }
-    if ($options.BehindProxy) { $arguments += '--behind-proxy' }
+    if (-not [string]::IsNullOrWhiteSpace($options.BehindProxy)) { $arguments += @('--behind-proxy', $options.BehindProxy) }
     if ($options.InstallArgs.Count -gt 0) { $arguments += $options.InstallArgs }
     if (-not ($arguments -contains '--mdns') -and -not ($arguments -contains '--no-mdns')) { $arguments += '--no-mdns' }
     return ,$arguments

@@ -29,7 +29,7 @@ Describe 'Windows WSL installer' {
         $script:InstallerOptions.Network = ''
         $script:InstallerOptions.Domain = ''
         $script:InstallerOptions.AcmeEmail = ''
-        $script:InstallerOptions.BehindProxy = $false
+        $script:InstallerOptions.BehindProxy = ''
         $script:InstallerOptions.InstallArgs = @()
         $script:InstallerOptions.Distro = ''
         $script:InstallerOptions.InstallDir = '~/gachipad'
@@ -201,7 +201,7 @@ Describe 'Windows WSL installer' {
         $script:InstallerOptions.Network = 'internal'
         $script:InstallerOptions.Domain = 'gachipad.example.test'
         $script:InstallerOptions.AcmeEmail = 'ops@example.test'
-        $script:InstallerOptions.BehindProxy = $true
+        $script:InstallerOptions.BehindProxy = '192.0.2.7/32'
         $script:InstallerOptions.InstallArgs = @('--extra-flag', 'extra-value')
         $output = Invoke-Installer 6>&1 | Out-String
         $log = Get-Content -LiteralPath $script:fakeLog -Encoding UTF8 -Raw
@@ -209,7 +209,7 @@ Describe 'Windows WSL installer' {
         $log | Should -Match '--network internal'
         $log | Should -Match '--domain gachipad\.example\.test'
         $log | Should -Match '--acme-email ops@example\.test'
-        $log | Should -Match '--behind-proxy'
+        $log | Should -Match '--behind-proxy 192\.0\.2\.7/32'
         $log | Should -Match '--extra-flag extra-value'
         $log | Should -Match '--no-mdns'
         $log | Should -Not -Match '(^| )--mdns( |$)'
