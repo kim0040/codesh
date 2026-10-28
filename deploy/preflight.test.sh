@@ -92,6 +92,7 @@ expect() {
   fi
   COUNT=$((COUNT + 1))
 }
+# shellcheck disable=SC2034 # Read by the sourced preflight checks.
 PF_HTTP=80 PF_HTTPS=443 PF_NETWORK=internal PF_DB=sqlite
 expect 0 'Docker CLI is available' preflight_cli
 HIDE=docker expect 2 'Docker CLI is missing' preflight_cli

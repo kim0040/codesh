@@ -99,7 +99,7 @@ env_set GACHIPAD_BIND_ADDRESS ''
 run
 [ "$(env_get GACHIPAD_BIND_ADDRESS)" = '' ]
 env_set GACHIPAD_BIND_ADDRESS '192.0.2.8:'
-DOCKER_INFO='{"OperatingSystem":"Docker Desktop","SecurityOptions":["name=rootless"],"ip6tables":false,"userland-proxy":true}' run
+HTTP_PORT=18481 HTTPS_PORT=18444 DOCKER_INFO='{"OperatingSystem":"Docker Desktop","SecurityOptions":["name=rootless"],"ip6tables":false,"userland-proxy":true}' run
 [ "$(env_get GACHIPAD_BIND_ADDRESS)" = '192.0.2.8:' ]
 grep -q 'docker info reports rootless Docker or Docker Desktop' "$WORK/log"
 grep -q 'disabled ip6tables or enabled userland-proxy' "$WORK/log"

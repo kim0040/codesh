@@ -122,11 +122,14 @@ for answer, flag, setting, expected in [(b'\n', [], None, True), (b'n\n', [], No
     output = b''
     deadline = time.monotonic() + 20
     sent = False
+    network_sent = False
     while process.poll() is None and time.monotonic() < deadline:
         if select.select([master], [], [], .1)[0]:
             try: chunk = os.read(master, 65536)
             except OSError: break
             output += chunk
+            if b'Network [' in output and not network_sent:
+                os.write(master, b'\n'); network_sent = True
             if b'[Y/n]:' in output and not sent:
                 os.write(master, answer); sent = True
     if process.poll() is None: process.kill()

@@ -152,7 +152,7 @@ preflight_ports() {
     done <<<"$container"
   fi
   for port in "$PF_HTTP" "$PF_HTTPS"; do
-    line="$(printf '%s\n' "$listeners" | awk -v p="$((10#$port))" '{for(i=1;i<=NF;i++) if ($i ~ ":" p "$") {print; break}}')"
+    line="$(printf '%s\n' "$listeners" | awk -v p="$((10#$port))" '{for(i=1;i<=NF;i++) if ($i ~ ":" p "$") {print; exit}}' | tr -s ' ')"
     if [ -n "$line" ]; then
       if printf '%s\n' "$bindings" | grep -qx "$((10#$port))"; then owned=1; continue; fi
       # ss/netstat include process names only when visible to the invoking user.
