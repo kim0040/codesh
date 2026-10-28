@@ -356,7 +356,16 @@ async function imeSession(owner: User) {
       page.evaluate(() => (window as unknown as { __log: [string, number][] }).__log.slice()),
     state,
     send,
-    // The editor text and the cursor right after a step, each one checked.
+    // One step sent as it is, nothing waited for; the editor text and cursor read right after it.
+    async step(text: string, expected: { text: string; caret: number }) {
+      await send(text);
+      expect(await state()).toEqual({
+        text: expected.text,
+        start: expected.caret,
+        end: expected.caret,
+      });
+    },
+    // The editor text and the cursor after a step settled, each one checked.
     async compose(text: string, expected: { text: string; caret: number }) {
       await send(text);
       await settle();
@@ -495,13 +504,15 @@ test("a Hangul step that arrives during the previous glide still lands exactly",
     await ime.commit("한", { text: "한", caret: 1 });
     const before = await ime.glides();
     // The new syllable glides; the next step follows at once, with no settling in between.
-    await ime.send("ㄱ");
+    await ime.step("ㄱ", { text: "한ㄱ", caret: 2 });
     await expect.poll(ime.glides, { intervals: [5] }).toBeGreaterThan(before);
+    const started = await ime.glides();
     await ime.send("그");
     // The snap cut the running glide short: nothing is left moving, and the cursor is where the
     // text ends right away, not after the old animation would have finished.
     expect(await ime.caret()).toMatchObject({ transition: "none", running: 0 });
     expect(await ime.state()).toEqual({ text: "한그", start: 2, end: 2 });
+    expect(await ime.glides()).toBe(started);
     expect(await ime.offset()).toBeLessThan(1.5);
     // The log shows the steps overlapped: the second update came less than one glide after the first run.
     const log = await ime.log();
@@ -509,10 +520,10 @@ test("a Hangul step that arrives during the previous glide still lands exactly",
     const updates = log.filter(([name]) => name === "update");
     expect(run).toBeDefined();
     expect((updates.at(-1)?.[1] ?? Number.POSITIVE_INFINITY) - (run?.[1] ?? 0)).toBeLessThan(100);
-    await ime.send("글");
-    await owner.page.keyboard.insertText("글");
-    await owner.page.waitForTimeout(150);
-    expect(await ime.state()).toEqual({ text: "한글", start: 2, end: 2 });
+    await ime.step("글", { text: "한글", caret: 2 });
+    expect(await ime.glides()).toBe(started);
+    await ime.commit("글", { text: "한글", caret: 2 });
+    expect(await ime.glides()).toBe(started);
     expect(await ime.offset()).toBeLessThan(1.5);
   } finally {
     await closeAll(owner);
@@ -569,34 +580,118 @@ test("a stale or empty measure of the composing text snaps at once", async ({
     // 1. A rect without height: no glide to it, the cursor drawn at once.
     await measure("zero");
     const empty = await ime.glides();
-    await ime.send("ㄱ");
+    await ime.step("ㄱ", { text: "한ㄱ", caret: 2 });
     expect(await ime.caret()).toMatchObject({ transition: "none", running: 0, height: "0px" });
     expect(await ime.glides()).toBe(empty);
     // The corrected measure that follows snaps too, and lands where the text ends.
     await measure("live");
-    await ime.send("가");
+    await ime.step("가", { text: "한가", caret: 2 });
     expect((await ime.caret()).transition).toBe("none");
-    expect(await ime.state()).toEqual({ text: "한가", start: 2, end: 2 });
     await page.waitForTimeout(900);
     expect(await ime.offset()).toBeLessThan(1.5);
 
     // 2. A step that would glide while the previous one is still gliding, measured at the same
     // spot: the glide stops at once instead of running on to the stale target.
-    await ime.send("가ㄴ");
+    await ime.step("가ㄴ", { text: "한가ㄴ", caret: 3 });
     await expect.poll(ime.glides, { intervals: [5] }).toBeGreaterThan(empty);
     const gliding = await ime.caret();
     expect(gliding.running).toBeGreaterThan(0);
     await measure("freeze");
-    await ime.send("가나ㅅ");
+    await ime.step("가나ㅅ", { text: "한가나ㅅ", caret: 4 });
     expect(await ime.caret()).toMatchObject({ transition: "none", running: 0 });
     // The stale measure was drawn as measured; the next, live one corrects it without a glide.
     expect((await ime.caret()).transform).toBe(gliding.transform);
     await measure("live");
-    await ime.send("가나사");
+    await ime.step("가나사", { text: "한가나사", caret: 4 });
     expect((await ime.caret()).transition).toBe("none");
     await page.waitForTimeout(900);
     expect(await ime.state()).toEqual({ text: "한가나사", start: 4, end: 4 });
     expect(await ime.offset()).toBeLessThan(1.5);
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+/**
+ * Measures the cursor layers again without a transaction, as the browser does when layout settles
+ * late: asks the view to run each layer's own measure request. CodeMirror gives the page no handle
+ * on its view or its layers, so both are found through the tile the content element carries.
+ */
+async function remeasureLayers(page: Page) {
+  await page.evaluate(() => {
+    type Layer = { measureReq?: unknown };
+    type View = {
+      plugins: { value: Layer | null }[];
+      requestMeasure(request: unknown): void;
+    };
+    const content = document.querySelector(".cm-content") as unknown as {
+      cmTile?: { root?: { view?: View } };
+    };
+    const view = content.cmTile?.root?.view;
+    const layers = view?.plugins.flatMap((plugin) =>
+      plugin.value?.measureReq ? [plugin.value] : [],
+    );
+    // The smooth caret layer and CodeMirror's own cursor layer at least.
+    if (!view || !layers || layers.length < 2) throw new Error("layers not found through the view");
+    for (const layer of layers) view.requestMeasure(layer.measureReq);
+  });
+}
+
+test("a stale measure is corrected by a later measure without another input", async ({
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "IME composition can only be driven through Chromium's CDP",
+  );
+  const owner = await newUser(browser, "Late");
+  try {
+    const ime = await imeSession(owner);
+    const page = owner.page;
+    // A glide long enough to be seen running if the corrected measure were to glide.
+    await page.addStyleTag({
+      content: ".cm-smooth-caret { transition-duration: 800ms !important; }",
+    });
+    const measure = await stubMeasure(page);
+    await ime.compose("한", { text: "한", caret: 1 });
+    await ime.commit("한", { text: "한", caret: 1 });
+    await page.waitForTimeout(900);
+    const settled = await ime.glides();
+
+    // 1. The new syllable is measured where the old text ended: drawn there at once. One input
+    // only; the correction that follows is a measure of the same document state.
+    await measure("freeze");
+    await ime.step("ㄱ", { text: "한ㄱ", caret: 2 });
+    const stale = await ime.caret();
+    expect(stale).toMatchObject({ transition: "none", running: 0 });
+    expect(await ime.glides()).toBe(settled);
+    await measure("live");
+    await remeasureLayers(page);
+    const fixed = await ime.caret();
+    expect(fixed.transform).not.toBe(stale.transform);
+    expect(fixed).toMatchObject({ transition: "none", running: 0, height: stale.height });
+    // Right away, not after a glide: the cursor is already where CodeMirror puts it.
+    expect(await ime.offset()).toBeLessThan(1.5);
+    expect(await ime.glides()).toBe(settled);
+    expect(await ime.state()).toEqual({ text: "한ㄱ", start: 2, end: 2 });
+
+    // 2. The same with a measure that has no height.
+    await ime.commit("ㄱ", { text: "한ㄱ", caret: 2 });
+    await page.waitForTimeout(900);
+    const committed = await ime.glides();
+    await measure("zero");
+    await ime.step("ㄴ", { text: "한ㄱㄴ", caret: 3 });
+    expect(await ime.caret()).toMatchObject({ transition: "none", running: 0, height: "0px" });
+    expect(await ime.glides()).toBe(committed);
+    await measure("live");
+    await remeasureLayers(page);
+    const grown = await ime.caret();
+    expect(grown).toMatchObject({ transition: "none", running: 0 });
+    expect(grown.height).not.toBe("0px");
+    expect(await ime.offset()).toBeLessThan(1.5);
+    expect(await ime.glides()).toBe(committed);
+    expect(await ime.state()).toEqual({ text: "한ㄱㄴ", start: 3, end: 3 });
   } finally {
     await closeAll(owner);
   }
@@ -651,10 +746,15 @@ test("a Hanja replacement of a Hangul syllable snaps", async ({ browser, browser
     expect(await ime.glides()).toBe(hangul);
     // A Hangul syllable after the Hanja is a new place for the cursor, so it glides again.
     await ime.compose("ㄱ", { text: "韓ㄱ", caret: 2 });
-    expect(await ime.glides()).toBeGreaterThan(hangul);
+    const next = await ime.glides();
+    expect(next).toBeGreaterThan(hangul);
+    // The syllable takes its jamo, then the second Hanja replaces it: neither starts a glide.
     await ime.compose("글", { text: "韓글", caret: 2 });
+    expect(await ime.glides()).toBe(next);
     await ime.compose("契", { text: "韓契", caret: 2 });
+    expect(await ime.glides()).toBe(next);
     await ime.commit("契", { text: "韓契", caret: 2 });
+    expect(await ime.glides()).toBe(next);
     expect(await ime.offset()).toBeLessThan(1.5);
   } finally {
     await closeAll(owner);

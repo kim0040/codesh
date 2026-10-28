@@ -69,16 +69,23 @@ export function hangulStep(tr: Transaction): boolean {
   );
 }
 
-/** Longest run of conjoining jamo looked at when finding where a syllable starts. */
-const SYLLABLE_SPAN = 16;
+/** Characters read at a time when walking back to where a syllable starts. */
+const SYLLABLE_CHUNK = 16;
 
 /** Position where the syllable ending at `head` starts, or -1 when there is nothing before it. */
 function syllableStart(doc: Text, head: number): number {
-  const from = Math.max(0, head - SYLLABLE_SPAN);
-  const text = doc.sliceString(from, head);
-  let i = text.length - 1;
-  while (i > 0 && joins(text.charCodeAt(i - 1), text.charCodeAt(i))) i--;
-  return from + i;
+  let start = head - 1;
+  // A cluster of any length has a true start: keep reading back until a pair no longer joins, so a
+  // long run of jamo never looks like several syllables.
+  while (start > 0) {
+    const from = Math.max(0, start - SYLLABLE_CHUNK);
+    const text = doc.sliceString(from, start + 1);
+    let i = text.length - 1;
+    while (i > 0 && joins(text.charCodeAt(i - 1), text.charCodeAt(i))) i--;
+    start = from + i;
+    if (i > 0) break;
+  }
+  return start;
 }
 
 /** Role of a Hangul code in a syllable: leading, vowel or trailing jamo, or a whole syllable. */

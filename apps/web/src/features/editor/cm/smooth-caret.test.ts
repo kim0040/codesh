@@ -163,6 +163,41 @@ describe("caret during decomposed and extended jamo composition", () => {
   });
 });
 
+describe("caret in a long run of conjoining jamo", () => {
+  const composing = (doc: string, userEvent = "input.type.compose") =>
+    EditorState.create({ doc, selection: { anchor: doc.length } }).update({
+      changes: { from: doc.length, insert: "\u1161" },
+      selection: { anchor: doc.length + 1 },
+      userEvent,
+    });
+  const [leading, vowel] = ["\u1112", "\u1161"];
+
+  it("snaps while a cluster grows past the span read at a time", () => {
+    // every pair joins, so the whole run is one syllable however long it gets
+    for (const length of [15, 16, 17, 31, 32, 33, 80]) {
+      expect(glides(composing(leading + vowel.repeat(length)))).toBe(false);
+    }
+  });
+
+  it("finds the start of a long cluster that follows other text", () => {
+    for (const length of [14, 15, 16, 17, 40]) {
+      expect(glides(composing(`\ud55c${leading}${vowel.repeat(length)}`))).toBe(false);
+    }
+  });
+
+  it("glides for the next syllable after a long cluster", () => {
+    for (const length of [15, 16, 17, 40]) {
+      const doc = leading + vowel.repeat(length);
+      const next = EditorState.create({ doc, selection: { anchor: doc.length } }).update({
+        changes: { from: doc.length, insert: "\u1102" },
+        selection: { anchor: doc.length + 1 },
+        userEvent: "input.type.compose",
+      });
+      expect(glides(next)).toBe(true);
+    }
+  });
+});
+
 describe("gliding caret marker", () => {
   it("is not equal to one at the same place that moves differently", () => {
     expect(new GlidingCaret(10, 4, 16, true).eq(new GlidingCaret(10, 4, 16, true))).toBe(true);
