@@ -10,6 +10,22 @@ Releases publish `ghcr.io/kim0040/gachipad-web` (Caddy with the web app), `gachi
 
 ```sh
 cd deploy
+./install.sh                                      # online mode: pulls released images, writes .env, starts stack
+curl http://localhost/healthz
+```
+
+When running from `deploy/` of a git clone without `images.tar`, `install.sh` operates in online mode. It skips bundle checksum verification, reads the version from `.env.example`, and pulls released container images from the registry using `docker compose pull`. If the host has no internet access, the installer halts without modifying `.env`:
+`no internet: use the offline bundle (registry unavailable, authentication denied or release images missing); .env was not changed`
+
+- Run `./install.sh --check` to test host prerequisites first without changing any configuration or creating `.env`.
+- Pass `--yes` to accept defaults and run unattended installations without interactive prompts.
+
+### Manual Docker Compose alternative
+
+As an alternative to `install.sh`, you can configure and run the stack directly using Docker Compose:
+
+```sh
+cd deploy
 cp .env.example .env && ./generate-secrets.sh     # once; .env stays on the host
 docker compose pull && docker compose up -d       # the release GACHIPAD_VERSION from GHCR
 docker compose up -d --build                      # or: build api, collab and the Caddy image from these sources
@@ -33,13 +49,111 @@ gachipad supports multiple database backends, selected during installation or co
 ## Installation with --db
 
 ```sh
-./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL]
+./install.sh [--check] [--yes] [--db sqlite|postgres|mongodb|external] [--database-url URL] [--network internal|public]
 ```
 
 - **Interactive detection**: On a TTY, the installer inventories local database ports (5432, 3306, 27017), running containers, installed client CLI tools, and available memory, prompting for the backend with SQLite as the recommended default.
 - **Non-interactive installs**: Default to SQLite unless `--db` or `DATABASE_URL` is passed.
 - **External database connection**: If `--db external` is selected without a URL on a TTY, a hidden input prompt asks for `DATABASE_URL`. Multiline values are rejected, and URLs are stored single-quoted in `.env` to preserve special characters (`$`, `#`, spaces).
 - **Backend guard**: Refuses switching if non-empty data volumes or a recorded marker from another backend exist (`database backend change refused; use ./migrate-db.sh to copy data and switch backends`).
+
+## Host preflight checks (preflight.sh)
+
+`install.sh` automatically runs host validation checks from `deploy/preflight.sh` (`preflight_run`) before configuring `.env` or starting containers. To test host prerequisites without changing any settings or files, run:
+
+```sh
+./install.sh --check
+```
+
+`--check` performs read-only checks and exits immediately without modifying host settings (`no host settings changed.`). Each check returns pass (`[ok]`), a warning (`[warn]`), or a failure (`[fail]`). The script prints a summary (`preflight: %s failure(s), %s warning(s); no host settings changed.`) and exits with a non-zero code if any failure is encountered.
+
+These checks are best-effort and were verified on Ubuntu only; other distributions, arm64, rootless Docker and SELinux hosts were not verified.
+
+Summary of preflight checks:
+
+1. **Filesystem (`filesystem`)**:
+   - `fail`: Installation path contains whitespace (`installation path contains whitespace`). Fix: `move the installation to a Linux filesystem path without spaces/newlines, such as /opt/gachipad`.
+   - `fail`: Filesystem type is FAT, NTFS, fuseblk, 9p, or drvfs (`filesystem <type> cannot preserve Linux install permissions`). Fix: `move the installation onto a Linux filesystem (WSL 2: use ~/gachipad, not /mnt/c)`.
+   - `fail`: Installation filesystem mounted with `noexec` (`installation filesystem is mounted noexec`). Fix: `move the installation to an executable Linux filesystem, such as /opt/gachipad`.
+   - `warn`: Filesystem type or mount options unknown (`filesystem type or mount options are unknown`). Fix: `findmnt -T .; verify a Linux filesystem mounted with exec`.
+
+2. **Docker CLI (`cli`)**:
+   - `fail`: Docker CLI is missing (`Docker CLI is missing`). Fix line printed per distribution from `/etc/os-release`:
+     - Ubuntu/Debian/Raspbian: `sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 (if unavailable, configure https://docs.docker.com/engine/install/ and install docker-ce docker-ce-cli containerd.io docker-compose-plugin)`
+     - Fedora: `sudo dnf install -y moby-engine docker-compose`
+     - RHEL/CentOS/Rocky/AlmaLinux: `sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo && sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin (use yum on older hosts)`
+     - SUSE/openSUSE: `sudo zypper install docker docker-compose`
+     - Arch: `sudo pacman -S docker docker-compose`
+     - Other: `install Docker Engine and its Compose plugin: https://docs.docker.com/engine/install/`
+   - `fail`: Podman Docker emulation detected in `docker version` (`Podman Docker emulation is not supported; install Docker Engine`). Fix: distribution-specific hint as above.
+
+3. **Docker daemon (`daemon`)**:
+   - `fail`: Docker socket permission denied (`Docker socket permission denied`). Fix: `sudo usermod -aG docker "$USER"; then log out and log in again, or run sudo ./install.sh`.
+   - `fail`: Docker daemon unavailable (`Docker daemon is unavailable`). Fix: `sudo systemctl enable --now docker (rootless: systemctl --user start docker; WSL 2: enable systemd or Docker Desktop integration)`.
+   - `fail`: Podman detected in `docker info` (`Podman is not supported; install Docker Engine`). Fix: distribution-specific hint as above.
+
+4. **Docker Compose (`compose`)**:
+   - `fail`: Compose v2 plugin missing (`Compose v2 plugin is missing (legacy docker-compose v1 is not supported)`). Fix: distribution-specific hint as above.
+   - `fail`: Compose version below 2.20.0 (`need Compose >=2.20.0 for depends_on.required; up --wait alone needs >=2.1.1`). Fix: distribution-specific hint as above.
+   - `warn`: Compose version cannot be parsed (`Compose version is unknown`). Fix: `docker compose version; install Compose >=2.20.0`.
+
+5. **Readiness probe tool (`curl`)**:
+   - `fail`: `curl` is missing for the required `/healthz` readiness check (`curl is missing; installation readiness cannot be checked`). Fix line printed per distribution:
+     - Ubuntu/Debian/Raspbian: `sudo apt-get install -y curl`
+     - Fedora/RHEL/CentOS/Rocky/AlmaLinux: `sudo dnf install -y curl (use yum on older hosts)`
+     - SUSE/openSUSE: `sudo zypper install curl`
+     - Arch: `sudo pacman -S curl`
+     - Other: `install curl with your distribution package manager`
+
+6. **Port configuration (`ports_config`)**:
+   - `fail`: `HTTP_PORT` or `HTTPS_PORT` outside 1-65535 (`HTTP_PORT and HTTPS_PORT must be integers from 1 to 65535`). Fix: `HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh`.
+   - `fail`: `HTTP_PORT` equals `HTTPS_PORT` (`HTTP_PORT and HTTPS_PORT must differ`). Fix: `HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh`.
+
+7. **Rootless Docker (`rootless`)**:
+   - `warn`: Security options unreadable (`Docker security mode is unknown`). Fix: `docker info --format "{{json .SecurityOptions}}"`.
+   - `fail`: Privileged ports (< 1024) selected without kernel unprivileged port start permission (`rootless Docker cannot bind the selected privileged ports`). Fix: `HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh; or sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0 (persist in /etc/sysctl.d/ for reboot)`.
+
+8. **Port availability (`ports`)**:
+   - `warn`: Port listing tools missing (`listening ports are unknown (no ss, netstat or /proc/net/tcp)`). Fix: `install iproute2 (ss), then rerun ./install.sh --check`.
+   - `fail`: Target TCP port already bound by another process (`host TCP port <port> is already in use: <line>`). Bindings owned by this installation's Caddy container are recognized and skipped. Fix: `stop the named listener, or HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh`.
+
+9. **Architecture (`architecture`)**:
+   - `warn`: Daemon architecture unknown (`daemon architecture is unknown`). Fix: `docker info --format "{{.Architecture}}"`.
+   - `fail`: Unsupported host architecture (`released images support amd64 and arm64 only`). Fix: `use a 64-bit amd64/arm64 Docker host (Raspberry Pi: install 64-bit Raspberry Pi OS)`.
+   - `warn`: Offline bundle architecture cannot be determined (`offline bundle architecture is unknown`). Fix: `use a bundle named gachipad-<version>-linux-amd64 or -linux-arm64 matching docker info`.
+   - `fail`: Bundle architecture does not match Docker host (`bundle <bundle> does not match Docker <host>`). Fix: `use the linux-<host> offline bundle`.
+
+10. **Disk space (`disk`)**:
+    - `fail`: Insufficient free space (`need <required> bytes at Docker root (2 x images.tar + 2 GiB), and 100 MiB at install folder`). Fix: `df -h; free space on the indicated filesystem or move Docker data-root/install folder to a larger Linux disk (do not prune shared resources)`.
+    - `warn`: Free space cannot be determined (`free space at Docker root or install folder is unknown`). Fix: `sudo df -Pk; verify <required> bytes at Docker root and 100 MiB at install folder`.
+
+11. **Memory (`memory`)**:
+    - `warn`: Total RAM unknown (`total memory is unknown`). Fix: `provision at least 2 GiB RAM (MongoDB: 4 GiB recommended)`.
+    - `fail`: Host RAM below 2 GiB (`only <total> KiB RAM; need at least 2 GiB`). Fix: `add RAM or increase the VM/WSL 2 memory limit to at least 2 GiB`.
+    - `warn`: MongoDB selected on host with less than 4 GiB RAM (`MongoDB on less than 4 GiB RAM`). Fix: `MONGO_CACHE_GB=1 ./install.sh --db mongodb (persist MONGO_CACHE_GB=1 in .env)`.
+
+12. **SELinux (`selinux`)**:
+    - Non-enforcing modes (Permissive, Disabled, 0, or not detected) pass as ok.
+    - `warn`: SELinux state unknown (`SELinux state is unknown`). Fix: `getenforce; verify bind mounts have :z or :Z`.
+    - `warn`: Compose file missing for inspection (`compose file is unavailable for bind mount inspection`). Fix: `restore docker-compose.yml from the release`.
+    - `fail`: SELinux enforcing with unlabelled bind mounts (`SELinux enforcing with unlabelled bind mounts`). Fix: `add :z to the access options of bind mounts in docker-compose.yml (shipped tls and state use :ro,z)`.
+
+13. **Firewall (`firewall`)**:
+    - `warn`: ufw active (`ufw is active; allow the selected TCP ports`). Fix (public): `sudo ufw allow to any port $PF_HTTP proto tcp; sudo ufw allow to any port $PF_HTTPS proto tcp`; Fix (internal): `sudo ufw allow from <LAN_SUBNET_CIDR> to any port $PF_HTTP proto tcp; sudo ufw allow from <LAN_SUBNET_CIDR> to any port $PF_HTTPS proto tcp`.
+    - `warn`: firewalld active (`firewalld is active; allow ports in the ingress zone`). Fix (public): `sudo firewall-cmd --permanent --add-port=$PF_HTTP/tcp --add-port=$PF_HTTPS/tcp; sudo firewall-cmd --reload`; Fix (internal): `sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=<LAN_SUBNET_CIDR> port port=$PF_HTTP protocol=tcp accept'; sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=<LAN_SUBNET_CIDR> port port=$PF_HTTPS protocol=tcp accept'; sudo firewall-cmd --reload`.
+    - `warn`: nftables input default drop active (`nftables input default drop is active; allow ports before drop rules`). Fix (public): `sudo nft insert rule <chain> tcp dport { $PF_HTTP, $PF_HTTPS } accept; persist with your distribution firewall manager`; Fix (internal): `sudo nft insert rule <chain> ip saddr <LAN_SUBNET_CIDR> tcp dport { $PF_HTTP, $PF_HTTPS } accept; persist with your distribution firewall manager`.
+    - `warn`: Firewall status cannot be queried (`firewall state is unknown (tools missing or permission denied)`). Fix: `sudo nft list ruleset; check host/router rules for the selected ports (internal: restrict to the LAN subnet)`.
+
+14. **Clock synchronization (`clock`)**:
+    - `warn`: System clock not NTP-synchronized in public mode (`system clock is not synchronized or unknown; ACME may fail`). Fix: `sudo timedatectl set-ntp true; timedatectl status (without systemd: enable chronyd or another NTP client)`. In internal network mode, this check is skipped.
+
+15. **Docker at boot (`boot`)**:
+    - `warn`: systemctl missing (`Docker boot enablement is unknown (systemctl missing)`). Fix: `enable Docker with your init system; containers already use restart: unless-stopped`.
+    - `warn`: Docker service not enabled at boot (`Docker is not enabled at boot, or service status is unknown`). Fix: `systemctl enable docker (use sudo for a system service); containers already have restart policies` (rootless: `systemctl --user enable docker ...`).
+
+16. **Cascading warnings when Docker is unavailable**:
+    - If Docker CLI or daemon checks fail, dependent probes (`daemon`, `compose`, `rootless`, `architecture`, `disk`, `boot`) output:
+      `[warn] <check>: unknown until Docker is available`.
 
 ## Network deployment modes
 
@@ -59,7 +173,7 @@ PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-prox
 ```
 
 - **Interactive prompt**: On a TTY without explicit flags, `install.sh` prompts for `internal` or `public`. Non-interactive executions default to `internal`.
-- **Public domain validation**: `--domain` (or `PUBLIC_URL=https://...`) must be a domain you own with A/AAAA DNS records pointing to the host. IP addresses, `.local`, single-label names, `.test`, `.example`, and `.invalid` are rejected. Ports 80 and 443 must reach Caddy.
+- **Public domain validation**: `--domain` (or `PUBLIC_URL=https://...`) must be a domain you own with an A DNS record pointing to the host's public IPv4 address (or the TLS proxy). An AAAA record should only be published after setting up a source-preserving dual-stack Docker network (see [docs/OPERATIONS.md §17.2](../docs/OPERATIONS.md#172-공개-인터넷-모드의-주요-변경-사항)). IP addresses, `.local`, single-label names, `.test`, `.example`, and `.invalid` are rejected. Ports 80 and 443 must reach Caddy.
 - **Behind proxy (`--behind-proxy <CIDR>`)**: Used when an external proxy terminates TLS and forwards HTTP to Caddy. The CIDR must be a non-universal prefix (IPv4 >= /8, IPv6 >= /32) and must not overlap `NETWORK_SUBNET`. A single-host CIDR (`/32` or `/128`) is recommended; prefixes wider than `/16` trigger a warning. The proxy must supply `X-Forwarded-For` and `X-Forwarded-Proto: https`. Connections outside that CIDR are rejected with `403 Forbidden`.
 - **Switching modes on existing installs**: Re-running `install.sh` without `--network` preserves the stored mode in `.env`. Switching `internal -> public` saves prior settings as `GACHIPAD_INTERNAL_*` and applies strict public limits. Switching `public -> internal` restores saved `GACHIPAD_INTERNAL_*` values while retaining tightened security limits for operator review.
 - **Transactional rollback**: `.env` is backed up to a private snapshot before changes and restored if container startup, `/healthz` or `/readyz` checks fail.
@@ -84,7 +198,7 @@ PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-prox
   - `SSE_MAX_PER_CLIENT=5` (internal: 20); `SSE_MAX_PER_IP=50` (internal: 200)
   - `PRESENCE_MAX_PER_NET=100` (internal: 500)
   - For large shared NAT networks (schools, corporate egress), raise `SSE_MAX_PER_IP`, `RATE_LIMIT_API_PER_MIN`, and `RATE_LIMIT_CODE_PER_MIN`.
-- **Join-code failure budget**: A Valkey fixed-minute counter limits failed 6-digit code lookups fleet-wide to 300/min. Clean addresses (IPv4 or IPv6 /48) without recent failures get one free miss (up to 3x budget fleet-wide). If the budget is exhausted during a scan attack, code joins return 429 (`Retry-After`), but direct share links (`/<id>`), existing sessions, and ordinary API operations continue to work.
+- **Join-code failure budget**: A Valkey fixed-minute counter limits failed 6-digit code lookups fleet-wide to 300/min. Clean addresses (IPv4 or IPv6 /48) without recent failures get one free miss (up to 3x budget fleet-wide). A source that looks up a valid code is treated as clean again, but total guesses stay within the shared budget plus the free allowance (3 x RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN per minute fleet-wide). If the budget is exhausted during a scan attack, code joins are paused and return 429 (`Retry-After`), but direct share links (`/<id>`), existing sessions, and ordinary API operations keep working.
 - **Upload pool per-address cap**: In-flight and held uploads are tracked per IPv4 or IPv6 /64, capped at `floor(UPLOAD_STORAGE_MAX_BYTES/4)` (512 MiB default). Exceeding this returns HTTP 429 (`upload_pool_limited`).
 - **Unknown client rule**: If forwarded IP resolution ends inside `TRUST_PROXY` or headers are malformed, the client IP becomes `unknown`. Unknown clients share a conservative rate-limit bucket and cannot satisfy `ADMIN_ALLOW_CIDR`. If `unknown` requests exceed 5% over 5 minutes, `/api/admin/overview` sets `unknownClientIdentity: true`.
 - **IPv4-only binding default**: Public installs default to `GACHIPAD_BIND_ADDRESS=0.0.0.0:`. Publishing IPv6 without source-preservation can map external clients to Docker bridge gateway addresses. IPv6 requires an operator-managed dual-stack Docker network with `ip6tables` enabled and `userland-proxy` disabled.
@@ -114,7 +228,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Networ
 
 Switches:
 - `-Network internal|public`: Choose network mode.
-- `-Domain <domain>`, `-AcmeEmail <email>`, `-BehindProxy`: Configure public internet mode.
+- `-Domain <domain>`, `-AcmeEmail <email>`, `-BehindProxy <CIDR>`: Configure public internet mode (`-BehindProxy 192.0.2.7/32`, forwarded as `--behind-proxy <CIDR>`).
 - `-Db sqlite|postgres|mongodb|external`, `-DatabaseUrl <URL>`: Select database backend.
 - `-Distro <distro>`: Target WSL distribution.
 - `-InstallDir <dir>`: Target directory inside WSL Linux filesystem (default `~/gachipad`). Must not be on a Windows mount (`/mnt/c` or drvfs/9p).

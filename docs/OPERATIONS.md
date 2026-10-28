@@ -61,26 +61,206 @@ deploy/bundle.sh [버전]
 sha256sum -c gachipad-<버전>.tar.gz.sha256
 tar xzf gachipad-<버전>.tar.gz
 cd gachipad-<버전>        # 릴리스 파일은 이름이 gachipad-<버전>-linux-amd64(또는 -arm64)입니다
-PUBLIC_URL=http://gachipad.local ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns]
+PUBLIC_URL=http://gachipad.local ./install.sh [--check] [--yes] [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns] [--network internal|public] [--domain DNS-NAME] [--behind-proxy CIDR] [--acme-email EMAIL]
 ```
 `install.sh` 스크립트는 다음 작업을 순차적으로 수행합니다.
-1. 번들 안의 `SHA256SUMS`로 모든 파일을 검사하고, 맞지 않으면 아무것도 하지 않고 중단.
-2. 명령줄 인자 검사: `--db`, `--database-url`, `--mdns`, `--no-mdns` 옵션과 `GACHIPAD_MDNS`(0 또는 1) 환경 변수를 검증합니다. 유효하지 않은 `GACHIPAD_MDNS` 값은 즉시 거부됩니다.
+1. 번들 안의 `SHA256SUMS`로 모든 파일을 검사하고, 맞지 않으면 아무것도 하지 않고 중단. `images.tar`가 없는 온라인 트리(git clone의 `deploy/`)에서는 체크섬 검사를 건너뛰고 공개 릴리스 이미지를 다운로드합니다.
+2. 명령줄 인자 검사: `--check`, `--yes`, `--db`, `--database-url`, `--mdns`, `--no-mdns`, `--network`, `--domain`, `--behind-proxy`, `--acme-email` 옵션과 `GACHIPAD_MDNS`(0 또는 1) 환경 변수를 검증합니다. 유효하지 않은 `GACHIPAD_MDNS` 값은 즉시 거부됩니다. `--check` 플래그는 2.3절의 호스트 사전 점검만 수행하고 즉시 종료하며 호스트 설정을 전혀 변경하지 않습니다. `--yes` 플래그는 대화형 프롬프트를 건너뛰고 기본값으로 무인 설치합니다.
 3. 데이터베이스 백엔드 확인: TTY 환경에서는 로컬 데이터베이스 포트(5432, 3306, 27017), 실행 중인 DB 컨테이너, 설치된 클라이언트 도구(`psql`, `mysql`/`mariadb`, `mongosh` 등), 가용 메모리를 검사하여 표시하고 대화형 선택 프롬프트(기본값: sqlite)를 제공합니다. 비대화형 환경에서는 `--db` 인자가 없으면 SQLite가 기본 선택됩니다. `DATABASE_URL` 플래그나 환경 변수가 있으면 해당 외부 데이터베이스 또는 SQLite 파일이 우선 적용됩니다.
-4. `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`).
-5. 백엔드 가드 검사: 기존에 다른 백엔드로 생성된 비어있지 않은 데이터 볼륨이나 마커가 존재하면 데이터 복사 도구 없는 임의의 백엔드 전환을 즉시 거부하고 중단.
-6. `.env` 파일이 없으면 `.env.example`을 복사하고 선택한 백엔드(`GACHIPAD_DB`, `DATABASE_URL`) 및 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
-7. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성 및 선택한 DB에 맞는 `COMPOSE_PROFILES` 구성.
-8. mDNS 설정 및 로컬 네트워크 단축 도메인 확인(5장):
-   - 지원 환경: 네이티브 Linux Docker 호스트 환경에서만 호스트 네트워크 모드(`network_mode: host`)를 통해 로컬 네트워크 mDNS 멀티캐스트가 지원됩니다. macOS, Windows, Docker Desktop(가상머신 격리로 인해 호스트 멀티캐스트 전달 불가), WSL, 원격 Docker 데몬 엔드포인트 환경에서는 mDNS가 자동으로 비활성화됩니다.
-   - 신규 설치: 네이티브 Linux TTY 환경에서는 단축 이름 활성화 여부를 묻는 대화형 프롬프트(`Enable short name gachipad.local on this network? [Y/n]: `)를 제공하며 기본값은 활성화(Y)입니다. 비대화형 환경에서도 기본값으로 활성화됩니다. 명령줄 옵션(`--mdns`, `--no-mdns`)이나 환경 변수(`GACHIPAD_MDNS=1`, `GACHIPAD_MDNS=0`)로 선택을 강제할 수 있으며 옵션 플래그가 우선합니다.
-   - 재실행 시 설정 유지: 강제 옵션 없이 `install.sh`를 다시 실행하면 기존 `.env`의 mDNS 선택과 호스트 이름을 그대로 유지합니다(`mdns: keeping the existing choice and hostname.`). 재실행 시 mDNS를 비활성화하면 실행 중인 `mdns` 컨테이너를 안전하게 중지합니다.
-   - 이름 충돌 탐색: 활성화 시 내부 네트워크에 동일한 호스트 이름이 존재하는지 격리된 프로브 컨테이너로 검사합니다. 이미 사용 중이면 `-2`부터 최대 10회까지 `-N` 접미사(예: `gachipad-2.local`)를 붙여 빈 이름을 탐색하며, 탐색 실패나 시간 초과 시에는 경고 후 원래 이름을 유지합니다.
-9. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 번들 MongoDB를 사용할 경우 일회성 서비스 `mongo-users`가 앱 전용 사용자 `gachipad_app`을 준비합니다.
-10. `state/database-kind`에 선택된 백엔드 마커 기록 및 최종 접속 주소 출력:
+4. 배포 모드 확인: 대화형 환경에서 내부 네트워크 모드(`internal`) 또는 공개 인터넷 모드(`public`)를 선택합니다.
+5. 호스트 사전 점검(`deploy/preflight.sh`): 2.3절에 명시된 15개 호스트 요구사항을 검사하며, 실패 항목이 있을 경우 즉시 중단합니다.
+6. 컨테이너 이미지 준비: 오프라인 번들의 경우 `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`)하고, 온라인 모드의 경우 저장소에서 릴리스 이미지를 풀(`docker compose pull`)합니다(인터넷 연결이 불가능하면 `no internet: use the offline bundle (registry unavailable, authentication denied or release images missing); .env was not changed` 출력 후 중단).
+7. 백엔드 가드 검사: 기존에 다른 백엔드로 생성된 비어있지 않은 데이터 볼륨이나 마커가 존재하면 데이터 복사 도구 없는 임의의 백엔드 전환을 즉시 거부하고 중단.
+8. `.env` 파일이 없으면 `.env.example`을 복사하고 선택한 백엔드(`GACHIPAD_DB`, `DATABASE_URL`) 및 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
+9. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성 및 선택한 DB에 맞는 `COMPOSE_PROFILES` 구성.
+10. mDNS 설정 및 로컬 네트워크 단축 도메인 확인(5장):
+    - 지원 환경: 네이티브 Linux Docker 호스트 환경에서만 호스트 네트워크 모드(`network_mode: host`)를 통해 로컬 네트워크 mDNS 멀티캐스트가 지원됩니다. macOS, Windows, Docker Desktop(가상머신 격리로 인해 호스트 멀티캐스트 전달 불가), WSL, 원격 Docker 데몬 엔드포인트 환경에서는 mDNS가 자동으로 비활성화됩니다.
+    - 신규 설치: 네이티브 Linux TTY 환경에서는 단축 이름 활성화 여부를 묻는 대화형 프롬프트(`Enable short name gachipad.local on this network? [Y/n]: `)를 제공하며 기본값은 활성화(Y)입니다. 비대화형 환경에서도 기본값으로 활성화됩니다. 명령줄 옵션(`--mdns`, `--no-mdns`)이나 환경 변수(`GACHIPAD_MDNS=1`, `GACHIPAD_MDNS=0`)로 선택을 강제할 수 있으며 옵션 플래그가 우선합니다.
+    - 재실행 시 설정 유지: 강제 옵션 없이 `install.sh`를 다시 실행하면 기존 `.env`의 mDNS 선택과 호스트 이름을 그대로 유지합니다(`mdns: keeping the existing choice and hostname.`). 재실행 시 mDNS를 비활성화하면 실행 중인 `mdns` 컨테이너를 안전하게 중지합니다.
+    - 이름 충돌 탐색: 활성화 시 내부 네트워크에 동일한 호스트 이름이 존재하는지 격리된 프로브 컨테이너로 검사합니다. 이미 사용 중이면 `-2`부터 최대 10회까지 `-N` 접미사(예: `gachipad-2.local`)를 붙여 빈 이름을 탐색하며, 탐색 실패나 시간 초과 시에는 경고 후 원래 이름을 유지합니다.
+11. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 번들 MongoDB를 사용할 경우 일회성 서비스 `mongo-users`가 앱 전용 사용자 `gachipad_app`을 준비합니다.
+12. `state/database-kind`에 선택된 백엔드 마커 기록 및 최종 접속 주소 출력:
     - 기본 HTTP 설정 시 `http://gachipad.local`(또는 지정 포트) 및 가상 브리지(`docker*`, `br-*`, `veth*`, `virbr*`)를 제외한 서버의 실제 호스트 IPv4 접속 주소를 안내합니다.
     - 도메인 기반 사이트나 HTTPS 구성 시에는 mDNS 공지만으로 가상 호스트나 TLS 인증서가 생성되지 않으므로, `SITE_ALIASES` 추가 및 TLS 인증서 구성이 필요하다는 안내를 출력합니다.
     - 일부 Android 기기나 멀티캐스트 트래픽을 필터링·차단하는 네트워크 환경에서는 `.local` 주소를 해석하지 못할 수 있으므로, 이러한 경우 서버 IP 주소로 접속해야 한다는 주의사항을 함께 안내합니다.
+
+### 2.3 리눅스 호스트 사전 점검 항목 (deploy/preflight.sh)
+
+`install.sh` 실행 시 데이터베이스 및 네트워크 설정 직후 호스트 환경 검사 도구인 `deploy/preflight.sh`의 `preflight_run` 함수가 자동 호출됩니다. 설치 전에 호스트의 준비 상태만 미리 점검하고자 할 때는 다음 명령을 실행합니다:
+
+```sh
+./install.sh --check
+```
+
+`--check` 옵션은 오직 읽기 전용으로 호스트 환경을 점검하고 결과를 출력한 뒤 즉시 종료하며, 호스트 설정이나 `.env` 파일을 일절 변경하지 않습니다(`no host settings changed.`). 각 점검 항목은 통과(`[ok]`, 종료 코드 0), 경고(`[warn]`, 종료 코드 1), 실패(`[fail]`, 종료 코드 2) 중 하나를 반환하며, 모든 검사가 끝난 뒤 요약 정보(`preflight: %s failure(s), %s warning(s); no host settings changed.`)를 출력합니다. 실패 항목이 1건이라도 있으면 `install.sh`는 스택 설치 및 시작을 진행하지 않고 즉시 중단됩니다.
+
+이 점검 항목들은 최선(best-effort) 기준이며 Ubuntu 환경에서만 검증되었습니다. 다른 Linux 배포판, arm64 아키텍처, rootless Docker 및 SELinux 호스트 환경은 검증되지 않았습니다.
+
+점검 순서 및 세부 검사 항목은 다음과 같습니다:
+
+1. **파일시스템 (`filesystem`)**:
+   - **경로 공백 검사** (`fail`): 현재 작업 디렉터리 경로에 공백, 줄바꿈 또는 탭 문자가 포함되어 있는 경우 실패합니다.
+     - 메시지: `installation path contains whitespace`
+     - 해결 명령: `move the installation to a Linux filesystem path without spaces/newlines, such as /opt/gachipad`
+   - **파일시스템 유형 검사** (`fail`): 설치 경로의 파일시스템 유형(`stat -f -c %T`)이 FAT, NTFS, fuseblk, 9p, drvfs 등 Linux 파일 권한을 온전히 보존할 수 없는 유형인 경우 실패합니다.
+     - 메시지: `filesystem <type> cannot preserve Linux install permissions`
+     - 해결 명령: `move the installation onto a Linux filesystem (WSL 2: use ~/gachipad, not /mnt/c)`
+   - **noexec 마운트 옵션 검사** (`fail`): 파일시스템 마운트 옵션(`findmnt` 또는 `/proc/mounts`)에 `noexec`가 설정되어 스크립트 실행이 불가능한 경우 실패합니다.
+     - 메시지: `installation filesystem is mounted noexec`
+     - 해결 명령: `move the installation to an executable Linux filesystem, such as /opt/gachipad`
+   - **파일시스템 정보 확인 불가** (`warn`): 파일시스템 유형이나 마운트 옵션을 읽을 수 없는 경우 경고를 출력합니다.
+     - 메시지: `filesystem type or mount options are unknown`
+     - 해결 명령: `findmnt -T .; verify a Linux filesystem mounted with exec`
+
+2. **Docker CLI (`cli`)**:
+   - **Docker CLI 미설치** (`fail`): 시스템에 `docker` 명령어가 존재하지 않는 경우 실패합니다. 배포판 식별(`/etc/os-release`)에 따라 다음 해결 명령을 안내합니다:
+     - 메시지: `Docker CLI is missing`
+     - Ubuntu / Debian / Raspbian: `sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 (if unavailable, configure https://docs.docker.com/engine/install/ and install docker-ce docker-ce-cli containerd.io docker-compose-plugin)`
+     - Fedora: `sudo dnf install -y moby-engine docker-compose`
+     - RHEL / CentOS / Rocky / AlmaLinux: `sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo && sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin (use yum on older hosts)`
+     - SUSE / openSUSE: `sudo zypper install docker docker-compose`
+     - Arch: `sudo pacman -S docker docker-compose`
+     - 기타 배포판: `install Docker Engine and its Compose plugin: https://docs.docker.com/engine/install/`
+   - **Podman 에뮬레이션 감지** (`fail`): `docker version` 출력에 podman이 감지된 경우 Podman Docker 에뮬레이션은 지원되지 않으므로 실패합니다.
+     - 메시지: `Podman Docker emulation is not supported; install Docker Engine`
+     - 해결 명령: 위 배포판별 안내와 동일.
+
+3. **Docker 데몬 (`daemon`)**:
+   - **소켓 권한 거부** (`fail`): Docker 소켓 접근 권한이 없어 `permission denied`가 반환되는 경우 실패합니다.
+     - 메시지: `Docker socket permission denied`
+     - 해결 명령: `sudo usermod -aG docker "$USER"; then log out and log in again, or run sudo ./install.sh`
+   - **데몬 연결 불가** (`fail`): Docker 데몬 서비스가 실행 중이지 않거나 응답하지 않는 경우 실패합니다.
+     - 메시지: `Docker daemon is unavailable`
+     - 해결 명령: `sudo systemctl enable --now docker (rootless: systemctl --user start docker; WSL 2: enable systemd or Docker Desktop integration)`
+   - **Podman 감지** (`fail`): `docker info`에서 Podman이 감지된 경우 실패합니다.
+     - 메시지: `Podman is not supported; install Docker Engine`
+     - 해결 명령: 위 배포판별 안내와 동일.
+
+4. **Docker Compose (`compose`)**:
+   - **Compose v2 플러그인 부재** (`fail`): `docker compose` 명령을 사용할 수 없거나 레거시 docker-compose v1만 있는 경우 실패합니다.
+     - 메시지: `Compose v2 plugin is missing (legacy docker-compose v1 is not supported)`
+     - 해결 명령: 위 배포판별 안내와 동일.
+   - **버전 기준 미달 (< 2.20.0)** (`fail`): 설치된 Docker Compose 버전이 2.20.0 미만인 경우 실패합니다 (Compose v2의 `depends_on.required` 기능에 2.20.0 이상 필요; `up --wait` 자체는 2.1.1 이상 필요).
+     - 메시지: `need Compose >=2.20.0 for depends_on.required; up --wait alone needs >=2.1.1`
+     - 해결 명령: 위 배포판별 안내와 동일.
+   - **Compose 버전 판독 불가** (`warn`): Compose 버전 문자열을 파싱할 수 없는 경우 경고를 출력합니다.
+     - 메시지: `Compose version is unknown`
+     - 해결 명령: `docker compose version; install Compose >=2.20.0`
+
+5. **상태 점검 도구 (`curl`)**:
+   - **curl 명령어 부재** (`fail`): 배포 후 `/healthz` 준비 상태를 점검하기 위한 `curl` 명령어가 없는 경우 실패합니다. 배포판별 해결 명령을 안내합니다:
+     - 메시지: `curl is missing; installation readiness cannot be checked`
+     - Ubuntu / Debian / Raspbian: `sudo apt-get install -y curl`
+     - Fedora / RHEL / CentOS / Rocky / AlmaLinux: `sudo dnf install -y curl (use yum on older hosts)`
+     - SUSE / openSUSE: `sudo zypper install curl`
+     - Arch: `sudo pacman -S curl`
+     - 기타 배포판: `install curl with your distribution package manager`
+
+6. **포트 설정값 검증 (`ports_config`)**:
+   - **포트 번호 유효 범위 위반** (`fail`): `HTTP_PORT` 또는 `HTTPS_PORT`가 1부터 65535 사이의 정수가 아닌 경우 실패합니다.
+     - 메시지: `HTTP_PORT and HTTPS_PORT must be integers from 1 to 65535`
+     - 해결 명령: `HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh`
+   - **HTTP 및 HTTPS 포트 동일 지정** (`fail`): `HTTP_PORT`와 `HTTPS_PORT`가 같은 값으로 지정된 경우 실패합니다.
+     - 메시지: `HTTP_PORT and HTTPS_PORT must differ`
+     - 해결 명령: `HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh`
+
+7. **Rootless Docker 환경 (`rootless`)**:
+   - **보안 모드 판독 불가** (`warn`): Docker 보안 모드(`SecurityOptions`)를 읽을 수 없는 경우 경고를 출력합니다.
+     - 메시지: `Docker security mode is unknown`
+     - 해결 명령: `docker info --format "{{json .SecurityOptions}}"`
+   - **1024 미만 특권 포트 바인딩 불가** (`fail`): rootless Docker 환경에서 1024 미만 특권 포트 바인딩을 시도하였으나 커널의 비특권 포트 시작값(`net.ipv4.ip_unprivileged_port_start`)보다 낮은 경우 실패합니다.
+     - 메시지: `rootless Docker cannot bind the selected privileged ports`
+     - 해결 명령: `HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh; or sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0 (persist in /etc/sysctl.d/ for reboot)`
+
+8. **포트 충돌 검사 (`ports`)**:
+   - **수신 포트 탐색 도구 부재** (`warn`): `ss`, `netstat`, `/proc/net/tcp` 모두 가용하지 않아 포트 점유 여부를 검사할 수 없는 경우 경고를 출력합니다.
+     - 메시지: `listening ports are unknown (no ss, netstat or /proc/net/tcp)`
+     - 해결 명령: `install iproute2 (ss), then rerun ./install.sh --check`
+   - **호스트 TCP 포트 점유 중** (`fail`): 대상 포트(`HTTP_PORT`, `HTTPS_PORT`)가 다른 프로세스에 의해 이미 사용 중인 경우 실패합니다 (단, 현재 설치 디렉터리의 Caddy 컨테이너 바인딩은 자동 감지하여 충돌에서 제외).
+     - 메시지: `host TCP port <port> is already in use: <listener>`
+     - 해결 명령: `stop the named listener, or HTTP_PORT=8080 HTTPS_PORT=8443 ./install.sh`
+
+9. **호스트 및 번들 아키텍처 (`architecture`)**:
+   - **데몬 아키텍처 판독 불가** (`warn`): Docker 데몬의 아키텍처를 확인할 수 없는 경우 경고를 출력합니다.
+     - 메시지: `daemon architecture is unknown`
+     - 해결 명령: `docker info --format "{{.Architecture}}"`
+   - **비지원 아키텍처** (`fail`): Docker 데몬 아키텍처가 `amd64`(x86_64) 또는 `arm64`(aarch64)가 아닌 경우 실패합니다.
+     - 메시지: `released images support amd64 and arm64 only`
+     - 해결 명령: `use a 64-bit amd64/arm64 Docker host (Raspberry Pi: install 64-bit Raspberry Pi OS)`
+   - **오프라인 번들 아키텍처 판독 불가** (`warn`): `images.tar` 번들의 아키텍처를 디렉터리 이름이나 `manifest.json`에서 식별할 수 없는 경우 경고를 출력합니다.
+     - 메시지: `offline bundle architecture is unknown`
+     - 해결 명령: `use a bundle named gachipad-<version>-linux-amd64 or -linux-arm64 matching docker info`
+   - **번들과 호스트 아키텍처 불일치** (`fail`): 오프라인 번들의 대상 아키텍처와 Docker 데몬 아키텍처가 일치하지 않는 경우 실패합니다.
+     - 메시지: `bundle <bundle> does not match Docker <host>`
+     - 해결 명령: `use the linux-<host> offline bundle`
+
+10. **디스크 공간 (`disk`)**:
+    - **공간 계산 기준**: Docker 루트 디렉터리(`DockerRootDir`)에 필요한 공간은 `2 * images.tar 크기 + 2 GiB(2147483648 바이트)`이며, 설치 작업 디렉터리에는 최소 100 MiB(102400 KiB)가 필요합니다.
+    - **디스크 공간 부족** (`fail`): 가용 공간이 계산된 기준치에 미치지 못하는 경우 실패합니다.
+      - 메시지: `need <required> bytes at Docker root (2 x images.tar + 2 GiB), and 100 MiB at install folder`
+      - 해결 명령: `df -h; free space on the indicated filesystem or move Docker data-root/install folder to a larger Linux disk (do not prune shared resources)`
+    - **디스크 공간 판독 불가** (`warn`): 여유 공간 정보를 조회할 수 없는 경우 경고를 출력합니다.
+      - 메시지: `free space at Docker root or install folder is unknown`
+      - 해결 명령: `sudo df -Pk; verify <required> bytes at Docker root and 100 MiB at install folder`
+
+11. **메모리 (`memory`)**:
+    - **총 메모리 판독 불가** (`warn`): `/proc/meminfo`에서 메모리 크기를 확인할 수 없는 경우 경고를 출력합니다.
+      - 메시지: `total memory is unknown`
+      - 해결 명령: `provision at least 2 GiB RAM (MongoDB: 4 GiB recommended)`
+    - **메모리 2 GiB 미만** (`fail`): 호스트 총 메모리가 2 GiB(2097152 KiB) 미만인 경우 실패합니다.
+      - 메시지: `only <total> KiB RAM; need at least 2 GiB`
+      - 해결 명령: `add RAM or increase the VM/WSL 2 memory limit to at least 2 GiB`
+    - **MongoDB 메모리 4 GiB 미만 경고** (`warn`): MongoDB를 백엔드로 선택하였으나 총 메모리가 4 GiB(4194304 KiB) 미만인 경우 성능 저하를 방지하기 위해 경고를 출력합니다.
+      - 메시지: `MongoDB on less than 4 GiB RAM`
+      - 해결 명령: `MONGO_CACHE_GB=1 ./install.sh --db mongodb (persist MONGO_CACHE_GB=1 in .env)`
+
+12. **SELinux (`selinux`)**:
+    - SELinux가 Permissive, Disabled, 0이거나 미탐지된 상태는 검사를 통과합니다(`ok`).
+    - **SELinux 상태 판독 불가** (`warn`): SELinux 동작 상태를 확인할 수 없는 경우 경고를 출력합니다.
+      - 메시지: `SELinux state is unknown`
+      - 해결 명령: `getenforce; verify bind mounts have :z or :Z`
+    - **compose 파일 판독 불가** (`warn`): 바인드 마운트 검사를 위한 `docker-compose.yml`을 읽을 수 없는 경우 경고를 출력합니다.
+      - 메시지: `compose file is unavailable for bind mount inspection`
+      - 해결 명령: `restore docker-compose.yml from the release`
+    - **SELinux Enforcing 환경에서 바인드 마운트 라벨 누락** (`fail`): SELinux가 Enforcing 상태인데 `docker-compose.yml`의 호스트 바인드 마운트에 컨테이너 공유 라벨(`:z` 또는 `:Z`)이 없는 경우 파일 접근 거부로 인해 실패합니다.
+      - 메시지: `SELinux enforcing with unlabelled bind mounts`
+      - 해결 명령: `add :z to the access options of bind mounts in docker-compose.yml (shipped tls and state use :ro,z)`
+
+13. **방화벽 (`firewall`)**:
+    - ufw, firewalld, nftables의 활성화 여부를 검사하며, 인바운드 허용 범위는 공개 인터넷 모드에서는 전체 허용, 내부 네트워크 모드에서는 감지된 로컬 서브넷 CIDR(`<LAN_SUBNET_CIDR>`)로 제한됩니다.
+    - **ufw 활성화** (`warn`): ufw 방화벽이 동작 중인 경우 경고를 출력합니다.
+      - 메시지: `ufw is active; allow the selected TCP ports`
+      - 해결 명령 (공개 인터넷 모드): `sudo ufw allow to any port $PF_HTTP proto tcp; sudo ufw allow to any port $PF_HTTPS proto tcp`
+      - 해결 명령 (내부 네트워크 모드): `sudo ufw allow from <LAN_SUBNET_CIDR> to any port $PF_HTTP proto tcp; sudo ufw allow from <LAN_SUBNET_CIDR> to any port $PF_HTTPS proto tcp`
+    - **firewalld 활성화** (`warn`): firewalld가 동작 중인 경우 경고를 출력합니다.
+      - 메시지: `firewalld is active; allow ports in the ingress zone`
+      - 해결 명령 (공개 인터넷 모드): `sudo firewall-cmd --permanent --add-port=$PF_HTTP/tcp --add-port=$PF_HTTPS/tcp; sudo firewall-cmd --reload`
+      - 해결 명령 (내부 네트워크 모드): `sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=<LAN_SUBNET_CIDR> port port=$PF_HTTP protocol=tcp accept'; sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=<LAN_SUBNET_CIDR> port port=$PF_HTTPS protocol=tcp accept'; sudo firewall-cmd --reload`
+    - **nftables 입력 기본 차단(drop) 활성화** (`warn`): nftables의 input 체인 정책이 drop으로 활성화되어 있는 경우 경고를 출력합니다.
+      - 메시지: `nftables input default drop is active; allow ports before drop rules`
+      - 해결 명령 (공개 인터넷 모드): `sudo nft insert rule <chain> tcp dport { $PF_HTTP, $PF_HTTPS } accept; persist with your distribution firewall manager`
+      - 해결 명령 (내부 네트워크 모드): `sudo nft insert rule <chain> ip saddr <LAN_SUBNET_CIDR> tcp dport { $PF_HTTP, $PF_HTTPS } accept; persist with your distribution firewall manager`
+    - **방화벽 상태 판독 불가** (`warn`): 방화벽 도구가 없거나 권한 부족으로 규칙을 확인할 수 없는 경우 경고를 출력합니다.
+      - 메시지: `firewall state is unknown (tools missing or permission denied)`
+      - 해결 명령: `sudo nft list ruleset; check host/router rules for the selected ports (internal: restrict to the LAN subnet)`
+
+14. **시스템 시계 동기화 (`clock`)**:
+    - 내부 네트워크 모드에서는 검사를 건너뛰고 정상 통과합니다(`clock synchronization check applies to public mode`).
+    - **공개 인터넷 모드에서 NTP 동기화 미완료** (`warn`): ACME 인증서 발급 시 시간 불일치로 인한 검증 실패를 방지하기 위해 `timedatectl`로 NTP 동기화 여부(`NTPSynchronized == yes`)를 확인하며, 동기화되지 않은 경우 경고를 출력합니다.
+      - 메시지: `system clock is not synchronized or unknown; ACME may fail`
+      - 해결 명령: `sudo timedatectl set-ntp true; timedatectl status (without systemd: enable chronyd or another NTP client)`
+
+15. **Docker 부팅 시 자동 시작 (`boot`)**:
+    - **init 시스템 제어 도구 부재** (`warn`): systemctl 명령어가 없는 경우 경고를 출력합니다.
+      - 메시지: `Docker boot enablement is unknown (systemctl missing)`
+      - 해결 명령: `enable Docker with your init system; containers already use restart: unless-stopped`
+    - **부팅 자동 시작 비활성화** (`warn`): Docker 서비스가 부팅 시 활성화되어 있지 않거나 상태를 알 수 없는 경우 경고를 출력합니다.
+      - 메시지: `Docker is not enabled at boot, or service status is unknown`
+      - 해결 명령: `systemctl enable docker (use sudo for a system service); containers already have restart policies` (rootless Docker 환경의 경우 `systemctl --user enable docker ...`)
+
+16. **Docker 미가용 시 의존 점검 연쇄 경고**:
+    - `cli` 또는 `daemon` 검사에서 Docker가 준비되지 않은 것으로 확인되면, Docker 데몬에 의존하는 후속 점검 항목(`daemon`, `compose`, `rootless`, `architecture`, `disk`, `boot`)은 개별 점검 대신 다음 경고를 출력합니다:
+      - 출력: `[warn] <check>: unknown until Docker is available`
 
 ---
 
@@ -1144,7 +1324,7 @@ Network [internal/public] (default internal):
   ```sh
   ./install.sh --network public --domain share.example.org --acme-email ops@example.org
   ```
-  소유한 공용 DNS 도메인 이름이 필수이며, 도메인의 A/AAAA 레코드가 서버의 공인 IP를 가리켜야 하고 인터넷에서 TCP 80 및 443 포트로 접근 가능해야 합니다. Caddy가 무료 ACME CA(Let's Encrypt 또는 ZeroSSL)를 통해 인증서를 자동 발급·갱신합니다. `--acme-email`은 선택 사항입니다. IP 주소, `.local`, 단일 레이블 이름, `.test`, `.example`, `.invalid`는 도메인 검증 단계에서 즉시 거부됩니다.
+  소유한 공용 DNS 도메인 이름이 필수이며, 도메인의 A 레코드가 서버의 공인 IPv4 주소(또는 TLS 프록시)를 가리켜야 하고 인터넷에서 TCP 80 및 443 포트로 접근 가능해야 합니다. AAAA 레코드는 실제 클라이언트 소스 IP를 보존하는 이중 스택 Docker 네트워크를 구성한 후에만 등록해야 합니다(17.2절 9항 참고). Caddy가 무료 ACME CA(Let's Encrypt 또는 ZeroSSL)를 통해 인증서를 자동 발급·갱신합니다. `--acme-email`은 선택 사항입니다. IP 주소, `.local`, 단일 레이블 이름, `.test`, `.example`, `.invalid`는 도메인 검증 단계에서 즉시 거부됩니다.
 
 - **TLS 프록시 뒷단 공개 모드**:
   ```sh
@@ -1204,8 +1384,8 @@ Network [internal/public] (default internal):
 6. **참가 코드 실패 예산(Join-Code Failure Budget)과 트레이드오프**:
    - 6자리 숫자 코드는 약 90만 개의 조합을 가지며, 빠른 접속을 위한 편의 도구일 뿐 암호학적 비밀키가 아닙니다.
    - 분산 스캐너가 다수의 IP를 동원해 코드를 무차별 대입하는 공격을 막기 위해, 공개 모드에서는 전체 API 복제본이 Valkey 시계 기반의 1분 고정 윈도우 원자적 카운터(`RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN=300`)를 공유합니다.
-   - 최근 10분 내 실패 이력이 없는 정상 클라이언트(IPv4 주소 또는 IPv6 `/48`)는 1분당 최대 3배(900회)까지 첫 1회의 실패가 무료로 허용됩니다. 따라서 공격자가 공유 실패 예산을 소모하고 있는 중이라도 올바른 코드를 입력하는 일반 사용자는 정상적으로 참가할 수 있습니다. 성공적으로 참가하면 10분 마커가 즉시 삭제됩니다.
-   - **보안 및 가용성 트레이드오프**: 대규모 분산 공격자가 공유 실패 예산(300회)과 무료 실패 허용량(900회)을 모두 소진시키면, 윈도우가 초기화될 때까지 모든 클라이언트의 6자리 코드 조회가 일시적으로 차단되고 HTTP 429(`Retry-After`)가 반환됩니다. 그러나 **전체 공유 링크(`/<id>`)를 통한 직접 접속, 이미 열려 있는 세션, 일반 API 호출은 영향을 받지 않고 계속 작동**합니다. 중요한 문서에는 6자리 코드 외에 PIN 번호, 승인 대기실, 로그인 필수 조건을 함께 구성하십시오.
+   - 최근 10분 내 실패 이력이 없는 정상 클라이언트(IPv4 주소 또는 IPv6 `/48`)는 1분당 최대 3배(900회)까지 첫 1회의 실패가 무료 허용량으로 인정됩니다. 유효한 코드를 조회한 소스는 다시 정상(깨끗한 상태)으로 취급되어 10분 마커가 삭제되지만, 함대 전체의 분당 총 추측 시도는 공유 예산과 무료 허용량의 합계(`3 x RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN`회/분) 이내로 유지됩니다.
+   - **보안 및 가용성 트레이드오프**: 대규모 분산 공격자가 공유 실패 예산(300회)과 무료 실패 허용량을 모두 소진시키면, 윈도우가 초기화될 때까지 모든 클라이언트의 6자리 코드 조회가 일시 중단(paused)되고 HTTP 429(`Retry-After`)가 반환됩니다. 그러나 **전체 공유 링크(`/<id>`)를 통한 직접 접속, 이미 열려 있는 세션, 일반 API 호출은 영향을 받지 않고 계속 작동**합니다. 중요한 문서에는 6자리 코드 외에 PIN 번호, 승인 대기실, 로그인 필수 조건을 함께 구성하십시오.
 
 7. **주소별 업로드 풀 한도**:
    - 공개 모드에서는 Valkey 시계를 기준으로 각 IPv4 주소 또는 IPv6 `/64`가 현재 점유하고 있는 파일 업로드 총량을 추적합니다.
@@ -1269,7 +1449,7 @@ gachipad는 Windows 10 및 11 환경에서 WSL 2(Windows Subsystem for Linux 2)�
    - `-Network internal|public`: 내부망 모드(기본값) 또는 공개 인터넷 모드 선택.
    - `-Domain <domain>`: 공개 인터넷 모드에서 사용할 도메인 이름.
    - `-AcmeEmail <email>`: 공개 인터넷 모드에서 ACME 인증서 발급에 등록할 이메일 주소.
-   - `-BehindProxy`: 외부 TLS 프록시 뒷단 모드 활성화.
+   - `-BehindProxy <CIDR>`: 외부 TLS 프록시 뒷단 모드 활성화 (예: `-BehindProxy 192.0.2.7/32`, `--behind-proxy <CIDR>`로 전달).
    - `-Db sqlite|postgres|mongodb|external`: 데이터베이스 백엔드 선택 (신규 기본값: `sqlite`).
    - `-DatabaseUrl <URL>`: 외부 데이터베이스 접속 URL.
    - `-Distro <distro>`: 설치에 사용할 WSL 배포판 이름 (지정하지 않으면 기본 배포판 자동 선택).

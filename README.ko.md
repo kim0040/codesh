@@ -104,6 +104,8 @@ codesh 1.0.x에서 업그레이드하시나요? [운영자 안내서의 이름 �
 
 Docker Engine과 Docker Compose 플러그인(`docker compose`)이 설치된 Linux 서버 또는 WSL 2와 Docker Desktop을 사용하는 64비트 Windows 10/11 환경에서 실행할 수 있습니다. 외부에 노출되는 포트는 Caddy의 HTTP(80)와 HTTPS(443)뿐입니다.
 
+설치 전 `./install.sh --check`를 실행하면 호스트 환경(Docker, 포트, 메모리, 디스크, 방화벽, 파일시스템)을 사전에 점검할 수 있으며 호스트 설정을 전혀 변경하지 않습니다. 대화형 확인 없이 무인 설치를 진행할 때는 `--yes`를 지정합니다. `install.sh`는 오프라인 번들뿐만 아니라 git clone 저장소의 `deploy/` 디렉터리에서도 실행할 수 있습니다(온라인 모드: `images.tar`가 없으면 공개 이미지를 다운로드).
+
 | 규모 | 최소 | 권장 | 메모 |
 |---|---|---|---|
 | 한 공유 50명 | 2 vCPU, 4 GB RAM, SSD 20 GB | 4 vCPU, 8 GB RAM | RAM 4 GB에서는 `MONGO_CACHE_GB=1` |
@@ -114,18 +116,19 @@ Docker Engine과 Docker Compose 플러그인(`docker compose`)이 설치된 Linu
 `install.sh` 실행 시 배포 대상 환경에 맞게 내부망 모드 또는 공개 인터넷 모드를 선택합니다:
 
 - **내부망 모드** (`./install.sh --network internal`, 기본값): 내부 네트워크 환경을 위한 모드입니다. 일반 HTTP 또는 내부 HTTPS(Caddy 내장 CA 또는 자체 인증서)를 제공하며, 네이티브 Linux 환경에서 `gachipad.local` mDNS 단축 도메인을 지원하고 내부망 환경에 맞춘 여유 있는 리소스 및 요청 한도를 사용합니다.
-- **공개 인터넷 모드** (`./install.sh --network public --domain share.example.org`): 인터넷 공개 호스팅을 위한 모드입니다. 소유한 공용 DNS 도메인 이름(A/AAAA 레코드가 서버 공인 IP를 가리켜야 함)과 외부에서 접근 가능한 TCP 80/443 포트가 필요합니다. Caddy가 무료 공개 ACME CA(Let's Encrypt 또는 ZeroSSL)를 통해 자동으로 인증서를 발급·갱신하고 HTTP를 HTTPS로 리다이렉트합니다. Caddy 직접 HTTPS 대신 외부 TLS 종단 프록시 뒤에 배치할 때는 `--behind-proxy <CIDR>`(예: `PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32`)를 지정합니다. `--acme-email ops@example.org`로 인증서 관리용 이메일을 등록할 수도 있습니다.
+- **공개 인터넷 모드** (`./install.sh --network public --domain share.example.org`): 인터넷 공개 호스팅을 위한 모드입니다. 소유한 공용 DNS 도메인 이름(A 레코드가 서버의 공인 IPv4 주소 또는 TLS 프록시를 가리켜야 함)과 외부에서 접근 가능한 TCP 80/443 포트가 필요합니다. AAAA 레코드는 실제 클라이언트 소스 IP를 보존하는 이중 스택 Docker 네트워크를 구성한 후에만 등록해야 합니다([운영자 안내서](docs/OPERATIONS.md#172-공개-인터넷-모드의-주요-변경-사항) 참고). Caddy가 무료 공개 ACME CA(Let's Encrypt 또는 ZeroSSL)를 통해 자동으로 인증서를 발급·갱신하고 HTTP를 HTTPS로 리다이렉트합니다. Caddy 직접 HTTPS 대신 외부 TLS 종단 프록시 뒤에 배치할 때는 `--behind-proxy <CIDR>`(예: `PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32`)를 지정합니다. `--acme-email ops@example.org`로 인증서 관리용 이메일을 등록할 수도 있습니다.
 
 공개 인터넷 모드는 HTTPS와 HSTS를 강제하고, mDNS를 끄며, 불필요한 네트워크 정보 노출을 막기 위해 클라이언트 디스커버리 그룹을 개별 격리합니다. 또한 관리자 콘솔을 로컬 루프백 및 사설망 CIDR로 기본 제한하고 강화된 남용 방지 및 업로드 한도를 적용합니다. 공개 인터넷 직접 모드에서 추가로 발생하는 유일한 외부 네트워크 통신은 Caddy의 무료 ACME 인증서 발급·갱신 트래픽이며, 프록시 종단 공개 모드 및 내부망 모드는 추가 외부 요청을 일절 발생시키지 않습니다.
 
-### 인터넷이 되는 서버: Docker Compose
+### 인터넷이 되는 서버: git clone
 
 ```sh
 git clone https://github.com/kim0040/gachipad.git && cd gachipad/deploy
-cp .env.example .env && ./generate-secrets.sh     # 한 번만. .env는 서버에만 둡니다
-docker compose pull && docker compose up -d       # ghcr.io/kim0040의 공개 이미지
+./install.sh                                      # 공개 이미지 다운로드, .env 작성, 스택 시작
 curl http://localhost/healthz
 ```
+
+`./install.sh --check`로 호스트 환경을 먼저 점검할 수 있으며(호스트 설정 변경 없음), `--yes`를 사용하면 대화형 프롬프트 없이 무인 설치됩니다. `install.sh`는 오프라인 번들뿐만 아니라 git clone 저장소의 `deploy/`에서도 실행할 수 있습니다(`images.tar`가 없으면 공개 이미지 다운로드). `install.sh` 대신 수동으로 Docker Compose를 실행하는 방법은 [deploy/README.md](deploy/README.md)에 안내되어 있습니다.
 
 ### 인터넷이 없는 서버: 오프라인 번들
 
@@ -160,7 +163,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Network internal
 `install.ps1`의 주요 스위치:
 - `-Network internal|public`: 내부망 모드 또는 공개 인터넷 모드 선택.
 - `-Domain <domain>` 및 `-AcmeEmail <email>`: 공개 인터넷 모드용 도메인 이름 및 선택적 ACME 계정 이메일.
-- `-BehindProxy`: TLS 종단 프록시 뒷단 모드 활성화.
+- `-BehindProxy <CIDR>`: 외부 TLS 종단 프록시 뒷단 모드 활성화 (예: `-BehindProxy 192.0.2.7/32`, `--behind-proxy <CIDR>`로 전달).
 - `-Db sqlite|postgres|mongodb|external` 및 `-DatabaseUrl <URL>`: 데이터베이스 백엔드 선택.
 - `-Distro <distro>` 및 `-InstallDir <dir>`: 대상 WSL 배포판 및 Linux 설치 경로 지정 (기본값: WSL Linux 파일시스템 내 `~/gachipad`, drvfs `/mnt/c` 경로는 거부됨).
 - `-OpenFirewall`: HTTP/HTTPS 인바운드 방화벽 규칙 자동 추가 (관리자 권한 PowerShell 필요).
