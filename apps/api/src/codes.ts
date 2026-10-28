@@ -1,5 +1,6 @@
 import { generateJoinCode, JOIN_CODE_COOLDOWN_SECONDS, keys } from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
+import { ApiError } from "./errors.js";
 
 export type CodeKind = "share" | "lab";
 
@@ -83,8 +84,65 @@ export async function resolveCode(
   ctx: Ctx,
   code: string,
 ): Promise<{ shareId: string } | { labId: string } | null> {
+  const budget = keys.rateLimit("global", "code-failures");
+  let window = 0;
+  if (ctx.config.network === "public") {
+    const [admitted, audit] = (await ctx.valkey.eval(
+      RESERVE_LOOKUP,
+      1,
+      budget,
+      ctx.config.codeFailureBudgetPerMinute,
+    )) as [number, number];
+    if (admitted < 0) {
+      ctx.diagnostics.record("rate_limit");
+      ctx.metrics.rateLimited.inc({ bucket: "code-global" });
+      if (audit === 1)
+        await ctx.stores.audit
+          .append({
+            at: new Date(),
+            actor: "00000000-0000-4000-8000-000000000000",
+            ip: "global",
+            action: "code.lookup_limited",
+            detail: { budget: ctx.config.codeFailureBudgetPerMinute },
+          })
+          .catch(() => undefined);
+      throw new ApiError("rate_limited", "Join-code lookups paused; try again shortly", {
+        "Retry-After": String(-admitted),
+      });
+    }
+    window = admitted;
+  }
   const [shareId, labId] = await ctx.valkey.mget(keys.code(code), keys.labCode(code));
+  if (window && (shareId || labId)) await ctx.valkey.eval(REFUND_LOOKUP, 1, budget, window);
   if (shareId) return { shareId };
   if (labId) return { labId };
   return null;
 }
+
+// Reserve before the lookup, refund hits. One Valkey clock and atomic admission across replicas
+// bound parallel guesses; matching the window on refund prevents crossing-window undercounts.
+const RESERVE_LOOKUP = `
+local now = tonumber(redis.call('TIME')[1])
+local window = math.floor(now / 60) + 1
+local state = redis.call('HMGET', KEYS[1], 'window', 'count', 'logged')
+local count = tonumber(state[2]) or 0
+if tonumber(state[1]) ~= window then
+  count = 0
+  redis.call('HSET', KEYS[1], 'window', window, 'count', 0, 'logged', 0)
+end
+redis.call('EXPIRE', KEYS[1], 120)
+if count >= tonumber(ARGV[1]) then
+  local log = tonumber(redis.call('HGET', KEYS[1], 'logged')) == 0 and 1 or 0
+  redis.call('HSET', KEYS[1], 'logged', 1)
+  return {-(60 - now % 60), log}
+end
+redis.call('HINCRBY', KEYS[1], 'count', 1)
+return {window, 0}
+`;
+
+const REFUND_LOOKUP = `
+if tonumber(redis.call('HGET', KEYS[1], 'window')) == tonumber(ARGV[1]) then
+  redis.call('HINCRBY', KEYS[1], 'count', -1)
+end
+return 1
+`;

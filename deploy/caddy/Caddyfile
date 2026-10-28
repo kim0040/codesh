@@ -7,13 +7,35 @@
 
 {
 	admin localhost:2019
+	{$ACME_EMAIL_CONFIG}
 	servers {
 		trusted_proxies static {$TRUSTED_PROXIES:127.0.0.1/32}
+		trusted_proxies_strict
+	}
+}
+
+(network_internal) {
+	import /etc/caddy/tls/*.caddy
+}
+
+(network_public) {
+	header Strict-Transport-Security "max-age=31536000"
+	import public_{$GACHIPAD_PUBLIC_TLS:acme}
+}
+
+(public_acme) {
+	# Automatic HTTPS manages the certificate and the HTTP redirect.
+}
+
+(public_proxy) {
+	@untrusted not remote_ip {$TRUSTED_PROXIES:127.0.0.1/32}
+	handle @untrusted {
+		respond "Forbidden" 403
 	}
 }
 
 {$SITE_ADDRESS::80}{$SITE_ALIASES} {
-	import /etc/caddy/tls/*.caddy
+	import network_{$GACHIPAD_NETWORK:internal}
 
 	header {
 		-Server
@@ -29,6 +51,7 @@
 	@metrics_api {
 		path /metrics/api
 		remote_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
+		client_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
 	}
 	handle @metrics_api {
 		rewrite * /metrics
@@ -37,6 +60,7 @@
 	@metrics_collab {
 		path /metrics/collab
 		remote_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
+		client_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
 	}
 	handle @metrics_collab {
 		rewrite * /metrics

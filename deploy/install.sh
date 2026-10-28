@@ -14,14 +14,24 @@ assert_no_database_migration
 DB_OPTION=""
 DB_URL_OPTION=""
 MDNS_OPTION="${GACHIPAD_MDNS:-auto}"
+NETWORK_OPTION=""
+GACHIPAD_NETWORK_ENV="${GACHIPAD_NETWORK:-}"
+DOMAIN_OPTION=""
+PROXY_OPTION=""
+PROXY_OPTION_SET=0
+ACME_OPTION="${ACME_EMAIL:-}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --db) DB_OPTION="${2:?--db needs sqlite, postgres, mongodb or external}"; shift ;;
     --database-url) DB_URL_OPTION="${2:?--database-url needs a URL}"; shift ;;
     --mdns) MDNS_OPTION=1 ;;
     --no-mdns) MDNS_OPTION=0 ;;
+    --network) NETWORK_OPTION="${2:?--network needs internal or public}"; shift ;;
+    --domain) DOMAIN_OPTION="${2:?--domain needs a DNS name}"; shift ;;
+    --behind-proxy) PROXY_OPTION="${2:?--behind-proxy needs a CIDR}"; PROXY_OPTION_SET=1; shift ;;
+    --acme-email) ACME_OPTION="${2:?--acme-email needs an email address}"; shift ;;
     -h | --help)
-      echo "usage: ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns]"
+      echo "usage: ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns] [--network internal|public] [--domain DNS-NAME] [--behind-proxy CIDR] [--acme-email EMAIL]"
       exit 0
       ;;
     *) die "unknown option $1 (./install.sh --help)" ;;
@@ -147,14 +157,23 @@ VERSION="$(cat VERSION)"
 ENV_SNAPSHOT=""
 ENV_SNAPSHOT_READY=0
 ENV_READY=0
+START_ATTEMPTED=0
 install_cleanup() {
   local status=$? restored=1
   trap - EXIT
   trap '' HUP INT TERM PIPE
   if [ "$ENV_READY" = 0 ] && [ "$ENV_SNAPSHOT_READY" = 1 ]; then
+    if [ "$START_ATTEMPTED" = 1 ]; then
+      docker compose stop caddy >/dev/null 2>&1 || true
+      docker compose --profile mdns stop mdns >/dev/null 2>&1 || true
+      if [ "$FRESH" = 1 ]; then docker compose stop >/dev/null 2>&1 || true; fi
+    fi
     if [ "$FRESH" = 0 ]; then
       cp -p "$ENV_SNAPSHOT" .env.install-recovery && mv .env.install-recovery .env || restored=0
     else rm -f .env || restored=0; fi
+    if [ "$restored" = 1 ] && [ "$FRESH" = 0 ] && [ "$START_ATTEMPTED" = 1 ]; then
+      docker compose up -d --wait || { echo 'install: settings restored; could not restart the previous configuration. Run docker compose up -d --wait.' >&2; status=1; }
+    fi
   fi
   if [ "$restored" = 1 ]; then
     [ -z "$ENV_SNAPSHOT" ] || rm -f "$ENV_SNAPSHOT"
@@ -188,6 +207,7 @@ else
   FRESH=1
 fi
 select_database "$FRESH"
+select_network "$FRESH"
 echo "install: loading images ($VERSION)"
 docker load -i images.tar
 assert_database_backend
@@ -197,6 +217,7 @@ ENV_SNAPSHOT="$(mktemp .env.install-snapshot.XXXXXX)"
 [ "$FRESH" = 1 ] || cp -p .env "$ENV_SNAPSHOT"
 ENV_SNAPSHOT_READY=1
 [ "$FRESH" = 0 ] || cp .env.example .env
+persist_network "$FRESH"
 for name in PUBLIC_URL HTTP_PORT HTTPS_PORT SITE_ADDRESS COLLAB_REPLICAS; do
   value="${!name:-}"
   [ -n "$value" ] && env_set "$name" "$value"
@@ -208,19 +229,26 @@ env_set GACHIPAD_VERSION "$VERSION"
 # The loaded images carry the bundle's registry in their names.
 REGISTRY="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
 [ -n "$REGISTRY" ] && env_set GACHIPAD_REGISTRY "$REGISTRY"
-if [ "$FRESH" = 0 ] && [ "$MDNS_OPTION" = auto ] && mdns_supported; then
+if [ "$GACHIPAD_NETWORK" = public ]; then
+  mdns_profile 0
+  echo 'mdns: disabled in public mode.'
+elif [ "$FRESH" = 0 ] && [ "$MDNS_OPTION" = auto ] && mdns_supported; then
   echo 'mdns: keeping the existing choice and hostname.'
 else select_mdns "$MDNS_OPTION"; fi
 mkdir -p state && chmod 755 state
 
 echo "install: starting"
-ENV_READY=1
+START_ATTEMPTED=1
 if [ "$FRESH" = 0 ] && ! mdns_enabled; then
-  docker compose --profile mdns stop mdns || echo 'mdns: could not stop the existing service; inspect docker compose --profile mdns ps mdns.' >&2
+  if ! docker compose --profile mdns stop mdns; then
+    [ "$GACHIPAD_NETWORK" != public ] || die 'could not disable the existing mDNS service; public mode was not started'
+    echo 'mdns: could not stop the existing service; inspect docker compose --profile mdns ps mdns.' >&2
+  fi
 fi
 docker compose up -d --wait
 wait_healthy 120
 record_database_backend
+ENV_READY=1
 echo "install: gachipad $VERSION is running on port $(env_get HTTP_PORT 80)"
-mdns_addresses
+network_addresses
 echo "install: back up with ./backup.sh, update with ./update.sh (online) or ./upgrade.sh <new bundle>"

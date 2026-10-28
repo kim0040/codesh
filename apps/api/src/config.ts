@@ -6,6 +6,7 @@ import { isValidCidr, parseCidr } from "./net.js";
 const DEV_SECRET = "dev-only-secret-change-me";
 
 const envSchema = z.object({
+  GACHIPAD_NETWORK: z.enum(["internal", "public"]).default("internal"),
   QUOTA_WINDOW_SECONDS: z.coerce.number().int().positive().default(86400),
   QUOTA_SHARES_PER_CLIENT: z.coerce.number().int().positive().default(200),
   QUOTA_SHARES_PER_IP: z.coerce.number().int().positive().default(1000),
@@ -58,6 +59,7 @@ const envSchema = z.object({
   /** Requests per client IP and minute, per bucket. */
   RATE_LIMIT_API_PER_MIN: z.coerce.number().int().positive().default(1200),
   RATE_LIMIT_CODE_PER_MIN: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_CREATE_PER_MIN: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_LOGIN_PER_MIN: z.coerce.number().int().positive().default(10),
   /** Asks GitHub for the latest release now and then; `off` makes no outbound request at all. */
@@ -109,6 +111,8 @@ export interface UpdateConfig {
 }
 
 export interface Config {
+  network: "internal" | "public";
+  codeFailureBudgetPerMinute: number;
   production: boolean;
   host: string;
   port: number;
@@ -134,6 +138,26 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     parsed.DATABASE_URL ?? (parsed.STORAGE === "memory" ? "memory:" : parsed.MONGO_URL);
   const storage = storageKindFromUrl(databaseUrl);
   const production = parsed.NODE_ENV === "production";
+  if (parsed.GACHIPAD_NETWORK === "public") {
+    let url: URL;
+    try {
+      url = new URL(parsed.PUBLIC_URL);
+    } catch {
+      throw new Error("Public mode requires PUBLIC_URL=https://your.domain");
+    }
+    if (
+      url.protocol !== "https:" ||
+      !url.hostname.includes(".") ||
+      /(?:\.local|\.localhost)\.?$|^[\d.]+$|:|\.$/.test(url.hostname) ||
+      url.username ||
+      url.password ||
+      url.port ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    )
+      throw new Error("Public mode requires PUBLIC_URL=https://your.domain with a DNS name");
+  }
   if (production) {
     if (parsed.ADMIN_TOKEN !== "" && parsed.ADMIN_TOKEN.length < 32)
       throw new Error("ADMIN_TOKEN must contain at least 32 random characters in production");
@@ -144,6 +168,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
   }
   return {
+    network: parsed.GACHIPAD_NETWORK,
+    codeFailureBudgetPerMinute: parsed.RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN,
     production,
     host: parsed.HOST,
     port: parsed.PORT,
@@ -155,13 +181,22 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionSecret: parsed.SESSION_SECRET,
     collabSecret: parsed.COLLAB_SECRET,
     adminToken: parsed.ADMIN_TOKEN,
-    adminAllowCidr: parsed.ADMIN_ALLOW_CIDR.split(",")
+    adminAllowCidr: (
+      parsed.ADMIN_ALLOW_CIDR.trim() ||
+      (parsed.GACHIPAD_NETWORK === "public"
+        ? "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+        : "")
+    )
+      .split(",")
       .map((cidr) => cidr.trim())
       .filter(Boolean),
     trustProxy: parsed.TRUST_PROXY.split(",")
       .map((cidr) => cidr.trim())
       .filter(Boolean),
-    publicUrl: parsed.PUBLIC_URL.replace(/\/+$/, ""),
+    publicUrl:
+      parsed.GACHIPAD_NETWORK === "public"
+        ? new URL(parsed.PUBLIC_URL).origin
+        : parsed.PUBLIC_URL.replace(/\/+$/, ""),
     limits: {
       QUOTA_WINDOW_SECONDS: parsed.QUOTA_WINDOW_SECONDS,
       QUOTA_SHARES_PER_CLIENT: parsed.QUOTA_SHARES_PER_CLIENT,

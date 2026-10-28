@@ -51,7 +51,8 @@ export async function adminAccess(
     throw notFound("Not found");
   const header = request.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const restricted = ctx.adminAllowed.length > 0;
+  const restricted =
+    ctx.adminAllowed.length > 0 && !ctx.adminAllowed.some((cidr) => cidr.prefix === 0);
   if (!restricted) {
     const retry = Number(await ctx.valkey.eval(TAKE_BUDGET, 1, budgetKey()));
     if (retry > 0)

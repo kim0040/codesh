@@ -25,7 +25,7 @@ import { shareRoutes } from "./routes/shares.js";
 import { socialRoutes } from "./routes/social.js";
 import { systemRoutes } from "./routes/system.js";
 import { transferRoutes } from "./routes/transfer.js";
-import { SECURITY_HEADERS } from "./security.js";
+import { requestIsHttps, SECURITY_HEADERS } from "./security.js";
 import { clientIp, loadSession } from "./session.js";
 
 /** Paths a visitor without a login may use even when `settings.guestAllowed` is false. */
@@ -104,6 +104,8 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
     const matched = request.routeOptions.url ?? request.url;
     const admin = matched.startsWith("/api/admin/") || /^\/api\/admin(?:[/?]|$)/.test(request.url);
     if (!admin && !matched.startsWith("/api/") && !request.url.startsWith("/api/")) return;
+    if (ctx.config.network === "public" && !requestIsHttps(ctx, request))
+      throw forbidden("Public API requests require HTTPS through a trusted proxy");
     // Matched route metadata keeps encoded or absolute-form paths inside the same guard.
     if (admin) {
       await adminAccess(ctx, request, reply);

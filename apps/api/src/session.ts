@@ -106,7 +106,11 @@ export async function loadSession(
   if (!clientId) clientId = issueSession(ctx, reply);
   const settings = await ctx.settings();
   const ip = clientIp(ctx, request);
-  const { net, room } = resolveNet(ip, settings);
+  const group = resolveNet(ip, settings);
+  // An internet /24 or shared NAT is not a trusted neighbourhood. Only operator-defined rooms
+  // opt into shared discovery; otherwise public presence, previews and broadcasts stay private.
+  const room = group.room;
+  const net = ctx.config.network === "public" && room === null ? `client:${clientId}` : group.net;
   const [profile, identity] = await Promise.all([
     ctx.valkey.hgetall(apiKeys.profile(clientId)),
     ctx.valkey.hgetall(apiKeys.identity(clientId)),
