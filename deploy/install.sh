@@ -13,18 +13,23 @@ assert_no_database_migration
 
 DB_OPTION=""
 DB_URL_OPTION=""
+MDNS_OPTION="${GACHIPAD_MDNS:-auto}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --db) DB_OPTION="${2:?--db needs sqlite, postgres, mongodb or external}"; shift ;;
     --database-url) DB_URL_OPTION="${2:?--database-url needs a URL}"; shift ;;
+    --mdns) MDNS_OPTION=1 ;;
+    --no-mdns) MDNS_OPTION=0 ;;
     -h | --help)
-      echo "usage: ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL]"
+      echo "usage: ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns]"
       exit 0
       ;;
     *) die "unknown option $1 (./install.sh --help)" ;;
   esac
   shift
 done
+
+case "$MDNS_OPTION" in auto | 0 | 1) ;; *) die "GACHIPAD_MDNS must be 0 or 1" ;; esac
 
 valid_db_option() {
   case "$1" in sqlite | postgres | mongodb | external) return 0 ;; *) return 1 ;; esac
@@ -203,12 +208,19 @@ env_set GACHIPAD_VERSION "$VERSION"
 # The loaded images carry the bundle's registry in their names.
 REGISTRY="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
 [ -n "$REGISTRY" ] && env_set GACHIPAD_REGISTRY "$REGISTRY"
+if [ "$FRESH" = 0 ] && [ "$MDNS_OPTION" = auto ] && mdns_supported; then
+  echo 'mdns: keeping the existing choice and hostname.'
+else select_mdns "$MDNS_OPTION"; fi
 mkdir -p state && chmod 755 state
 
 echo "install: starting"
 ENV_READY=1
+if [ "$FRESH" = 0 ] && ! mdns_enabled; then
+  docker compose --profile mdns stop mdns || echo 'mdns: could not stop the existing service; inspect docker compose --profile mdns ps mdns.' >&2
+fi
 docker compose up -d --wait
 wait_healthy 120
 record_database_backend
 echo "install: gachipad $VERSION is running on port $(env_get HTTP_PORT 80)"
+mdns_addresses
 echo "install: back up with ./backup.sh, update with ./update.sh (online) or ./upgrade.sh <new bundle>"

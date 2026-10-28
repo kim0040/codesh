@@ -237,3 +237,10 @@ if [ "${#filled[@]}" -gt 0 ]; then
 else
   echo "generate-secrets: $FILE already has all secrets"
 fi
+
+# Legacy updaters do not copy new commands from their fixed file lists.
+mdns_live_lock="${GACHIPAD_LOCK_PATH:-${CODESH_LOCK_PATH:-}}"
+if [ -n "$mdns_live_lock" ] && [ -f mdns.sh ] &&
+  [ ! -f "$(dirname "$(dirname "$mdns_live_lock")")/mdns.sh" ]; then
+  echo 'mdns: after this update, install the optional tools offline in one step: ./update.sh --mdns-tools /path/to/matching-bundle.tar.gz' >&2
+fi

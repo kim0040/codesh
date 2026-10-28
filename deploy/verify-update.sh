@@ -190,7 +190,7 @@ cp "$INSTALL/.env.example" "$INSTALL/.env"
 for kv in HTTP_PORT=$P HTTPS_PORT="${VERIFY_HTTPS_PORT:-18843}" NETWORK_SUBNET=172.29.97.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off GACHIPAD_DB=mongodb; do
   sed -i "s|^${kv%%=*}=.*|$kv|" "$INSTALL/.env"
 done
-in_install ./install.sh | tail -n 2
+GACHIPAD_MDNS=0 in_install ./install.sh | tail -n 2
 rm "$INSTALL/images.tar"
 [ "$(envv GACHIPAD_REGISTRY)" = "$REG" ] || fail "GACHIPAD_REGISTRY not taken from the bundle"
 ID="$(create_data marker-one)"
@@ -269,6 +269,9 @@ ok "1.0.2 mutated DB and failed; restore precedes old API startup; all three sha
 
 step "automatic updates (dry run on this host)"
 in_install ./update.sh --enable-auto --at 04:00 --policy patch --dry-run
+
+step "Linux mDNS install and optional service control"
+VERIFY_MDNS_NETWORK_SUBNET=172.29.96.0/24 bash deploy/verify-mdns.sh "$WORK/deploy/dist/gachipad-1.0.1-linux-amd64.tar.gz" "$WORK/mdns-live" gp-dbdeploy-update-mdns
 
 step "done"
 echo "verify-update: all checks passed"

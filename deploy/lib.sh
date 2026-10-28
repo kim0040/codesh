@@ -46,6 +46,197 @@ env_set() {
   chmod 600 "$tmp" && mv "$tmp" .env
 }
 
+# Linux host networking is required; Docker Desktop's Linux VM cannot advertise the host.
+mdns_supported() {
+  [ "$(uname -s)" = Linux ] || return 1
+  [ "$(docker info --format '{{.OSType}}' 2>/dev/null)" = linux ] || return 1
+  case "$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in *[Dd]esktop*) return 1 ;; esac
+  if [ -r /proc/version ] && grep -qi microsoft /proc/version; then return 1; fi
+  local endpoint="${DOCKER_HOST:-}"
+  if [ -n "${DOCKER_CONTEXT:-}" ] || [ -z "$endpoint" ]; then
+    endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" || return 1
+  fi
+  case "$endpoint" in unix://*) return 0 ;; *) return 1 ;; esac
+}
+
+mdns_image() {
+  printf '%s/gachipad-mdns:%s' "$(env_get GACHIPAD_REGISTRY ghcr.io/kim0040)" "$(env_get GACHIPAD_VERSION "$(cat VERSION 2>/dev/null)")"
+}
+
+# Restore the optional helper after an updater with a fixed legacy file list.
+mdns_install_tools() (
+  local bundle="$1" stage status=0
+  [ -f .env ] || die '.env is missing'
+  verify_archive "$bundle"
+  stage="$(mktemp -d)"
+  trap 'rm -rf "$stage"; rm -f ./mdns.sh.new' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  tar xzf "$bundle" -C "$stage" || status=$?
+  if [ "$status" = 0 ]; then
+    local source
+    source="$(find "$stage" -maxdepth 2 -name mdns.sh -exec dirname {} \; | head -n 1)"
+    if [ -z "$source" ] || ! (verify_bundle "$source") ||
+      [ "$(cat "$source/VERSION")" != "$(env_get GACHIPAD_VERSION)" ] || [ ! -f "$source/images.tar" ]; then
+      echo 'mdns: need the verified offline bundle matching the installed version' >&2
+      status=1
+    elif docker load -i "$source/images.tar" && docker image inspect "$(mdns_image)" >/dev/null 2>&1 && cp -p "$source/mdns.sh" ./mdns.sh.new && mv ./mdns.sh.new ./mdns.sh; then
+      echo 'mdns: tools installed; run ./mdns.sh enable'
+    else status=1; fi
+  fi
+  rm -rf "$stage"
+  return "$status"
+)
+
+mdns_require_image() {
+  local image
+  image="$(mdns_image)"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "mdns: local image $image is missing; trying the registry. For offline use: ./update.sh --mdns-tools /path/to/matching-bundle.tar.gz" >&2
+    if ! docker compose --profile mdns pull mdns || ! docker image inspect "$image" >/dev/null 2>&1; then
+      echo 'mdns: cannot probe or enable without the local image; load the matching offline bundle with the command above.' >&2
+      return 1
+    fi
+  fi
+}
+
+mdns_run() {
+  # A Node deadline bounds the query; timeout also bounds Docker startup. Never pull at install time.
+  command -v timeout >/dev/null 2>&1 || return 2
+  local name="gachipad-mdns-probe-$$" status=0
+  timeout -k 1 6 docker run --rm --pull never --name "$name" --network host --read-only \
+    --cap-drop ALL --security-opt no-new-privileges -e "MDNS_IP=${MDNS_IP:-$(env_get MDNS_IP)}" \
+    "$(mdns_image)" node index.mjs "$@" 2>/dev/null || status=$?
+  if [ "$status" = 124 ] || [ "$status" = 137 ]; then
+    docker rm -f "$name" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+
+mdns_profile() {
+  local enabled="$1" profiles profile result=""
+  profiles="$(env_get COMPOSE_PROFILES)"
+  local -a entries=()
+  IFS=',' read -r -a entries <<<"$profiles"
+  for profile in ${entries[@]+"${entries[@]}"}; do
+    profile="${profile#"${profile%%[![:space:]]*}"}"
+    profile="${profile%"${profile##*[![:space:]]}"}"
+    if [ -z "$profile" ] || [ "$profile" = mdns ]; then continue; fi
+    [ -z "$result" ] || result+=,
+    result+="$profile"
+  done
+  if [ "$enabled" = 1 ]; then [ -z "$result" ] || result+=,; result+=mdns; fi
+  env_set COMPOSE_PROFILES "$result"
+  COMPOSE_PROFILES="$result"; export COMPOSE_PROFILES
+}
+
+mdns_choose_name() {
+  local original="${MDNS_HOSTNAME:-$(env_get MDNS_HOSTNAME gachipad.local)}" candidate status number
+  if [[ ! "$original" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.local$ ]] ||
+    [ "${#original}" -gt 66 ]; then die "MDNS_HOSTNAME must be a single-label .local host name (at most 60 characters before .local)"; fi
+  candidate="$original"
+  for number in {1..10}; do
+    status=0
+    mdns_run --probe "$candidate" >/dev/null || status=$?
+    case "$status" in
+      0)
+        if [ "$candidate" != "$original" ]; then echo "mdns: $original is in use; using $candidate."; fi
+        env_set MDNS_HOSTNAME "$candidate"
+        MDNS_HOSTNAME="$candidate"; export MDNS_HOSTNAME
+        return ;;
+      10) candidate="${original%.local}-$((number + 1)).local" ;;
+      125 | 126 | 127) echo "mdns: local probe image or command unavailable; keeping $original (name was not checked)." >&2; break ;;
+      124 | 137) echo "mdns: name check timed out; keeping $original (check for conflicts on your network)." >&2; break ;;
+      *) echo "mdns: name check failed; keeping $original (check for conflicts on your network)." >&2; break ;;
+    esac
+  done
+  if [ "$status" = 10 ]; then echo "mdns: no free name found in 10 attempts; keeping $original (check for conflicts on your network)." >&2; fi
+  env_set MDNS_HOSTNAME "$original"
+  MDNS_HOSTNAME="$original"; export MDNS_HOSTNAME
+}
+
+mdns_check_aliases() {
+  local alias status aliases
+  aliases="${MDNS_ALIASES:-$(env_get MDNS_ALIASES)}"
+  local -a names=()
+  IFS=',' read -r -a names <<<"$aliases"
+  for alias in ${names[@]+"${names[@]}"}; do
+    [ -n "$alias" ] || continue
+    status=0; mdns_run --probe "$alias" >/dev/null || status=$?
+    case "$status" in
+      0) ;;
+      10) echo "mdns: alias $alias is in use by another host; remove or change MDNS_ALIASES before relying on it." >&2 ;;
+      *) echo "mdns: alias $alias could not be checked; confirm it on your network." >&2 ;;
+    esac
+  done
+}
+
+select_mdns() {
+  local choice="$1" answer
+  case "$choice" in auto | 0 | 1) ;; *) die "GACHIPAD_MDNS must be 0 or 1" ;; esac
+  if ! mdns_supported; then
+    echo "mdns: disabled; a native Linux Docker host is required for multicast host networking."
+    mdns_profile 0
+    return
+  fi
+  if [ "$choice" = auto ]; then
+    choice=1
+    if [ -t 0 ]; then
+      read -r -p "Enable short name ${MDNS_HOSTNAME:-$(env_get MDNS_HOSTNAME gachipad.local)} on this network? [Y/n]: " answer || answer=""
+      case "$answer" in n | N | no | NO) choice=0 ;; esac
+    fi
+  fi
+  if [ "$choice" = 1 ]; then mdns_choose_name; mdns_check_aliases; fi
+  mdns_profile "$choice"
+}
+
+mdns_enabled() {
+  case ",${COMPOSE_PROFILES-$(env_get COMPOSE_PROFILES)}," in *,mdns,*) return 0 ;; *) return 1 ;; esac
+}
+
+mdns_host_addresses() {
+  if [ "$(uname -s)" = Linux ] && command -v ip >/dev/null 2>&1; then
+    ip -4 -o addr show scope global 2>/dev/null | awk '
+      $2 !~ /^(docker|br-|veth|virbr)/ {split($4, address, "/"); print address[1]}'
+  elif command -v ifconfig >/dev/null 2>&1; then
+    ifconfig 2>/dev/null | awk '
+      /^[^[:space:]]/ {interface=$1}
+      $1 == "inet" && $2 != "127.0.0.1" && interface !~ /^(docker|br-|veth|virbr)/ {print $2}'
+  fi
+}
+
+mdns_addresses() {
+  local port suffix="" address site public direct=0
+  port="$(env_get HTTP_PORT 80)"
+  [ "$port" = 80 ] || suffix=":$port"
+  site="$(env_get SITE_ADDRESS :80)"
+  public="$(env_get PUBLIC_URL)"
+  case "$site" in :* | http:// | http://:*) direct=1 ;; esac
+  case "$public" in https://*) direct=0 ;; esac
+  if mdns_enabled; then
+    if [ "$direct" = 1 ]; then
+      echo "mdns: open http://$(env_get MDNS_HOSTNAME gachipad.local)$suffix"
+    else
+      echo "mdns: $(env_get MDNS_HOSTNAME gachipad.local) advertised; named sites need a matching SITE_ALIASES entry (and a certificate for HTTPS; see tls/README.md)."
+    fi
+    if [ "$direct" = 1 ]; then
+      echo 'mdns: some networks and Android devices do not resolve .local; use a server IP address then.'
+    else
+      echo 'mdns: some networks and Android devices do not resolve .local; use the configured site name or an IP covered by its HTTP/TLS configuration.'
+    fi
+  fi
+  if ! mdns_supported; then
+    echo 'install: automatic server IP discovery requires a local native Linux Docker host.'
+    return
+  fi
+  while IFS= read -r address; do
+    [[ "$address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    if [ "$direct" = 1 ]; then echo "install: server address http://$address$suffix"
+    else echo "install: server IP $address (use the configured site name and its HTTP/TLS settings)"; fi
+  done < <(mdns_host_addresses || true)
+}
+
 # database_kind reads the effective deployment choice without ever printing a database URL.
 database_kind() {
   local url kind
