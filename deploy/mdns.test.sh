@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin" "$WORK/install"
-cp "$ROOT"/{install.sh,lib.sh,generate-secrets.sh,mdns.sh,.env.example} "$WORK/install/"
+cp "$ROOT"/{install.sh,preflight.sh,lib.sh,generate-secrets.sh,mdns.sh,.env.example} "$WORK/install/"
 printf '1.1.0\n' >"$WORK/install/VERSION"
 printf 'images\n' >"$WORK/install/images.tar"
 (cd "$WORK/install" && sha256sum images.tar VERSION >SHA256SUMS)
@@ -16,6 +16,9 @@ printf '%s\n' "$*" >>"$DOCKER_CALLS"
 case "$1 ${2:-}" in
   'info --format')
     case "$*" in
+      *Architecture*) echo amd64 ;;
+      *DockerRootDir*) echo /data ;;
+      *SecurityOptions*) echo '[]' ;;
       *OperatingSystem*) echo "${FAKE_DOCKER_SYSTEM:-Debian}" ;;
       *) echo "${FAKE_DOCKER_OS:-linux}" ;;
     esac ;;
@@ -119,11 +122,14 @@ for answer, flag, setting, expected in [(b'\n', [], None, True), (b'n\n', [], No
     output = b''
     deadline = time.monotonic() + 20
     sent = False
+    network_sent = False
     while process.poll() is None and time.monotonic() < deadline:
         if select.select([master], [], [], .1)[0]:
             try: chunk = os.read(master, 65536)
             except OSError: break
             output += chunk
+            if b'Network [' in output and not network_sent:
+                os.write(master, b'\n'); network_sent = True
             if b'[Y/n]:' in output and not sent:
                 os.write(master, answer); sent = True
     if process.poll() is None: process.kill()

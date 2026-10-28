@@ -76,7 +76,7 @@ awk '
 ' docker-compose.yml >"$STAGE/docker-compose.yml"
 sed -e "s/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=$VERSION/" -e "s|^GACHIPAD_REGISTRY=.*|GACHIPAD_REGISTRY=$REGISTRY|" \
   .env.example >"$STAGE/.env.example"
-cp lib.sh generate-secrets.sh install.sh upgrade.sh update.sh backup.sh restore.sh migrate-db.sh mdns.sh "$STAGE/"
+cp lib.sh preflight.sh generate-secrets.sh install.sh upgrade.sh update.sh backup.sh restore.sh migrate-db.sh mdns.sh "$STAGE/"
 cp install.ps1 gachipad.ps1 install.cmd "$STAGE/"
 touch "$STAGE/state/.gitkeep"
 cp tls/README.md tls/*.example "$STAGE/tls/"

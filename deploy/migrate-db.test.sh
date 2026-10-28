@@ -145,7 +145,7 @@ make_fixture() {
   export FIXTURE
   mkdir -p "$FIXTURE/install/state" "$FIXTURE/volumes"
   : >"$FIXTURE/run.log"
-  cp "$ROOT"/deploy/{install.sh,backup.sh,restore.sh,update.sh,upgrade.sh,migrate-db.sh,lib.sh,generate-secrets.sh,.env.example} "$FIXTURE/install/"
+  cp "$ROOT"/deploy/{install.sh,preflight.sh,backup.sh,restore.sh,update.sh,upgrade.sh,migrate-db.sh,lib.sh,generate-secrets.sh,.env.example} "$FIXTURE/install/"
   cp "$ROOT/deploy/.env.example" "$FIXTURE/install/.env"
   (
     cd "$FIXTURE/install"

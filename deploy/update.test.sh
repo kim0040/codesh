@@ -152,7 +152,7 @@ digest() { printf '%s' "$1" | sha256sum | cut -c1-64; }
 release() {
   local v="$1" dir="$F/srv/dl/kim0040/gachipad/releases/download/v$1" stage="$F/stage/gachipad-$1"
   mkdir -p "$dir" "$stage/docs" "$stage/tls" "$stage/state"
-  cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,mdns.sh,docker-compose.yml} "$stage/"
+  cp "$root"/deploy/{lib.sh,preflight.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,mdns.sh,docker-compose.yml} "$stage/"
   cp "$root/deploy/README.md" "$stage/README.md"
   printf '# doc\n' >"$stage/docs/OPERATIONS.md"
   printf '# tls\n' >"$stage/tls/tls.example"
@@ -201,7 +201,7 @@ for _ in $(seq 50); do curl -fs "$base/healthz" >/dev/null 2>&1 && break; sleep 
 
 # --- an installation of 1.0.0 --------------------------------------------------------------------
 I="$F/install"
-cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,mdns.sh,docker-compose.yml,.env.example,README.md} "$I/"
+cp "$root"/deploy/{lib.sh,preflight.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,mdns.sh,docker-compose.yml,.env.example,README.md} "$I/"
 sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" -e 's/^GACHIPAD_DB=sqlite/GACHIPAD_DB=mongodb/' "$I/.env.example" >"$I/.env"
 (cd "$I" && ./generate-secrets.sh .env >/dev/null)
 envv() { sed -n "s/^$1=//p" "$I/.env" | tail -n 1; }
