@@ -49,7 +49,7 @@ printf '%s\n' "${FAKE_OS:-Linux}"
 UNAME
 cat >"$WORK/bin/ip" <<'IP'
 #!/usr/bin/env bash
-printf '%s\n' '2: eth0 inet 192.0.2.20/24 scope global eth0' '3: docker0 inet 172.17.0.1/16 scope global docker0' '4: br-test inet 172.29.1.1/24 scope global br-test' '5: veth0 inet 172.20.0.1/24 scope global veth0' '6: virbr0 inet 192.168.122.1/24 scope global virbr0'
+printf '%s\n' '2: eth0 inet 192.0.2.20/24 scope global eth0' '3: docker0 inet 172.17.0.1/16 scope global docker0' '4: br-0123456789ab inet 172.29.1.1/24 scope global br-0123456789ab' '7: br-lan inet 192.0.2.30/24 scope global br-lan' '5: veth0 inet 172.20.0.1/24 scope global veth0' '6: virbr0 inet 192.168.122.1/24 scope global virbr0'
 IP
 cat >"$WORK/bin/curl" <<'CURL'
 #!/usr/bin/env bash
@@ -69,6 +69,9 @@ run_install
 assert_profile mdns
 grep -q 'http://gachipad.local' "$WORK/install.log"
 grep -q 'http://192.0.2.20' "$WORK/install.log"
+# Docker's own br-<12 hex> bridges are hidden; a user bridge such as br-lan carries the LAN and stays.
+grep -q 'http://192.0.2.30' "$WORK/install.log"
+if grep -q '172.29.1.1' "$WORK/install.log"; then echo 'listed a docker bridge' >&2; exit 1; fi
 grep -q 'Android' "$WORK/install.log"
 run_install --no-mdns
 assert_profile ''
@@ -114,7 +117,7 @@ for answer, flag, setting, expected in [(b'\n', [], None, True), (b'n\n', [], No
     env = os.environ.copy()
     if setting is not None: env['GACHIPAD_MDNS'] = setting
     master, slave = pty.openpty()
-    process = subprocess.Popen(['./install.sh', '--db', 'sqlite', *flag], stdin=slave, stdout=slave, stderr=slave, env=env)
+    process = subprocess.Popen(['./install.sh', '--db', 'sqlite', '--network', 'internal', *flag], stdin=slave, stdout=slave, stderr=slave, env=env)
     os.close(slave)
     output = b''
     deadline = time.monotonic() + 20
@@ -181,6 +184,13 @@ for setting in desktop remote context; do
   assert_profile ''
   if grep -q -- '--probe' "$DOCKER_CALLS"; then exit 1; fi
 done
+# Only a Docker Desktop daemon is rejected by name; DOCKER_HOST wins over DOCKER_CONTEXT like the docker CLI.
+FAKE_DOCKER_SYSTEM='Ubuntu 24.04 LTS Desktop' run_install --mdns
+assert_profile mdns
+DOCKER_HOST=unix:///var/run/docker.sock DOCKER_CONTEXT=remote FAKE_DOCKER_ENDPOINT=tcp://remote:2375 run_install --mdns
+assert_profile mdns
+DOCKER_HOST=ssh://remote DOCKER_CONTEXT=local run_install --mdns
+assert_profile ''
 # A genuinely hung Docker invocation is killed by the wrapper and removed explicitly.
 start=$SECONDS
 PROBE_MODE=hang run_install --mdns
@@ -220,6 +230,7 @@ for site in example.test http://example.test :80; do
   if grep -q 'open http://\|server address http://' "$WORK/addresses.log"; then exit 1; fi
   grep -q SITE_ALIASES "$WORK/addresses.log"
   grep -q 'server IP 192.0.2.20' "$WORK/addresses.log"
+  grep -q 'server IP 192.0.2.30' "$WORK/addresses.log"
   if grep -q '172.17.\|172.29.\|172.20.\|192.168.122.' "$WORK/addresses.log"; then exit 1; fi
 done
 # A failed optional stop on a rerun cannot fail the installation.

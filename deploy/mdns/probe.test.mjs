@@ -5,7 +5,16 @@ import { networkInterfaces } from "node:os";
 import { test } from "node:test";
 import multicastDns from "multicast-dns";
 
-async function probe(answer, { malformed = false, name } = {}) {
+// Preload that makes os.networkInterfaces() report the given interfaces.
+const fakeInterfaces = (interfaces) => [
+  "--import",
+  `data:text/javascript,${encodeURIComponent(
+    `import{syncBuiltinESMExports}from"node:module";import os from"node:os";os.networkInterfaces=()=>(${JSON.stringify(interfaces)});syncBuiltinESMExports();`,
+  )}`,
+];
+const ipv4 = (address) => [{ address, family: "IPv4", internal: false }];
+
+async function probe(answer, { malformed = false, name, interfaces } = {}) {
   name ||= `gp-probe-${process.pid}-${Math.random().toString(16).slice(2)}.local`;
   const responder = multicastDns();
   responder.on("error", () => {});
@@ -23,9 +32,13 @@ async function probe(answer, { malformed = false, name } = {}) {
       );
     }
   });
-  const child = spawn(process.execPath, ["index.mjs", "--probe", name], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    [...(interfaces ? fakeInterfaces(interfaces) : []), "index.mjs", "--probe", name],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   let output = "";
   child.stdout.on("data", (chunk) => {
     output += chunk;
@@ -52,7 +65,7 @@ test("foreign address returns conflict exit 10 despite malformed unrelated traff
 });
 test("own interface address returns exit 0", async () => {
   const own = Object.entries(networkInterfaces())
-    .filter(([name]) => !/^(docker|br-|veth|virbr)/.test(name))
+    .filter(([name]) => !/^(docker|veth|virbr|br-[0-9a-f]{12}$)/.test(name))
     .flatMap(([, entries]) => entries || [])
     .find((entry) => !entry.internal && entry.family === "IPv4");
   assert.ok(own);
@@ -66,4 +79,46 @@ test("goodbye records do not cause conflicts", async () => {
 });
 test("invalid probe input returns exit 2", async () => {
   assert.equal(await probe(undefined, { name: "invalid.example" }), 2);
+});
+test("a user bridge such as br-lan counts as an interface, docker's br-<12 hex> does not", async () => {
+  assert.equal(await probe(undefined, { interfaces: { "br-lan": ipv4("192.0.2.30") } }), 0);
+  assert.equal(
+    await probe(undefined, { interfaces: { "br-0123456789ab": ipv4("172.29.1.1") } }),
+    2,
+  );
+});
+
+// The sidecar publishes until stopped; resolves with its exit code, or null when it kept running.
+async function sidecar(interfaces, env = {}) {
+  const child = spawn(process.execPath, [...fakeInterfaces(interfaces), "index.mjs"], {
+    env: { ...process.env, MDNS_HOSTNAME: `gp-side-${process.pid}.local`, ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk;
+  });
+  const exited = new Promise((resolve) => child.on("exit", resolve));
+  const code = await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 1500))]);
+  if (code === undefined) {
+    child.kill("SIGTERM");
+    await exited;
+    return { code: null, output };
+  }
+  return { code, output };
+}
+test("sidecar exits 1 with a clear message when no usable IPv4 address exists", async () => {
+  const result = await sidecar({ "br-0123456789ab": ipv4("172.29.1.1") });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /no usable IPv4 address.*MDNS_IP/);
+});
+test("sidecar keeps running without a usable interface when MDNS_IP is set", async () => {
+  const result = await sidecar(
+    { "br-0123456789ab": ipv4("172.29.1.1") },
+    { MDNS_IP: "192.0.2.30" },
+  );
+  assert.equal(result.code, null, result.output);
 });

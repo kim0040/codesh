@@ -10,7 +10,7 @@ import { Bonjour } from "bonjour-service";
 import multicastDns from "multicast-dns";
 
 const addresses = Object.entries(networkInterfaces())
-  .filter(([name]) => !/^(docker|br-|veth|virbr)/.test(name))
+  .filter(([name]) => !/^(docker|veth|virbr|br-[0-9a-f]{12}$)/.test(name))
   .flatMap(([, entries]) => entries || [])
   .filter((entry) => entry && !entry.internal);
 // Exit 10 for a conflicting answer, 0 for silence/our own addresses, 2 for probe errors.
@@ -80,6 +80,11 @@ const ip = process.env.MDNS_IP || "";
 const invalid = hosts.find((name) => !validName(name));
 if (invalid !== undefined) {
   console.error("mdns: MDNS_HOSTNAME and MDNS_ALIASES must be single-label .local host names");
+  process.exit(1);
+}
+
+if (!ip && !addresses.some((entry) => entry.family === "IPv4")) {
+  console.error("mdns: no usable IPv4 address on this host; set MDNS_IP in .env");
   process.exit(1);
 }
 
