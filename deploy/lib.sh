@@ -145,7 +145,8 @@ migration_recovery_hint() {
     printf 'migrate-db: migration in progress (pid %s); wait.\n' "$owner"
     return
   fi
-  echo 'migrate-db: if no migrate-db.sh process is running, this marker may be stale; follow the recovery recipe below.'
+  # migration_cleanup passes its own stage: that marker was left on purpose, not stale.
+  [ -n "${1:-}" ] || echo 'migrate-db: if no migrate-db.sh process is running, this marker may be stale; follow the recovery recipe below.'
   phase="$(sed -n 's/^phase=//p' state/transaction 2>/dev/null)"
   source="$(sed -n 's/^source=//p' state/transaction 2>/dev/null)"
   target="$(sed -n 's/^destination=//p' state/transaction 2>/dev/null)"
@@ -153,7 +154,7 @@ migration_recovery_hint() {
   run="$(sed -n 's/^run=//p' state/transaction 2>/dev/null)"
   echo 'migrate-db: first verify the migration process has exited; clear shell overrides: unset DATABASE_URL GACHIPAD_DB COMPOSE_PROFILES GACHIPAD_DATABASE_URL'
   if [ "$phase" = live ]; then
-    echo 'migrate-db: keep the destination and roll forward first: docker compose ps; check /healthz and shares/uploads, then clear the marker once healthy.'
+    echo 'migrate-db: if the cmp check below exits 0, keep the destination and roll forward first: docker compose ps; check /healthz and shares/uploads, then clear the marker once healthy. If it exits 1, do not clear the marker yet.'
     echo 'migrate-db: rollback requires reconciling writes accepted since the switch first; preserve both databases and the snapshot until reconciled.'
   else
     if [[ "$run" =~ ^[a-f0-9]{32}$ ]]; then
@@ -168,7 +169,8 @@ migration_recovery_hint() {
   fi
   if [[ "$stage" =~ ^\.env\.migrate-db\.[A-Za-z0-9]+$ ]] && [ -f "$stage/original.env" ]; then
     if [ "$phase" = live ]; then
-      printf 'migrate-db: identify the active backend configuration: cmp -s .env %q/.env (exit 0: new backend is active; roll forward; exit 1: old backend was restored; treat as rollback and reconcile destination writes; other exits: inspect manually).\n' "$stage"
+      printf 'migrate-db: identify the active backend configuration: cmp -s .env %q/.env (exit 0: new backend is active; roll forward; exit 1: old backend was restored; treat as rollback and reconcile destination writes, or .env was edited by hand; other exits: inspect manually).\n' "$stage"
+      printf 'migrate-db: on exit 1, restart the restored backend: docker compose up -d --pull never --wait; or roll forward instead: cp -p %q/.env .env and write the destination kind to state/database-kind.\n' "$stage"
     fi
     if [ "$phase" != preflight ] && [ "$phase" != live ]; then
       case "$target" in

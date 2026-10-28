@@ -471,6 +471,8 @@ stage="$(sed -n 's/^snapshot=//p' "$FIXTURE/install/state/transaction")"
 if cmp -s "$FIXTURE/install/.env" "$FIXTURE/install/$stage/.env"; then exit 1; else [ "$?" = 1 ]; fi
 grep -Fq "cmp -s .env $stage/.env" "$FIXTURE/install/state/migrate-db.log"
 grep -q 'old backend was restored; treat as rollback and reconcile destination writes' "$FIXTURE/install/state/migrate-db.log"
+grep -q 'on exit 1, restart the restored backend' "$FIXTURE/install/state/migrate-db.log"
+if grep -q 'marker may be stale' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
 [ -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
 if grep -q 'rm -sf postgres' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
 echo 'ok: ingress and source-restart failure returns 3; live recipe identifies restored source configuration'
@@ -622,7 +624,7 @@ CRASH
       backup) grep -q 'startup may have initialized' "$FIXTURE/refusal.log" ;;
       copy) grep -q 'partial copy' "$FIXTURE/refusal.log" ;;
       switch) grep -q 'retain and reconcile' "$FIXTURE/refusal.log" ;;
-      live) grep -q 'roll forward first: docker compose ps; check /healthz' "$FIXTURE/refusal.log"; grep -q 'rollback requires reconciling writes' "$FIXTURE/refusal.log" ;;
+      live) grep -q 'roll forward first: docker compose ps; check /healthz' "$FIXTURE/refusal.log"; grep -q 'If it exits 1, do not clear the marker yet' "$FIXTURE/refusal.log"; grep -q 'rollback requires reconciling writes' "$FIXTURE/refusal.log" ;;
     esac
     case "$phase" in
       preflight | live) if grep -q 'rm -sf postgres' "$FIXTURE/refusal.log"; then exit 1; fi ;;
