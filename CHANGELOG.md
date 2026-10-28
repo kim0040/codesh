@@ -9,6 +9,7 @@ text of its GitHub release (RELEASING.md).
 
 ### Added
 
+- Linux installer preflight check and unattended options (`./install.sh --check` to verify host prerequisites without changing settings, and `--yes` for unattended execution), with support for online installations directly from a git clone deploy directory.
 - Network deployment choice in the installer (`--network internal|public`, `--domain`, `--behind-proxy`, `--acme-email`) supporting internal network mode and hardened public internet hosting with automatic ACME HTTPS or TLS proxy integration.
 - Windows installer (`install.cmd`, `install.ps1`, and `gachipad.ps1` command wrapper) to deploy, configure, and manage gachipad inside WSL 2 with Docker Desktop.
 - Linux installer mDNS option with conflict resolution (`--mdns`, `--no-mdns`, `GACHIPAD_MDNS`) and the `./mdns.sh` management script (`enable`, `disable`, `status`) to manage local LAN advertisement without restarting application services.

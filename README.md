@@ -104,6 +104,8 @@ Upgrading an existing 1.0.x installation? See [Renaming codesh to gachipad (upgr
 
 gachipad runs on Linux hosts with Docker Engine and the Docker Compose plugin (`docker compose`), or on Windows 10/11 using WSL 2 and Docker Desktop. Only Caddy publishes ports: HTTP (80) and HTTPS (443).
 
+Run `./install.sh --check` to test host prerequisites (Docker, ports, memory, disk, firewall, filesystem) before installing; it changes nothing on the host. Pass `--yes` for unattended installations without interactive prompts. `install.sh` runs either from `deploy/` of a git clone (online mode: pulls released images when `images.tar` is absent) or from an extracted offline bundle.
+
 | Scale | Minimum | Recommended | Notes |
 |---|---|---|---|
 | One share with 50 people | 2 vCPU, 4 GB RAM, 20 GB SSD | 4 vCPU, 8 GB RAM | with 4 GB RAM set `MONGO_CACHE_GB=1` |
@@ -114,18 +116,19 @@ gachipad runs on Linux hosts with Docker Engine and the Docker Compose plugin (`
 When running `install.sh`, select either internal network mode or public internet mode:
 
 - **Internal network** (`./install.sh --network internal`, default): Designed for internal networks. Supports plain HTTP or internal HTTPS (using Caddy's internal CA or an operator-supplied certificate), offers `gachipad.local` via mDNS on native Linux, and uses generous internal resource and rate limits.
-- **Public internet** (`./install.sh --network public --domain share.example.org`): Designed for direct internet hosting. Requires a public DNS name you own whose A/AAAA records point to the host, and inbound TCP ports 80 and 443 reachable. Caddy automatically provisions and renews free certificates from an ACME CA (Let's Encrypt or ZeroSSL) and redirects HTTP to HTTPS. To use an external TLS-terminating reverse proxy instead of Caddy direct HTTPS, pass `--behind-proxy <CIDR>` (e.g. `PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32`). An optional ACME account email can be set with `--acme-email ops@example.org`.
+- **Public internet** (`./install.sh --network public --domain share.example.org`): Designed for direct internet hosting. Requires a public DNS name you own with an A record pointing to the host's public IPv4 address (or the TLS proxy), and inbound TCP ports 80 and 443 reachable. An AAAA record should only be published after setting up a source-preserving dual-stack Docker network (see [docs/OPERATIONS.md](docs/OPERATIONS.md#172-공개-인터넷-모드의-주요-변경-사항)). Caddy automatically provisions and renews free certificates from an ACME CA (Let's Encrypt or ZeroSSL) and redirects HTTP to HTTPS. To use an external TLS-terminating reverse proxy instead of Caddy direct HTTPS, pass `--behind-proxy <CIDR>` (e.g. `PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32`). An optional ACME account email can be set with `--acme-email ops@example.org`.
 
 Public mode enforces HTTPS and HSTS, disables mDNS, isolates client discovery to prevent local network leakages, restricts the admin console to loopback and private CIDRs by default, and applies strict abuse and quota limits. The only extra outside network traffic in public mode is Caddy's ACME exchange for certificate issuance and renewal; proxy-terminated public mode and internal mode introduce no new external requests.
 
-### With internet: Docker Compose
+### With internet: git clone
 
 ```sh
 git clone https://github.com/kim0040/gachipad.git && cd gachipad/deploy
-cp .env.example .env && ./generate-secrets.sh     # once; .env stays on the host
-docker compose pull && docker compose up -d       # public images from ghcr.io/kim0040
+./install.sh                                      # pulls released images, writes .env, starts stack
 curl http://localhost/healthz
 ```
+
+Run `./install.sh --check` to test host prerequisites first (changes nothing), or `--yes` for unattended installations without interactive prompts. `install.sh` runs from `deploy/` of a git clone (pulling released images when `images.tar` is absent) as well as inside the offline bundle. For the manual Docker Compose commands without `install.sh`, see [deploy/README.md](deploy/README.md).
 
 ### Without internet: the offline bundle
 
@@ -160,7 +163,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Network internal
 Main switches for `install.ps1`:
 - `-Network internal|public`: Choose internal network or public internet deployment mode.
 - `-Domain <domain>` and `-AcmeEmail <email>`: Domain name and optional ACME account email for public mode.
-- `-BehindProxy`: Enable reverse-proxy mode behind a TLS-terminating proxy.
+- `-BehindProxy <CIDR>`: Enable reverse-proxy mode behind a TLS-terminating proxy (e.g. `-BehindProxy 192.0.2.7/32`, forwarded as `--behind-proxy <CIDR>`).
 - `-Db sqlite|postgres|mongodb|external` and `-DatabaseUrl <URL>`: Select the database backend.
 - `-Distro <distro>` and `-InstallDir <dir>`: Target WSL distribution and Linux directory (defaults to `~/gachipad` in the Linux filesystem; drvfs `/mnt/c` paths are rejected).
 - `-OpenFirewall`: Automatically add inbound TCP firewall rules for HTTP/HTTPS (requires PowerShell run as Administrator).
