@@ -285,10 +285,10 @@ network_addresses() {
 mdns_supported() {
   [ "$(uname -s)" = Linux ] || return 1
   [ "$(docker info --format '{{.OSType}}' 2>/dev/null)" = linux ] || return 1
-  case "$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in *[Dd]esktop*) return 1 ;; esac
+  case "$(docker info --format '{{.OperatingSystem}}' 2>/dev/null)" in Docker\ Desktop*) return 1 ;; esac
   if [ -r /proc/version ] && grep -qi microsoft /proc/version; then return 1; fi
   local endpoint="${DOCKER_HOST:-}"
-  if [ -n "${DOCKER_CONTEXT:-}" ] || [ -z "$endpoint" ]; then
+  if [ -z "$endpoint" ]; then
     endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" || return 1
   fi
   case "$endpoint" in unix://*) return 0 ;; *) return 1 ;; esac
@@ -298,7 +298,60 @@ mdns_image() {
   printf '%s/gachipad-mdns:%s' "$(env_get GACHIPAD_REGISTRY ghcr.io/kim0040)" "$(env_get GACHIPAD_VERSION "$(cat VERSION 2>/dev/null)")"
 }
 
-# Restore the optional helper after an updater with a fixed legacy file list.
+# mdns_manifest_entry TAG < manifest.json: line 1 is the manifest reduced to the entry tagged TAG
+# (RepoTags reduced to TAG), the other lines are its config and layer files. Fails unless exactly one matches.
+mdns_manifest_entry() {
+  if command -v node >/dev/null 2>&1; then
+    node -e '
+      const tag = process.argv[1];
+      const found = JSON.parse(require("node:fs").readFileSync(0, "utf8")).filter((e) => (e.RepoTags || []).includes(tag));
+      if (found.length !== 1) process.exit(1);
+      found[0].RepoTags = [tag];
+      console.log(JSON.stringify([found[0]]));
+      console.log([found[0].Config, ...found[0].Layers].join("\n"));
+    ' "$1"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import json, sys
+found = [e for e in json.load(sys.stdin) if sys.argv[1] in (e.get("RepoTags") or [])]
+if len(found) != 1: sys.exit(1)
+found[0]["RepoTags"] = [sys.argv[1]]
+print(json.dumps([found[0]]))
+print("\n".join([found[0]["Config"], *found[0]["Layers"]]))
+' "$1"
+  elif command -v jq >/dev/null 2>&1; then
+    jq -er --arg tag "$1" '[.[] | select((.RepoTags // []) | index($tag)) | .RepoTags = [$tag]] |
+      select(length == 1) | (tojson, .[0].Config, .[0].Layers[])'
+  else return 1; fi
+}
+
+# mdns_filter_images ARCHIVE DIR OUT: a docker archive with only the mdns image of ARCHIVE, so loading it
+# cannot re-tag the other images of the bundle. DIR is scratch space, OUT must lie outside it.
+mdns_filter_images() {
+  local archive="$1" dir="$2" out="$3" lines member target
+  local -a files=() extra=()
+  mkdir -p "$dir" && tar xf "$archive" -C "$dir" manifest.json 2>/dev/null || return 1
+  lines="$(mdns_manifest_entry "$(mdns_image)" <"$dir/manifest.json")" || return 1
+  printf '%s\n' "${lines%%$'\n'*}" >"$dir/manifest.json"
+  while IFS= read -r member; do
+    [[ "$member" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@+-]*$ && "/$member/" != */../* ]] || return 1
+    files+=("$member")
+  done <<<"${lines#*$'\n'}"
+  tar xf "$archive" -C "$dir" "${files[@]}" || return 1
+  for member in "${files[@]}"; do
+    [ -L "$dir/$member" ] || continue
+    # A layer shared with another directory of the archive is stored as ../<id>/layer.tar.
+    target="$(readlink "$dir/$member")"
+    [[ "$target" =~ ^\.\./([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$ ]] || return 1
+    extra+=("${BASH_REMATCH[1]}")
+  done
+  if [ "${#extra[@]}" -gt 0 ]; then tar xf "$archive" -C "$dir" "${extra[@]}" || return 1; fi
+  for member in "${files[@]}"; do [ -e "$dir/$member" ] || return 1; done
+  tar cf "$out" -C "$dir" manifest.json "${files[@]}" ${extra[@]+"${extra[@]}"} || return 1
+  rm -rf "$dir"
+}
+
+# Restore the optional helper after an updater with a fixed legacy file list. Only the mdns image is loaded.
 mdns_install_tools() (
   local bundle="$1" stage status=0
   [ -f .env ] || die '.env is missing'
@@ -313,10 +366,15 @@ mdns_install_tools() (
     local source
     source="$(find "$stage" -maxdepth 2 -name mdns.sh -exec dirname {} \; | head -n 1)"
     if [ -z "$source" ] || ! (verify_bundle "$source") ||
-      [ "$(cat "$source/VERSION")" != "$(env_get GACHIPAD_VERSION)" ] || [ ! -f "$source/images.tar" ]; then
+      [ "$(cat "$source/VERSION")" != "$(env_get GACHIPAD_VERSION)" ] || [ ! -f "$source/images.tar" ] ||
+      ! grep -Eq '^[0-9a-fA-F]{64} [ *](\./)?mdns\.sh$' "$source/SHA256SUMS" ||
+      ! grep -Eq '^[0-9a-fA-F]{64} [ *](\./)?images\.tar$' "$source/SHA256SUMS"; then
       echo 'mdns: need the verified offline bundle matching the installed version' >&2
       status=1
-    elif docker load -i "$source/images.tar" && docker image inspect "$(mdns_image)" >/dev/null 2>&1 && cp -p "$source/mdns.sh" ./mdns.sh.new && mv ./mdns.sh.new ./mdns.sh; then
+    elif ! mdns_filter_images "$source/images.tar" "$stage/image" "$stage/mdns-image.tar"; then
+      echo "mdns: images.tar has no usable $(mdns_image) entry (host node, python3 or jq is needed to read it); nothing was loaded" >&2
+      status=1
+    elif docker load -i "$stage/mdns-image.tar" && docker image inspect "$(mdns_image)" >/dev/null 2>&1 && cp -p "$source/mdns.sh" ./mdns.sh.new && mv ./mdns.sh.new ./mdns.sh; then
       echo 'mdns: tools installed; run ./mdns.sh enable'
     else status=1; fi
   fi
@@ -434,11 +492,11 @@ mdns_enabled() {
 mdns_host_addresses() {
   if [ "$(uname -s)" = Linux ] && command -v ip >/dev/null 2>&1; then
     ip -4 -o addr show scope global 2>/dev/null | awk '
-      $2 !~ /^(docker|br-|veth|virbr)/ {split($4, address, "/"); print address[1]}'
+      $2 !~ /^(docker|veth|virbr)/ && !(length($2) == 15 && $2 ~ /^br-[0-9a-f]+$/) {split($4, address, "/"); print address[1]}'
   elif command -v ifconfig >/dev/null 2>&1; then
     ifconfig 2>/dev/null | awk '
-      /^[^[:space:]]/ {interface=$1}
-      $1 == "inet" && $2 != "127.0.0.1" && interface !~ /^(docker|br-|veth|virbr)/ {print $2}'
+      /^[^[:space:]]/ {interface=$1; sub(/:$/, "", interface)}
+      $1 == "inet" && $2 != "127.0.0.1" && interface !~ /^(docker|veth|virbr)/ && !(length(interface) == 15 && interface ~ /^br-[0-9a-f]+$/) {print $2}'
   fi
 }
 

@@ -125,7 +125,13 @@ if [ "$1" = inspect ]; then
   esac
   printf '%s false\n' "$writer_exit"; exit 0
 fi
+if [ "$1" = load ]; then
+  # Record which tags and files an archive would import (the bundle fixtures are plain tar files).
+  { tar -xOf "$3" manifest.json | grep -o '"RepoTags":\[[^]]*\]'; tar -tf "$3"; } >>"$FAKE_LOADED" 2>/dev/null || true
+  exit 0
+fi
 if [ "$1" = image ] && [ "$2" = inspect ]; then
+  [ -z "${FAKE_IMAGE_INSPECT_FAIL:-}" ] || exit 1
   ref="${!#}"
   name="${ref%:*}"
   printf '%s@sha256:%s\n' "$name" "$(printf '%s' "${name##*/}${FAKE_DIGEST_SALT:-}" | sha256sum | cut -c1-64)"
@@ -141,7 +147,7 @@ cat >"$F/bin/crontab" <<'CRONTAB'
 if [ "${1:-}" = -l ]; then cat "$CRONTAB_FILE" 2>/dev/null || exit 1; else cat >"$CRONTAB_FILE.new" && mv "$CRONTAB_FILE.new" "$CRONTAB_FILE"; fi
 CRONTAB
 chmod +x "$F/bin"/*
-export FAKE_DB="$F/database"
+export FAKE_DB="$F/database" FAKE_LOADED="$F/loaded"
 printf 'initial-data\n' >"$FAKE_DB"
 export PATH="$F/bin:$PATH" DOCKER_CALLS="$F/docker.calls" CRONTAB_FILE="$F/crontab"
 export UPDATE_API_URL="$base/api" UPDATE_DOWNLOAD_URL="$base/dl" UPDATE_HEALTH_TIMEOUT=3
@@ -209,6 +215,32 @@ status() { cat "$I/state/update.json"; }
 # Wait for the updater's process-substitution logger to close before reading its output.
 run() { (cd "$I" && "$@") 2>&1 | cat >"$F/run.log"; }
 calls() { cat "$DOCKER_CALLS" 2>/dev/null || true; }
+# images_tar OUT VERSION [legacy]: a docker-save style archive of the web, api and mdns images. The legacy
+# layout uses <id>/layer.tar and stores the mdns layer as a link to the web layer.
+images_tar() {
+  local out="$1" v="$2" legacy="${3:-}" w n config layer manifest="" sep=""
+  w="$(mktemp -d "$F/images.XXXXXX")"
+  for n in web api mdns; do
+    if [ -z "$legacy" ]; then
+      mkdir -p "$w/blobs/sha256"
+      config="blobs/sha256/$(digest "config-$n")" layer="blobs/sha256/$(digest "layer-$n")"
+      printf 'config-%s\n' "$n" >"$w/$config"
+      printf 'layer-%s\n' "$n" >"$w/$layer"
+    else
+      mkdir -p "$w/$n"
+      config="$n.json" layer="$n/layer.tar"
+      printf 'config-%s\n' "$n" >"$w/$config"
+      printf 'layer-%s\n' "$n" >"$w/$layer"
+    fi
+    manifest+="$sep{\"Config\":\"$config\",\"RepoTags\":[\"ghcr.io/kim0040/gachipad-$n:$v\"],\"Layers\":[\"$layer\"]}"
+    sep=,
+  done
+  if [ -n "$legacy" ]; then rm "$w/mdns/layer.tar" && ln -s ../web/layer.tar "$w/mdns/layer.tar"; fi
+  printf '[%s]\n' "$manifest" >"$w/manifest.json"
+  printf '{}\n' >"$w/index.json"
+  (cd "$w" && tar cf "$out" -- *)
+  rm -rf "$w"
+}
 
 step "--check: newest of this major and the new major, nothing changes"
 run ./update.sh --check || fail "--check failed"
@@ -263,7 +295,7 @@ if [ -n "${MDNS_LEGACY_FIXTURE:-}" ]; then
   [ ! -e "$I/mdns.sh" ] || fail 'old updater unexpectedly copied the new helper'
   grep -q './update.sh --mdns-tools /path/to/matching-bundle.tar.gz' "$F/run.log" || fail 'old updater did not print recovery command'
   stage="$F/stage/gachipad-1.0.1"
-  printf 'offline images\n' >"$stage/images.tar"
+  images_tar "$stage/images.tar" 1.0.1
   # shellcheck disable=SC2094 # manifest is excluded from find
   (cd "$stage" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
   tar czf "$F/legacy-offline.tar.gz" -C "$F/stage" gachipad-1.0.1
@@ -730,7 +762,7 @@ ok "unfinished migration retains marker and prints exact snapshot recovery recip
 step "offline release SHA256SUMS and a shared lock for every entry point"
 # Make an offline archive whose scripts are the same transaction engine.
 offline="$F/stage/gachipad-1.1.0"
-printf 'images\n' >"$offline/images.tar"
+images_tar "$offline/images.tar" 1.1.0
 # shellcheck disable=SC2094 # manifest is excluded from find
 (cd "$offline" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS)
 tar czf "$F/offline.tar.gz" -C "$F/stage" gachipad-1.1.0
@@ -796,11 +828,22 @@ LOAD
 # Fixed-list legacy updaters can omit the helper; same-version tools repair must be offline.
 rm "$I/mdns.sh"
 cp "$I/.env" "$F/mdns-tools.env"
+# Everything outside state/ and backups/, so a repair is shown to touch nothing but mdns.sh.
+tree_sums() { (cd "$I" && find . \( -path ./state -o -path ./backups \) -prune -o -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum); }
+tree_sums >"$F/tree.before"
 : >"$DOCKER_CALLS"
+: >"$FAKE_LOADED"
 run ./update.sh --mdns-tools "$F/offline.tar.gz" || fail 'offline mDNS tools repair failed'
 [ -x "$I/mdns.sh" ] || fail 'offline tools repair did not install helper'
 cmp "$I/.env" "$F/mdns-tools.env" || fail 'tools repair changed settings'
+tree_sums | grep -v '  \./mdns\.sh$' | cmp - "$F/tree.before" || fail 'tools repair changed more than mdns.sh'
 calls | grep -q '^load -i ' || fail 'tools repair did not load offline image archive'
+# Only the mdns image is imported: no other tag is re-pointed and no other image's files are read in.
+[ "$(grep -c RepoTags "$FAKE_LOADED")" = 1 ] || fail 'tools repair loaded other image tags'
+grep -qxF '"RepoTags":["ghcr.io/kim0040/gachipad-mdns:1.1.0"]' "$FAKE_LOADED" || fail 'tools repair did not load the mdns tag'
+grep -q "$(digest config-mdns)" "$FAKE_LOADED" || fail 'mdns config missing from the loaded archive'
+grep -q "$(digest layer-mdns)" "$FAKE_LOADED" || fail 'mdns layer missing from the loaded archive'
+grep -q "$(digest config-web)\|$(digest layer-web)\|$(digest config-api)\|$(digest layer-api)" "$FAKE_LOADED" && fail 'tools repair loaded files of other images'
 calls | grep -q '^compose .*\(pull\|up\|stop\)' && fail 'tools repair changed services or used registry'
 # The new staged generator prints the repair command even when the old updater owns FILES.
 rm "$I/mdns.sh"
@@ -809,6 +852,90 @@ cp "$I/.env" "$F/hint/.env"
 GACHIPAD_LOCK_PATH="$I/state/install.lock" bash "$root/deploy/generate-secrets.sh" "$F/hint/.env" >"$F/hint.log" 2>&1
 grep -q './update.sh --mdns-tools /path/to/matching-bundle.tar.gz' "$F/hint.log" || fail 'legacy first-update tools hint missing'
 run ./update.sh --mdns-tools "$F/offline.tar.gz" || fail 'repeat tools repair failed'
+
+step "--mdns-tools refuses anything but the verified, matching bundle"
+# A sentinel helper makes a wrongful install visible: a refusal leaves the whole installation byte-identical.
+printf '#!/bin/sh\n# sentinel helper\n' >"$I/mdns.sh"
+chmod 755 "$I/mdns.sh"
+tools_tree() { rm -rf "$F/tools/$1" && mkdir -p "$F/tools/$1" && cp -a "$F/stage/gachipad-1.1.0" "$F/tools/$1/"; }
+tools_sums() {
+  # shellcheck disable=SC2094 # manifest is excluded from find
+  (cd "$F/tools/$1/gachipad-1.1.0" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum >SHA256SUMS)
+}
+tools_pack() {
+  tar czf "$F/tools/$1/bundle.tar.gz" -C "$F/tools/$1" gachipad-1.1.0
+  (cd "$F/tools/$1" && sha256sum bundle.tar.gz >bundle.tar.gz.sha256)
+}
+# tools_refuse CASE MESSAGE: update.sh must fail with MESSAGE, load nothing and leave the installation unchanged
+tools_refuse() {
+  tree_sums >"$F/tree.before"
+  : >"$DOCKER_CALLS"
+  run ./update.sh --mdns-tools "$F/tools/$1/bundle.tar.gz" && fail "$1: accepted"
+  grep -q -- "$2" "$F/run.log" || fail "$1: expected '$2'"
+  calls | grep -q '^load -i ' && fail "$1: loaded images"
+  tree_sums | cmp - "$F/tree.before" || fail "$1: changed the installation"
+  [ ! -e "$I/mdns.sh.new" ] || fail "$1: left mdns.sh.new"
+}
+tools_tree good && tools_sums good && tools_pack good
+tools_tree tampered && tools_sums tampered && tools_pack tampered
+printf '%s  bundle.tar.gz\n' "$(digest tampered)" >"$F/tools/tampered/bundle.tar.gz.sha256"
+tools_refuse tampered 'bundle checksum mismatch'
+tools_tree inner && tools_sums inner
+printf '# changed\n' >>"$F/tools/inner/gachipad-1.1.0/mdns.sh"
+tools_pack inner
+tools_refuse inner 'bundle content checksum mismatch'
+tools_tree version && printf '1.1.1\n' >"$F/tools/version/gachipad-1.1.0/VERSION" && tools_sums version && tools_pack version
+tools_refuse version 'need the verified offline bundle matching the installed version'
+tools_tree online && rm "$F/tools/online/gachipad-1.1.0/images.tar" && tools_sums online && tools_pack online
+tools_refuse online 'need the verified offline bundle matching the installed version'
+for listed in mdns.sh images.tar; do
+  tools_tree "unlisted-$listed" && tools_sums "unlisted-$listed"
+  sed -i "/  \.\/${listed//./\\.}\$/d" "$F/tools/unlisted-$listed/gachipad-1.1.0/SHA256SUMS"
+  grep -q "$listed" "$F/tools/unlisted-$listed/gachipad-1.1.0/SHA256SUMS" && fail "fixture still lists $listed"
+  tools_pack "unlisted-$listed"
+  tools_refuse "unlisted-$listed" 'need the verified offline bundle matching the installed version'
+done
+tools_tree nomdns && images_tar "$F/tools/nomdns/gachipad-1.1.0/images.tar" 9.9.9 && tools_sums nomdns && tools_pack nomdns
+tools_refuse nomdns 'has no usable ghcr.io/kim0040/gachipad-mdns:1.1.0 entry'
+touch "$I/state/transaction"
+tools_refuse good 'unfinished transaction'
+rm "$I/state/transaction"
+(cd "$I" && . ./lib.sh; install_lock; trap install_unlock EXIT; touch "$F/tools-lock-held"; sleep 3) &
+holder=$!
+for _ in $(seq 100); do [ -f "$F/tools-lock-held" ] && break; sleep .02; done
+tools_refuse good 'another update'
+wait "$holder"
+# The image must exist after the load; otherwise nothing is installed.
+tree_sums >"$F/tree.before"
+: >"$DOCKER_CALLS"
+FAKE_IMAGE_INSPECT_FAIL=1 run ./update.sh --mdns-tools "$F/tools/good/bundle.tar.gz" && fail 'accepted a load that left no mdns image'
+calls | grep -q '^load -i ' || fail 'missing-image case did not reach the load'
+tree_sums | cmp - "$F/tree.before" || fail 'missing mdns image changed the installation'
+[ ! -e "$I/mdns.sh.new" ] || fail 'missing mdns image left mdns.sh.new'
+# Mode flags and --dry-run cannot be combined with the repair, in either order.
+good="$F/tools/good/bundle.tar.gz"
+for args in "--dry-run --mdns-tools $good" "--mdns-tools $good --dry-run" "--mdns-tools $good --check" "--check --mdns-tools $good" \
+  "--mdns-tools $good --bundle $good" "--bundle $good --mdns-tools $good" "--mdns-tools $good --auto" "--enable-auto --mdns-tools $good" \
+  "--mdns-tools $good --version 1.1.1" "--mdns-tools $good --allow-major"; do
+  read -ra argv <<<"$args"
+  tree_sums >"$F/tree.before"
+  : >"$DOCKER_CALLS"
+  run ./update.sh "${argv[@]}" && fail "accepted: ${args//$good/BUNDLE}"
+  grep -q 'cannot be combined' "$F/run.log" || fail "no combination message: ${args//$good/BUNDLE}"
+  calls | grep -q '^load -i ' && fail "loaded images: ${args//$good/BUNDLE}"
+  tree_sums | cmp - "$F/tree.before" || fail "changed the installation: ${args//$good/BUNDLE}"
+done
+# A layer shared with another image directory (legacy docker save) is carried along; nothing else is.
+tools_tree legacy && images_tar "$F/tools/legacy/gachipad-1.1.0/images.tar" 1.1.0 legacy && tools_sums legacy && tools_pack legacy
+: >"$FAKE_LOADED"
+run ./update.sh --mdns-tools "$F/tools/legacy/bundle.tar.gz" || fail 'legacy layout with a shared layer was refused'
+grep -qxF 'mdns/layer.tar' "$FAKE_LOADED" || fail 'mdns layer link missing from the loaded archive'
+grep -qxF 'web/layer.tar' "$FAKE_LOADED" || fail 'shared layer missing from the loaded archive'
+grep -q 'api' "$FAKE_LOADED" && fail 'legacy layout loaded the api image'
+# The real bundle then restores the genuine helper.
+run ./update.sh --mdns-tools "$F/offline.tar.gz" || fail 'tools repair after the refusals failed'
+cmp "$I/mdns.sh" "$root/deploy/mdns.sh" || fail 'tools repair did not install the bundled helper'
+ok "--mdns-tools: tampered, inner mismatch, wrong version, no images.tar, unlisted files, no mdns entry, marker, lock, missing image, option combinations; only the mdns image is loaded"
 [ ! -e "$I/state/install.lock.d" ] || fail "nested mkdir lock leaked"
 ok "flock + mkdir contention, nested offline upgrade, released SHA256SUMS (no sidecar)"
 

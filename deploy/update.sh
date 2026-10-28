@@ -651,11 +651,11 @@ update() {
 }
 
 main() {
-  local mode=update
+  local mode=update tools=0
   MODE=update TARGET="" YES=0 ALLOW_MAJOR=0 DRY=0 AT=04:00 POLICY=patch BUNDLE="" BACKUP="" TRANSACTION=0 DB_TOUCHED=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --mdns-tools) mode=mdns-tools; BUNDLE="${2:?--mdns-tools needs a matching offline bundle}"; shift ;;
+      --mdns-tools) [ "$mode" = update ] || die '--mdns-tools cannot be combined with another mode'; tools=1; mode=mdns-tools; BUNDLE="${2:?--mdns-tools needs a matching offline bundle}"; shift ;;
       --check) mode=check ;;
       --version) TARGET="${2:?--version needs X.Y.Z}"; TARGET="${TARGET#v}"; shift ;;
       --yes | -y) YES=1 ;;
@@ -672,6 +672,9 @@ main() {
     esac
     shift
   done
+  if [ "$tools" = 1 ] && { [ "$mode" != mdns-tools ] || [ "$DRY" = 1 ] || [ -n "$TARGET" ] || [ "$ALLOW_MAJOR" = 1 ]; }; then
+    die '--mdns-tools takes only its bundle; it cannot be combined with --dry-run, --version, --allow-major or another mode'
+  fi
   MODE="$mode"
   case "$mode:$DRY" in
     check:* | disable-auto:* | enable-auto:1) ;;
