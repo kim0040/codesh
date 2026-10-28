@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin" "$WORK/install"
-cp "$ROOT"/{install.sh,lib.sh,generate-secrets.sh,mdns.sh,.env.example} "$WORK/install/"
+cp "$ROOT"/{install.sh,preflight.sh,lib.sh,generate-secrets.sh,mdns.sh,.env.example} "$WORK/install/"
 printf '1.1.0\n' >"$WORK/install/VERSION"
 printf 'images\n' >"$WORK/install/images.tar"
 (cd "$WORK/install" && sha256sum images.tar VERSION >SHA256SUMS)
@@ -16,6 +16,9 @@ printf '%s\n' "$*" >>"$DOCKER_CALLS"
 case "$1 ${2:-}" in
   'info --format')
     case "$*" in
+      *Architecture*) echo amd64 ;;
+      *DockerRootDir*) echo /data ;;
+      *SecurityOptions*) echo '[]' ;;
       *OperatingSystem*) echo "${FAKE_DOCKER_SYSTEM:-Debian}" ;;
       *) echo "${FAKE_DOCKER_OS:-linux}" ;;
     esac ;;

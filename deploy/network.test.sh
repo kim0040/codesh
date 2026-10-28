@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/bin" "$WORK/install/tls"
-cp "$ROOT"/{install.sh,lib.sh,generate-secrets.sh,.env.example} "$WORK/install/"
+cp "$ROOT"/{install.sh,preflight.sh,lib.sh,generate-secrets.sh,.env.example} "$WORK/install/"
 printf '1.1.0\n' >"$WORK/install/VERSION"
 printf 'images\n' >"$WORK/install/images.tar"
 (cd "$WORK/install" && sha256sum images.tar VERSION >SHA256SUMS)
@@ -16,7 +16,7 @@ cat >"$WORK/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$DOCKER_CALLS"
 case "$1 ${2:-}" in
-  'info --format') case "$*" in *OperatingSystem*) echo Debian ;; *) echo linux ;; esac ;;
+  'info --format') case "$*" in *Architecture*) echo amd64 ;; *DockerRootDir*) echo /data ;; *SecurityOptions*) echo '[]' ;; *OperatingSystem*) echo Debian ;; *) echo linux ;; esac ;;
   'context inspect') echo unix:///var/run/docker.sock ;;
   'volume inspect') exit 1 ;;
   'compose up')

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installs gachipad from an offline bundle: loads the images, creates .env with fresh secrets and
-# starts the stack. Needs docker with the compose plugin; no internet.
+# Installs gachipad from an offline bundle or pulls released images online, creates .env with
+# fresh secrets and starts the stack. --check only reports prerequisites; --yes never prompts.
 #
 #   tar xzf gachipad-<version>.tar.gz && cd gachipad-<version> && ./install.sh
 #   PUBLIC_URL=http://gachipad.local HTTP_PORT=8080 ./install.sh     # optional settings for a new .env
@@ -20,8 +20,12 @@ DOMAIN_OPTION=""
 PROXY_OPTION=""
 PROXY_OPTION_SET=0
 ACME_OPTION="${ACME_EMAIL:-}"
+CHECK_ONLY=0
+ASSUME_YES=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --check) CHECK_ONLY=1 ;;
+    --yes) ASSUME_YES=1 ;;
     --db) DB_OPTION="${2:?--db needs sqlite, postgres, mongodb or external}"; shift ;;
     --database-url) DB_URL_OPTION="${2:?--database-url needs a URL}"; shift ;;
     --mdns) MDNS_OPTION=1 ;;
@@ -31,13 +35,16 @@ while [ "$#" -gt 0 ]; do
     --behind-proxy) PROXY_OPTION="${2:?--behind-proxy needs a CIDR}"; PROXY_OPTION_SET=1; shift ;;
     --acme-email) ACME_OPTION="${2:?--acme-email needs an email address}"; shift ;;
     -h | --help)
-      echo "usage: ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns] [--network internal|public] [--domain DNS-NAME] [--behind-proxy CIDR] [--acme-email EMAIL]"
+      echo "usage: ./install.sh [--check] [--yes] [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns] [--network internal|public] [--domain DNS-NAME] [--behind-proxy CIDR] [--acme-email EMAIL]"
       exit 0
       ;;
     *) die "unknown option $1 (./install.sh --help)" ;;
   esac
   shift
 done
+
+# Existing selection helpers use TTY detection; detach input for unattended/check-only runs.
+if [ "$ASSUME_YES" = 1 ] || [ "$CHECK_ONLY" = 1 ]; then exec </dev/null; fi
 
 case "$MDNS_OPTION" in auto | 0 | 1) ;; *) die "GACHIPAD_MDNS must be 0 or 1" ;; esac
 
@@ -149,11 +156,28 @@ select_database() {
   echo "install: database $selected; $reason."
 }
 
-need_docker
-verify_bundle .
+# Verify offline bytes before invoking host probes. Online trees have no image archive to verify.
+OFFLINE=0
+if [ -f images.tar ]; then
+  OFFLINE=1
+  verify_bundle .
+  echo 'install: offline bundle checksum passed.'
+  VERSION="$(cat VERSION)"
+else
+  echo 'install: online mode; bundle checksum check skipped because images.tar is absent.'
+  VERSION="$(sed -n 's/^GACHIPAD_VERSION=//p' .env.example | tail -n 1)"
+  [ -n "$VERSION" ] || die 'GACHIPAD_VERSION is missing from .env.example; restore the release template'
+fi
 
-[ -f images.tar ] || die "images.tar is missing: run this from the extracted bundle"
-VERSION="$(cat VERSION)"
+FRESH=1
+[ ! -f .env ] || FRESH=0
+select_database "$FRESH"
+select_network "$FRESH"
+[ -r ./preflight.sh ] || die 'preflight.sh is missing: extract all files from the matching release before installing'
+# shellcheck source=preflight.sh
+. ./preflight.sh
+preflight_run || exit 1
+[ "$CHECK_ONLY" = 0 ] || exit 0
 ENV_SNAPSHOT=""
 ENV_SNAPSHOT_READY=0
 ENV_READY=0
@@ -211,10 +235,27 @@ if [ -f .env ]; then
 else
   FRESH=1
 fi
-select_database "$FRESH"
-select_network "$FRESH"
-echo "install: loading images ($VERSION)"
-docker load -i images.tar
+if [ "$OFFLINE" = 1 ]; then
+  echo "install: loading images ($VERSION)"
+  docker load -i images.tar
+else
+  echo "install: pulling released images ($VERSION)"
+  # Compose interpolation requires secrets even for pull. Use non-secret placeholders in this
+  # subshell, without creating .env or printing existing credentials. The release template pins
+  # the registry/version; profiles match selection, including the optional internal mDNS probe.
+  if ! (
+    export SESSION_SECRET=pull COLLAB_SECRET=pull MONGO_PASSWORD=pull MONGO_APP_PASSWORD=pull VALKEY_PASSWORD=pull POSTGRES_PASSWORD=pull
+    export GACHIPAD_VERSION="$VERSION" GACHIPAD_REGISTRY
+    GACHIPAD_REGISTRY="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example | tail -n 1)"
+    export GACHIPAD_DATABASE_URL=sqlite:///data/gachipad.db COMPOSE_PROFILES=""
+    local_profiles=(docker compose --env-file .env.example)
+    case "$GACHIPAD_DB" in postgres|mongodb) local_profiles+=(--profile "$GACHIPAD_DB") ;; esac
+    if [ "$GACHIPAD_NETWORK" = internal ] && [ "$MDNS_OPTION" != 0 ]; then local_profiles+=(--profile mdns); fi
+    "${local_profiles[@]}" pull --quiet
+  ) >/dev/null 2>&1; then
+    die 'no internet: use the offline bundle (registry unavailable, authentication denied or release images missing); .env was not changed'
+  fi
+fi
 assert_database_backend
 
 # Persist settings only after the backend guard has accepted the proposed selection.
@@ -223,7 +264,7 @@ ENV_SNAPSHOT="$(mktemp .env.install-snapshot.XXXXXX)"
 ENV_SNAPSHOT_READY=1
 [ "$FRESH" = 0 ] || cp .env.example .env
 persist_network "$FRESH"
-for name in PUBLIC_URL HTTP_PORT HTTPS_PORT SITE_ADDRESS COLLAB_REPLICAS; do
+for name in PUBLIC_URL HTTP_PORT HTTPS_PORT SITE_ADDRESS COLLAB_REPLICAS MONGO_CACHE_GB; do
   value="${!name:-}"
   [ -n "$value" ] && env_set "$name" "$value"
 done

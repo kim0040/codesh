@@ -53,7 +53,7 @@ services:
       - "${GACHIPAD_BIND_ADDRESS:-}${HTTP_PORT:-80}:80"
       - "${GACHIPAD_BIND_ADDRESS:-}${HTTPS_PORT:-443}:443"
     volumes:
-      - ./tls:/etc/caddy/tls:ro
+      - ./tls:/etc/caddy/tls:ro,z
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -108,7 +108,7 @@ services:
       NODE_USE_ENV_PROXY: ${HTTPS_PROXY:+1}
     volumes:
       # Status of deploy/update.sh (last run, auto-update), shown in the admin console.
-      - ./state:/gachipad-state:ro
+      - ./state:/gachipad-state:ro,z
       - gachipad-data:/data
     expose: ["3001"]
     stop_grace_period: 20s

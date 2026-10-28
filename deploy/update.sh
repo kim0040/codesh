@@ -45,7 +45,7 @@ if [ -f "$SYSTEMD_DIR/codesh-update.timer" ] ||
   UNIT=codesh-update
 fi
 CRON_TAG="# $UNIT $(pwd)"
-FILES="docker-compose.yml .env.example VERSION lib.sh generate-secrets.sh install.sh upgrade.sh update.sh backup.sh restore.sh migrate-db.sh mdns.sh README.md"
+FILES="docker-compose.yml .env.example VERSION lib.sh preflight.sh generate-secrets.sh install.sh upgrade.sh update.sh backup.sh restore.sh migrate-db.sh mdns.sh README.md"
 
 usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "$0"; }
 

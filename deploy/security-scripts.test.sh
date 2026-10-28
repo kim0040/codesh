@@ -26,7 +26,7 @@ CURL
 chmod +x "$fixture/bin/docker"
 chmod +x "$fixture/bin/curl"
 export PATH="$fixture/bin:$PATH" DOCKER_CALLS="$fixture/docker.calls"
-cp "$root"/deploy/{install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,generate-secrets.sh,lib.sh} "$fixture/install/"
+cp "$root"/deploy/{install.sh,preflight.sh,upgrade.sh,update.sh,backup.sh,restore.sh,generate-secrets.sh,lib.sh} "$fixture/install/"
 printf 'security-test\n' >"$fixture/install/VERSION"
 printf 'original image bytes\n' >"$fixture/install/images.tar"
 (cd "$fixture/install" && sha256sum images.tar VERSION >SHA256SUMS)
@@ -51,7 +51,7 @@ echo 'L11: install and upgrade rejected corrupt bundles before image loading'
 make_install() {
   local dir="$1"
   mkdir -p "$dir/state"
-  cp "$root"/deploy/{install.sh,generate-secrets.sh,lib.sh,backup.sh,restore.sh,upgrade.sh,update.sh,migrate-db.sh,docker-compose.yml,.env.example} "$dir/"
+  cp "$root"/deploy/{install.sh,preflight.sh,generate-secrets.sh,lib.sh,backup.sh,restore.sh,upgrade.sh,update.sh,migrate-db.sh,docker-compose.yml,.env.example} "$dir/"
   printf '1.2.3\n' >"$dir/VERSION"
   printf 'fixture images\n' >"$dir/images.tar"
   (cd "$dir" && sha256sum images.tar VERSION >SHA256SUMS)

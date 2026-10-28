@@ -146,7 +146,7 @@ if grep -q 'private/secret' choices/invalid.log; then echo 'invalid URL was prin
 rm -rf choices
 # install.sh must not start an empty project beside the volumes of a 1.0.x installation.
 mkdir -p inst bin
-cp "$ROOT/install.sh" "$ROOT/lib.sh" "$ROOT/generate-secrets.sh" "$ROOT/.env.example" inst/
+cp "$ROOT/install.sh" "$ROOT/preflight.sh" "$ROOT/lib.sh" "$ROOT/generate-secrets.sh" "$ROOT/.env.example" inst/
 printf '1.0.2\n' >inst/VERSION
 printf 'images\n' >inst/images.tar
 (cd inst && sha256sum images.tar VERSION >SHA256SUMS)
