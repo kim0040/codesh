@@ -59,6 +59,7 @@ jobs:
       - name: Deploy script tests
         run: |
           bash deploy/security-scripts.test.sh
+          bash deploy/network.test.sh
           bash deploy/update.test.sh
           bash deploy/rename.test.sh
           bash deploy/migrate-db.test.sh

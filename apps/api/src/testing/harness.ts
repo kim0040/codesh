@@ -291,6 +291,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   const subscriber = new Redis(VALKEY_URL);
   const stores = options.stores ?? createMemoryStores();
   const config: Config = {
+    network: "internal",
+    codeFailureBudgetPerMinute: 60,
     limits: loadConfig().limits,
     production: false,
     host: "127.0.0.1",

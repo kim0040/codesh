@@ -128,3 +128,43 @@ it("rejects weak production admin tokens and still permits disabling the API", (
   expect(loadConfig({ ...production, ADMIN_TOKEN: "" }).adminToken).toBe("");
   expect(loadConfig({ ...production, ADMIN_TOKEN: "a".repeat(64) }).adminToken).toHaveLength(64);
 });
+
+it("keeps legacy/internal defaults and restricts public administrators to private and loopback networks", () => {
+  expect(loadConfig({}).network).toBe("internal");
+  const publicEnv = {
+    TRUST_PROXY: "127.0.0.1/32",
+    GACHIPAD_NETWORK: "public",
+    PUBLIC_URL: "https://share.example.org",
+  };
+  expect(() => loadConfig({ ...publicEnv, TRUST_PROXY: "" })).toThrow(/TRUST_PROXY/);
+  expect(loadConfig(publicEnv).adminAllowCidr).toEqual([
+    "127.0.0.0/8",
+    "::1/128",
+    "10.0.0.0/8",
+    "192.168.0.0/16",
+    "fc00::/7",
+  ]);
+  expect(loadConfig({ ...publicEnv, ADMIN_ALLOW_CIDR: "203.0.113.7/32" }).adminAllowCidr).toEqual([
+    "203.0.113.7/32",
+  ]);
+  expect(loadConfig(publicEnv).codeFailureBudgetPerMinute).toBe(300);
+  expect(loadConfig({ ...publicEnv, PUBLIC_URL: "HTTPS://Share.Example.Org" }).publicUrl).toBe(
+    "https://share.example.org",
+  );
+  for (const url of [
+    "",
+    "http://share.example.org",
+    "https://127.0.0.1",
+    "https://[::1]",
+    "https://gachipad.local",
+    "https://share.test",
+    "https://share.example",
+    "https://share.invalid",
+    "https://gachipad.local.",
+    "https://server",
+    "https://share.example.org/path",
+    "https://user:pass@share.example.org",
+    "https://share.example.org?x=1",
+  ])
+    expect(() => loadConfig({ ...publicEnv, PUBLIC_URL: url }), url).toThrow(/Public mode/);
+});

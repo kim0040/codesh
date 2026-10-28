@@ -10,7 +10,7 @@ import {
 import "@fastify/cookie";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Ctx } from "./ctx.js";
-import { resolveClientIp, resolveNet } from "./net.js";
+import { cidrContains, parseIp, resolveClientIp, resolveNet } from "./net.js";
 import { requireCapacity } from "./quotas.js";
 
 export interface Identity {
@@ -33,6 +33,7 @@ export interface Session {
 declare module "fastify" {
   interface FastifyRequest {
     session: Session;
+    clientAddress: string | undefined;
   }
 }
 
@@ -60,12 +61,31 @@ export const guestName = (clientId: string) => `Guest-${clientId.slice(0, 4)}`;
 
 /** The client address after applying the trusted-proxy rules of §7. */
 export function clientIp(ctx: Ctx, request: FastifyRequest): string {
+  if (request.clientAddress !== undefined) return request.clientAddress;
   const forwarded = request.headers["x-forwarded-for"];
-  return resolveClientIp(
+  const resolved = resolveClientIp(
     request.ip,
     typeof forwarded === "string" ? forwarded : undefined,
     ctx.trusted,
   );
+  const bytes = parseIp(resolved);
+  const unknown =
+    ctx.config.network === "public" &&
+    (!bytes || ctx.trusted.some((cidr) => cidrContains(cidr, bytes)));
+  if (ctx.config.network === "public") ctx.diagnostics.recordClientIdentity(unknown);
+  if (unknown) {
+    if (Date.now() - ctx.unknownClientWarningAt >= 60_000) {
+      ctx.unknownClientWarningAt = Date.now();
+      ctx.diagnostics.record("client_identity_unknown");
+      request.log.warn(
+        "Public client identity is unknown: check Docker userland-proxy/IPv6 port bindings and the TLS proxy X-Forwarded-For chain",
+      );
+    }
+    request.clientAddress = "unknown";
+  } else {
+    request.clientAddress = resolved;
+  }
+  return request.clientAddress;
 }
 
 /** Starts a session for the browser: a new client id in the signed `gachipad_sid` cookie. */
@@ -106,7 +126,11 @@ export async function loadSession(
   if (!clientId) clientId = issueSession(ctx, reply);
   const settings = await ctx.settings();
   const ip = clientIp(ctx, request);
-  const { net, room } = resolveNet(ip, settings);
+  const group = resolveNet(ip, settings);
+  // An internet /24 or shared NAT is not a trusted neighbourhood. Only operator-defined rooms
+  // opt into shared discovery; otherwise public presence, previews and broadcasts stay private.
+  const room = group.room;
+  const net = ctx.config.network === "public" && room === null ? `client:${clientId}` : group.net;
   const [profile, identity] = await Promise.all([
     ctx.valkey.hgetall(apiKeys.profile(clientId)),
     ctx.valkey.hgetall(apiKeys.identity(clientId)),

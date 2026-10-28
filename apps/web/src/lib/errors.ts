@@ -14,6 +14,10 @@ const TEXT: Record<ClientErrorCode, ErrorText> = {
   banned: { title: "error.banned", hint: "error.banned.hint" },
   pending_approval: { title: "error.pending_approval", hint: "error.pending_approval.hint" },
   rate_limited: { title: "error.rate_limited", hint: "error.rate_limited.hint" },
+  upload_pool_limited: {
+    title: "error.upload_pool_limited",
+    hint: "error.upload_pool_limited.hint",
+  },
   too_large: { title: "error.too_large", hint: "error.too_large.hint" },
   expired: { title: "error.expired", hint: "error.expired.hint" },
   validation: { title: "error.validation", hint: "error.validation.hint" },

@@ -5,15 +5,59 @@
 # TRUSTED_PROXIES  CIDRs of a load balancer in front of Caddy whose X-Forwarded-For is kept.
 #               Without one Caddy replaces the header with the client address it sees.
 
+(timeouts_internal) {
+}
+(timeouts_public) {
+	timeouts {
+		read_header 10s
+		idle 2m
+	}
+}
+(metrics_internal) {
+}
+(metrics_public) {
+	not remote_ip {$METRICS_GATEWAY:172.29.88.1}
+	not client_ip {$METRICS_GATEWAY:172.29.88.1}
+}
+
 {
 	admin localhost:2019
+	{$ACME_EMAIL_CONFIG}
 	servers {
 		trusted_proxies static {$TRUSTED_PROXIES:127.0.0.1/32}
+		trusted_proxies_strict
+		import timeouts_{$GACHIPAD_NETWORK:internal}
+	}
+}
+
+(network_internal) {
+	import /etc/caddy/tls/*.caddy
+}
+
+(network_public) {
+	header Strict-Transport-Security "max-age=31536000"
+	header X-Robots-Tag noindex
+	import public_{$GACHIPAD_PUBLIC_TLS:acme}
+}
+
+(public_acme) {
+	# Automatic HTTPS manages the certificate and the HTTP redirect.
+}
+
+(public_proxy) {
+	# Must stay the first handle: Caddy keeps path-less handles in source order.
+	# Metrics bypass this gate but still require their own private source matchers.
+	@untrusted {
+		not remote_ip {$TRUSTED_PROXIES:127.0.0.1/32}
+		not path /metrics/api /metrics/collab
+	}
+	handle @untrusted {
+		respond "Forbidden" 403
 	}
 }
 
 {$SITE_ADDRESS::80}{$SITE_ALIASES} {
-	import /etc/caddy/tls/*.caddy
+	import network_{$GACHIPAD_NETWORK:internal}
 
 	header {
 		-Server
@@ -27,16 +71,20 @@
 
 	# Prometheus endpoints: loopback and the dedicated compose network only.
 	@metrics_api {
+		import metrics_{$GACHIPAD_NETWORK:internal}
 		path /metrics/api
 		remote_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
+		client_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
 	}
 	handle @metrics_api {
 		rewrite * /metrics
 		reverse_proxy api:3001
 	}
 	@metrics_collab {
+		import metrics_{$GACHIPAD_NETWORK:internal}
 		path /metrics/collab
 		remote_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
+		client_ip 127.0.0.0/8 ::1 {$METRICS_SUBNET:172.29.88.0/24}
 	}
 	handle @metrics_collab {
 		rewrite * /metrics

@@ -14,6 +14,7 @@ import {
 } from "@gachipad/shared";
 import { diagnosticShareRef } from "@gachipad/storage";
 import { z } from "zod";
+import { codeFailureStatus } from "../codes.js";
 import { randomKey } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
 import { notFound } from "../errors.js";
@@ -38,6 +39,15 @@ const errors24h = (snapshots: DiagnosticSnapshot[]) =>
 export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
   app.get("/api/admin/overview", async (): Promise<AdminOverview> => {
     const { snapshots } = await ctx.diagnostics.recent();
+    const cutoff = Math.floor(Date.now() / 60_000) - 4;
+    const identities = snapshots
+      .filter((s) => s.source === "api")
+      .flatMap((s) => s.clientIdentityMinutes ?? [])
+      .filter(([minute]) => minute >= cutoff)
+      .reduce<[number, number]>(
+        ([total, unknown], [, count, misses]) => [total + count, unknown + misses],
+        [0, 0],
+      );
     const live = snapshots.filter(
       (s) => s.source === "collab" && Date.now() - Date.parse(s.at) < 20_000,
     );
@@ -56,6 +66,8 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
       uptimeSeconds: Math.floor((Date.now() - ctx.startedAt) / 1000),
       version: ctx.version,
       errors24h: errors24h(snapshots),
+      unknownClientIdentity:
+        ctx.config.network === "public" && (identities[1] ?? 0) > (identities[0] ?? 0) * 0.05,
       health: await health(ctx, Math.max(0, ...live.map((s) => Date.parse(s.at)))),
     };
   });
@@ -135,6 +147,7 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
   app.get(
     "/api/admin/security",
     async (): Promise<AdminSecurity> => ({
+      codeFailures: await codeFailureStatus(ctx),
       cidrRestricted: ctx.config.adminAllowCidr.length > 0,
       proxyRestricted: ctx.config.trustProxy.length > 0,
       loginPerMinute: ctx.config.rateLimit.loginPerMinute,

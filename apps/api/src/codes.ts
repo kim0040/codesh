@@ -1,5 +1,7 @@
 import { generateJoinCode, JOIN_CODE_COOLDOWN_SECONDS, keys } from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
+import { ApiError } from "./errors.js";
+import { addressKey, formatIp, parseIp } from "./net.js";
 
 export type CodeKind = "share" | "lab";
 
@@ -82,9 +84,102 @@ export async function touchCode(
 export async function resolveCode(
   ctx: Ctx,
   code: string,
+  ip = "unknown",
 ): Promise<{ shareId: string } | { labId: string } | null> {
-  const [shareId, labId] = await ctx.valkey.mget(keys.code(code), keys.labCode(code));
+  const budget = keys.rateLimit("global", "code-failures");
+  const bytes = parseIp(ip);
+  if (bytes?.length === 16) bytes.fill(0, 6);
+  const address = bytes?.length === 16 ? `${formatIp(bytes)}/48` : addressKey(ip);
+  const recentMiss = keys.rateLimit(address, "code-recent-miss");
+  let shareId: string | null;
+  let labId: string | null;
+  if (ctx.config.network === "public") {
+    const [admitted, audit, share, lab] = (await ctx.valkey.eval(
+      RESERVE_LOOKUP,
+      4,
+      budget,
+      recentMiss,
+      keys.code(code),
+      keys.labCode(code),
+      ctx.config.codeFailureBudgetPerMinute,
+    )) as [number, number, string | null, string | null];
+    if (admitted < 0) {
+      ctx.diagnostics.record("rate_limit");
+      ctx.metrics.rateLimited.inc({ bucket: "code-global" });
+      if (audit === 1)
+        await ctx.stores.audit
+          .append({
+            at: new Date(),
+            actor: "00000000-0000-4000-8000-000000000000",
+            ip: "global",
+            action: "code.lookup_limited",
+            detail: { budget: ctx.config.codeFailureBudgetPerMinute },
+          })
+          .catch(() => undefined);
+      throw new ApiError("rate_limited", "Join-code lookups paused; try again shortly", {
+        "Retry-After": String(-admitted),
+      });
+    }
+    shareId = share;
+    labId = lab;
+  } else
+    [shareId = null, labId = null] = await ctx.valkey.mget(keys.code(code), keys.labCode(code));
   if (shareId) return { shareId };
   if (labId) return { labId };
   return null;
+}
+
+// Admission, lookup and accounting share one clock and script across replicas. Clean identities
+// bypass an exhausted shared budget only while the fleet-wide free allowance has room.
+const RESERVE_LOOKUP = `
+local fresh = redis.call('SET', KEYS[2], '1', 'NX', 'EX', 600)
+local now = tonumber(redis.call('TIME')[1])
+local window = math.floor(now / 60) + 1
+local state = redis.call('HMGET', KEYS[1], 'window', 'count', 'free')
+local count = tonumber(state[2]) or 0
+local free = tonumber(state[3]) or 0
+if tonumber(state[1]) ~= window then
+  count = 0
+  free = 0
+  redis.call('HSET', KEYS[1], 'window', window, 'count', 0, 'free', 0, 'logged', 0)
+end
+redis.call('EXPIRE', KEYS[1], 120)
+local function refused()
+  local log = tonumber(redis.call('HGET', KEYS[1], 'logged')) == 0 and 1 or 0
+  redis.call('HSET', KEYS[1], 'logged', 1)
+  return {-(60 - now % 60), log, false, false}
+end
+local limit = tonumber(ARGV[1])
+if (not fresh or free >= 3 * limit) and count >= limit then return refused() end
+local targets = redis.call('MGET', KEYS[3], KEYS[4])
+if targets[1] or targets[2] then
+  redis.call('DEL', KEYS[2])
+  return {0, 0, targets[1], targets[2]}
+end
+if fresh and free < 3 * limit then
+  redis.call('HINCRBY', KEYS[1], 'free', 1)
+elseif count >= limit then return refused()
+else redis.call('HINCRBY', KEYS[1], 'count', 1) end
+return {0, 0, false, false}
+`;
+
+/** Read with Valkey's clock so expired windows are never shown as exhausted. */
+export async function codeFailureStatus(
+  ctx: Ctx,
+): Promise<{ count: number; limit: number; exhausted: boolean } | null> {
+  if (ctx.config.network !== "public") return null;
+  const limit = ctx.config.codeFailureBudgetPerMinute;
+  const count = Number(
+    await ctx.valkey.eval(
+      `
+local window = math.floor(tonumber(redis.call('TIME')[1]) / 60) + 1
+local state = redis.call('HMGET', KEYS[1], 'window', 'count')
+if tonumber(state[1]) ~= window then return 0 end
+return tonumber(state[2]) or 0
+`,
+      1,
+      keys.rateLimit("global", "code-failures"),
+    ),
+  );
+  return { count, limit, exhausted: count >= limit };
 }

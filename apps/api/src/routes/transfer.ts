@@ -239,6 +239,7 @@ export function transferRoutes(app: App, ctx: Ctx): void {
           for await (const part of request.parts()) {
             if (part.type !== "file") continue;
             const meta = await storeUpload(ctx, {
+              ip: session.ip,
               name: basename(sanitizePath(part.filename) ?? "upload"),
               contentType: part.mimetype || null,
               ownerId: session.clientId,
