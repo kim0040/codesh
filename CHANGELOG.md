@@ -9,6 +9,8 @@ text of its GitHub release (RELEASING.md).
 
 ### Added
 
+- Network deployment choice in the installer (`--network internal|public`, `--domain`, `--behind-proxy`, `--acme-email`) supporting internal network mode and hardened public internet hosting with automatic ACME HTTPS or TLS proxy integration.
+- Windows installer (`install.cmd`, `install.ps1`, and `gachipad.ps1` command wrapper) to deploy, configure, and manage gachipad inside WSL 2 with Docker Desktop.
 - Linux installer mDNS option with conflict resolution (`--mdns`, `--no-mdns`, `GACHIPAD_MDNS`) and the `./mdns.sh` management script (`enable`, `disable`, `status`) to manage local LAN advertisement without restarting application services.
 - Offline tools repair command `./update.sh --mdns-tools <matching-bundle>` to restore `mdns.sh` and load matching images on installations upgraded from 1.1.0 or older.
 
@@ -21,6 +23,10 @@ text of its GitHub release (RELEASING.md).
 - Your own text selection was invisible on the line holding the caret while other participants saw it.
 - Smooth caret glides through Hangul composition and long jamo runs no longer slow typing.
 - Migrate-db crash recovery is phase-aware and the other deploy scripts refuse to run while a migration marker exists.
+
+### Security
+
+- Public-mode security protections including enforced HTTPS and HSTS, default loopback and private admin CIDR restrictions, isolated client discovery, a shared fleet-wide join-code failure budget, and per-address upload pool caps.
 
 ### Known issues
 

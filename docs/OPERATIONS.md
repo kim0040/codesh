@@ -22,12 +22,14 @@
 14. [운영자 보안 점검표](#14-운영자-보안-점검표)
 15. [업데이트](#15-업데이트)
 16. [codesh에서 gachipad로 이름 변경 (1.0.x에서 업그레이드)](#16-codesh에서-gachipad로-이름-변경-10x에서-업그레이드)
+17. [네트워크 배포 모드 (내부망 및 공개 인터넷)](#17-네트워크-배포-모드-내부망-및-공개-인터넷)
+18. [Windows 환경 설치 및 운영 (WSL 2)](#18-windows-환경-설치-및-운영-wsl-2)
 
 ---
 
 ## 1. 시스템 요구사항
 
-- **운영체제**: Linux (Docker Compose 지원 환경 권장)
+- **운영체제**: Linux (Docker Compose 지원 환경 권장) 또는 64비트 Windows 10 22H2 / Windows 11 (WSL 2 및 Docker Desktop, 18장 참고)
 - **런타임 의존성**: Docker Engine 및 Docker Compose 플러그인 2.20 이상(`docker compose`)
 - **하드웨어 권장 사양**:
   - 최소: 2 vCPU, 4GB RAM
@@ -1114,5 +1116,278 @@ docker compose pull && docker compose up -d                  # .env의 GACHIPAD_
 - 세션 쿠키: 클라이언트 요청에 `gachipad_sid`가 없으면 `codesh_sid`를 fallback으로 인식하며, 응답 시 `gachipad_sid`를 발급해요.
 - CSRF 헤더: `X-Gachipad` 헤더 외에 기존 `X-Codesh` 헤더도 계속 허용해요.
 - 백업 복원: `restore.sh`는 아카이브 내부 경로 구조를 자동 감지하여 codesh 형식 백업과 gachipad 형식 백업을 모두 투명하게 복원해요.
+
+---
+
+<a id="17-네트워크-배포-모드-내부망-및-공개-인터넷"></a>
+## 17. 네트워크 배포 모드 (내부망 및 공개 인터넷)
+
+gachipad는 배포 환경의 보안 모델에 맞춰 **내부망 모드(`internal`)**와 **공개 인터넷 모드(`public`)**의 두 가지 네트워크 배포 모드를 지원합니다.
+
+### 17.1 모드 선택 및 기존 설치 환경 전환
+
+신규 설치 시 대화형 TTY 환경에서는 모드 선택 안내와 함께 프롬프트가 제공됩니다:
+```text
+internal: for a private network; HTTP, internal TLS or your own certificate.
+public: for the internet; requires your DNS name and HTTPS, with stricter abuse limits.
+Network [internal/public] (default internal):
+```
+비대화형 환경이나 플래그가 지정되지 않은 기본 실행 시에는 `internal` 모드가 적용됩니다. 설치 명령에 플래그나 환경 변수를 전달하여 모드를 명시할 수 있습니다.
+
+- **내부망 모드 (신규 설치 또는 유지)**:
+  ```sh
+  ./install.sh --network internal
+  ```
+  내부 네트워크 환경을 대상으로 하며, 기존의 일반 HTTP(:80), Caddy 내장 CA 또는 자체 인증서 TLS, mDNS 단축 도메인(`gachipad.local`), 내부망용 기본 요청 한도를 사용합니다.
+
+- **공개 인터넷 직접 모드 (Caddy 자동 HTTPS)**:
+  ```sh
+  ./install.sh --network public --domain share.example.org --acme-email ops@example.org
+  ```
+  소유한 공용 DNS 도메인 이름이 필수이며, 도메인의 A/AAAA 레코드가 서버의 공인 IP를 가리켜야 하고 인터넷에서 TCP 80 및 443 포트로 접근 가능해야 합니다. Caddy가 무료 ACME CA(Let's Encrypt 또는 ZeroSSL)를 통해 인증서를 자동 발급·갱신합니다. `--acme-email`은 선택 사항입니다. IP 주소, `.local`, 단일 레이블 이름, `.test`, `.example`, `.invalid`는 도메인 검증 단계에서 즉시 거부됩니다.
+
+- **TLS 프록시 뒷단 공개 모드**:
+  ```sh
+  PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32
+  ```
+  외부 역방향 프록시가 유효한 HTTPS를 종단하고 Caddy로 HTTP 요청을 전달하는 구성입니다. 프록시는 반드시 `X-Forwarded-For` 및 `X-Forwarded-Proto: https` 헤더를 전달해야 하며, `--behind-proxy`에 지정된 CIDR에서만 Caddy에 접근할 수 있습니다. Caddy는 지정된 프록시 CIDR 외의 모든 요청을 `403 Forbidden`으로 차단합니다. `--behind-proxy`는 IPv4 접두사 `/8` 이상, IPv6 접두사 `/32` 이상이어야 하며, 내부 Docker 네트워크 서브넷(`NETWORK_SUBNET`)과 겹치지 않아야 합니다. 클라이언트 실제 식별을 위해 단일 호스트(`/32` 또는 `/128`) 지정을 권장하며, `/16`보다 넓은 범위는 경고가 출력됩니다. 프록시 모드를 해제하려면 `.env`에서 `GACHIPAD_BEHIND_PROXY`를 비우고 공개 설치 스크립트를 다시 실행합니다.
+
+- **기존 설치 환경의 모드 전환**:
+  - `--network` 플래그 없이 `install.sh`를 재실행하면 기존 `.env`에 저장된 모드가 유지됩니다.
+  - **내부망에서 공개 모드로 전환 (`--network public`)**: 기존 내부망 설정(`SITE_ADDRESS`, `PUBLIC_URL`, `SITE_ALIASES`, `CADDY_TRUSTED_PROXIES`, `TRUST_PROXY`, `ADMIN_ALLOW_CIDR`, `GACHIPAD_BIND_ADDRESS`)을 `GACHIPAD_INTERNAL_*` 변수로 백업 보존합니다. 비어 있거나 템플릿 기본값으로 남아 있던 한도 설정은 공개 인터넷용 엄격한 기본값으로 자동 교체됩니다. 운영자가 기존에 직접 수정한 커스텀 한도 값은 유지되며, 권장 공개 한도 값과 함께 화면에 출력됩니다.
+  - **공개 모드에서 내부망으로 전환 (`--network internal`)**: 백업되었던 `GACHIPAD_INTERNAL_*` 설정을 원래 위치로 복원하고, `GACHIPAD_BEHIND_PROXY`를 제거하며 `GACHIPAD_PUBLIC_TLS=acme`로 리셋합니다. 다만 보안을 위해 강화되었던 요청 한도와 관리자 접근 제한값은 운영자의 명시적 검토를 위해 자동으로 완화하지 않고 그대로 유지합니다.
+  - **트랜잭션 롤백 보장**: 모드 전환 또는 신규 설치 시, Compose 기동 및 로컬 `/healthz`, `/readyz` 검사, 백엔드 기록이 완전히 성공할 때까지 비공개 스냅샷 `.env.install-snapshot.XXXXXX`가 유지됩니다. 중간에 실패할 경우 이전 `.env`를 원상 복구하고, 후보 모드 변수(`GACHIPAD_NETWORK`, `PUBLIC_URL`, `TRUST_PROXY` 등)를 unset한 뒤 이전 구성을 재시작합니다(Compose 기본 120초 대기, GNU timeout 지원 환경은 150초 제한). 데이터베이스 데이터는 어떠한 경우에도 롤백되거나 유실되지 않습니다.
+
+### 17.2 공개 인터넷 모드의 주요 변경 사항
+
+공개 인터넷 모드에서는 인터넷 환경의 위협 모델에 맞춰 다음과 같은 보안 강화 및 제약 사항이 적용됩니다:
+
+1. **HTTPS 및 HSTS 강제**:
+   - Caddy의 공개 브랜치는 `Strict-Transport-Security: max-age=31536000` 헤더를 자동으로 전송합니다(`preload`나 `includeSubDomains`는 포함되지 않음). 또한 검색 엔진 자동 수집을 방지하기 위해 `X-Robots-Tag: noindex` 헤더를 추가합니다.
+   - 공개 모드에서는 `deploy/tls/*.caddy` 조각 파일이 Caddy에 로드되지 않고 무시됩니다. 인증서는 Caddy의 자동 HTTPS 또는 외부 TLS 프록시가 제공합니다. 기존 내부망용 TLS 설정 파일은 디스크에 그대로 보존되므로 나중에 내부망 모드로 복귀할 때 다시 활성화할 수 있습니다.
+   - API와 Collab 세션 쿠키는 HTTPS 오리진에서 `Secure`, `HttpOnly`, `SameSite=Lax` 속성이 강제됩니다. 외부 프록시와 API 간의 평문 HTTP 구간에서도 세션 생성 및 로그아웃 시 `Secure` 플래그가 안전하게 유지됩니다.
+
+2. **관리 콘솔 기본 허용 대역과 `ADMIN_ALLOW_CIDR` 확장**:
+   - 공개 인터넷 모드에서 `.env`의 `ADMIN_ALLOW_CIDR`이 비어 있거나 기본값인 경우, 임의의 인터넷 접속을 허용하지 않고 오직 로컬 루프백 및 사설망 대역만 허용합니다:
+     `127.0.0.0/8,::1/128,10.0.0.0/8,192.168.0.0/16,fc00::/7`
+     (Docker Compose 기본 서브넷과의 혼선을 방지하기 위해 `172.16.0.0/12`는 기본 목록에서 제외되어 있습니다).
+   - 허용 대역 외의 클라이언트가 `/api/admin/*`에 접근하면 인증 토큰이나 요청 본문을 검사하기 전에 즉시 `404 Not Found`로 차단됩니다.
+   - 외부에서 관리 콘솔에 접근해야 하는 경우, `.env`의 `ADMIN_ALLOW_CIDR`에 관리자의 실제 공인 IP 또는 CIDR(예: `198.51.100.4/32,2001:db8::1/128`)을 추가하고 `docker compose up -d api`로 API를 재시작하십시오. IPv4와 IPv6는 별도로 평가되므로 둘 다 사용하는 경우 각각 기재해야 합니다.
+   - 관리자 인증은 쿠키가 아닌 `Authorization: Bearer <ADMIN_TOKEN>` 헤더를 사용합니다.
+
+3. **mDNS 비활성화**:
+   - 공개 인터넷 모드에서는 mDNS 프로필이 비활성화되며, 기존에 실행 중이던 `mdns` 컨테이너는 시작 전에 중지됩니다(중지 실패 시 모드 전환이 중단되고 롤백됨).
+   - 공개 모드에서는 `./mdns.sh enable` 명령의 실행도 안전하게 차단됩니다. 공개 모드 접속에는 소유한 공용 DNS 도메인을 사용해야 합니다.
+
+4. **클라이언트별 디스커버리 격리**:
+   - 내부망 모드에서는 동일 네트워크(/24 또는 /64) 사용자가 인접 공유 문서 목록과 실시간 프레즌스를 공유할 수 있습니다.
+   - 공개 인터넷 모드에서는 명시적으로 방(room)이 지정되지 않은 모든 세션이 개별 디스커버리 그룹(`client:<세션ID>`)으로 엄격히 격리됩니다. 인터넷의 동일 공인 IP나 동일 NAT 대역 뒤에 있는 서로 무관한 사용자가 접속하더라도 인접 문서 미리보기나 참가자 목록이 상호 노출되지 않습니다.
+   - 웹 UI에서 인접 문서 섹션이 자동으로 숨겨지며, 서버의 `announceShare` 로직도 인접 문서 캐시 키를 생성하지 않고 건너뜁니다. 운영자가 특정 CIDR에 방을 명시적으로 구성한 경우에만 해당 범위 내에서 그룹화가 동작합니다.
+
+5. **강화된 남용 방지 제한값과 대규모 공유 NAT 환경 대응**:
+   공개 모드로 신규 설치하거나 전환할 때 `.env`에 기록되는 기본 제한값은 다음과 같습니다 (괄호 안은 내부망 기본값):
+   - `RATE_LIMIT_API_PER_MIN=300` (내부망: 1200): IP 주소당 평균 초당 5회의 API 요청 허용. SSE 및 WebSocket 트래픽은 REST API 호출을 반복 소모하지 않음.
+   - `RATE_LIMIT_CODE_PER_MIN=10` (내부망: 30): IP 주소당 6자리 코드 조회 횟수. 오타 및 일반 참가 허용.
+   - `RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN=300`: 공개 모드 전용. 전체 클라이언트 IP 및 API 복제본이 공유하는 분당 참가 코드 실패 예산.
+   - `RATE_LIMIT_CREATE_PER_MIN=10` (내부망: 60): IP 주소당 분당 문서 생성 횟수. 대량 자동 생성 방지.
+   - `RATE_LIMIT_LOGIN_PER_MIN=5` (내부망: 10): IP 주소당 로그인 시도 제한.
+   - `QUOTA_WINDOW_SECONDS=86400`: 할당량 주기 (24시간, 동일).
+   - `QUOTA_SHARES_PER_CLIENT=50` (내부망: 200), `QUOTA_SHARES_PER_IP=200` (내부망: 1000).
+   - `QUOTA_UPLOADS_PER_CLIENT=50` (내부망: 200), `QUOTA_UPLOADS_PER_IP=200` (내부망: 1000).
+   - `QUOTA_BYTES_PER_CLIENT=104857600` / 100 MiB (내부망: 512 MiB).
+   - `QUOTA_BYTES_PER_IP=536870912` / 512 MiB (내부망: 2 GiB).
+   - `UPLOAD_STORAGE_MAX_BYTES=2147483648` / 2 GiB (내부망: 10 GiB): 서버 전체 업로드 영구 저장소 상한.
+   - `SSE_MAX_PER_CLIENT=5` (내부망: 20), `SSE_MAX_PER_IP=50` (내부망: 200): 단일 클라이언트 탭 및 IP별 동시 SSE 연결 상한.
+   - `PRESENCE_MAX_PER_NET=100` (내부망: 500): 명시적으로 구성된 공개 방의 최대 접속자 수.
+   - **대규모 공유 NAT 환경 대응**: 학교, 캠퍼스, 대규모 사무실, 행사 네트워크 등 수백 명 이상의 사용자가 단일 공인 IP(NAT)를 공유하여 접속하는 환경에서는 단일 IP 한도에 도달할 수 있습니다. 필요에 따라 `.env`에서 `SSE_MAX_PER_IP`, `RATE_LIMIT_API_PER_MIN`, `RATE_LIMIT_CODE_PER_MIN` 값을 환경 규모에 맞게 상향 조정하십시오.
+
+6. **참가 코드 실패 예산(Join-Code Failure Budget)과 트레이드오프**:
+   - 6자리 숫자 코드는 약 90만 개의 조합을 가지며, 빠른 접속을 위한 편의 도구일 뿐 암호학적 비밀키가 아닙니다.
+   - 분산 스캐너가 다수의 IP를 동원해 코드를 무차별 대입하는 공격을 막기 위해, 공개 모드에서는 전체 API 복제본이 Valkey 시계 기반의 1분 고정 윈도우 원자적 카운터(`RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN=300`)를 공유합니다.
+   - 최근 10분 내 실패 이력이 없는 정상 클라이언트(IPv4 주소 또는 IPv6 `/48`)는 1분당 최대 3배(900회)까지 첫 1회의 실패가 무료로 허용됩니다. 따라서 공격자가 공유 실패 예산을 소모하고 있는 중이라도 올바른 코드를 입력하는 일반 사용자는 정상적으로 참가할 수 있습니다. 성공적으로 참가하면 10분 마커가 즉시 삭제됩니다.
+   - **보안 및 가용성 트레이드오프**: 대규모 분산 공격자가 공유 실패 예산(300회)과 무료 실패 허용량(900회)을 모두 소진시키면, 윈도우가 초기화될 때까지 모든 클라이언트의 6자리 코드 조회가 일시적으로 차단되고 HTTP 429(`Retry-After`)가 반환됩니다. 그러나 **전체 공유 링크(`/<id>`)를 통한 직접 접속, 이미 열려 있는 세션, 일반 API 호출은 영향을 받지 않고 계속 작동**합니다. 중요한 문서에는 6자리 코드 외에 PIN 번호, 승인 대기실, 로그인 필수 조건을 함께 구성하십시오.
+
+7. **주소별 업로드 풀 한도**:
+   - 공개 모드에서는 Valkey 시계를 기준으로 각 IPv4 주소 또는 IPv6 `/64`가 현재 점유하고 있는 파일 업로드 총량을 추적합니다.
+   - 단일 주소/프리픽스당 최대 점유 가능 용량은 `floor(UPLOAD_STORAGE_MAX_BYTES / 4)` (공개 기본값 기준 512 MiB)로 제한됩니다.
+   - 이 한도를 초과하면 HTTP 429 (`upload_pool_limited`) 에러가 반환되며 업로드가 차단됩니다. 이는 전체 영구 디스크 공간 부족으로 인한 HTTP 503 (`storage_unavailable`) 에러와 구별됩니다. 업로드된 파일이 만료되거나 삭제되면 점유 용량 예약이 자동으로 해제됩니다.
+
+8. **"unknown" 클라이언트 식별 규칙과 프록시 설정 주의사항**:
+   - 클라이언트 IP 주소 역추적이 `TRUST_PROXY` 내부에서 끝나거나 `X-Forwarded-For` 헤더가 없거나 손상된 경우, API는 해당 클라이언트를 `unknown`으로 식별합니다.
+   - `unknown` 클라이언트는 매우 보수적인 단일 공통 남용 방지 버킷을 공유하며, `ADMIN_ALLOW_CIDR` 허용 목록을 통과할 수 없습니다. 다만 특정 클라이언트의 문제로 인해 사이트 전체 방문자가 차단되는 현상을 방지하기 위해 네트워크 차단(`network ban`) 대상에서는 제외됩니다.
+   - 최근 5분간의 API 요청 중 `unknown` 비율이 5%를 초과하면 `/api/admin/overview` 응답에 `unknownClientIdentity: true` 플래그가 표시됩니다 (관리자 대시보드 UI 배너는 없으며 API 응답으로 확인 가능).
+   - 역방향 프록시를 사용하는 경우 `--behind-proxy`에 넓은 대역을 지정하지 말고 실제 프록시의 단일 호스트 IP(`/32` 또는 `/128`)를 지정하고, 프록시가 실제 클라이언트 IP를 올바르게 전달하도록 구성하십시오.
+
+9. **IPv4 전용 바인딩 기본값과 IPv6 구성 주의사항**:
+   - 공개 모드 설치 시 `GACHIPAD_BIND_ADDRESS=0.0.0.0:`이 기본으로 기록되어 호스트의 IPv4 주소에만 포트를 바인딩합니다.
+   - 번들로 제공되는 Docker Compose 네트워크에는 IPv6가 구성되어 있지 않습니다. 이 상태에서 호스트 포트를 IPv6(`[::]`)로 노출할 경우, Docker의 사용자 영역 프록시(userland-proxy)나 rootless Docker 환경에서 외부 클라이언트의 IPv6(또는 IPv4) 접속 주소가 Docker 브리지 게이트웨이 주소(예: `172.29.88.1`)로 변환(SNAT)될 수 있습니다.
+   - 이 경우 실제 클라이언트 IP 추적이 불가능해질 뿐만 아니라, 재작성된 사설 IP가 공개 모드의 `ADMIN_ALLOW_CIDR` 기본 사설 대역 허용 조건을 만족하여 관리 콘솔이 외부에 노출되는 위험이 발생할 수 있습니다.
+   - IPv6 환경을 공개 서비스하려면 운영자가 실제 클라이언트 소스 IP를 보존하는 이중 스택(dual-stack) Docker 네트워크를 직접 구성하고, Docker 데몬에서 `ip6tables`가 활성화되고 `userland-proxy`가 비활성화되어 있는지 반드시 확인해야 합니다.
+
+10. **메트릭 스크래핑 제약**:
+    - Prometheus 엔드포인트인 `/metrics/api` 및 `/metrics/collab`은 소켓 원격 IP와 프록시 클라이언트 IP 모두 로컬 루프백(`127.0.0.0/8`, `::1`) 또는 전용 Compose 서브넷(`METRICS_SUBNET`)이어야 접근할 수 있습니다.
+    - 특히 Docker 브리지 게이트웨이(`METRICS_GATEWAY`)를 통해 들어오는 요청은 명시적으로 거부(`403 Forbidden`)됩니다. 따라서 호스트에 바인딩된 포트를 통해 외부에서 메트릭을 수집하려는 시도는 차단됩니다.
+    - 메트릭을 수집할 때는 Caddy 컨테이너 내부의 루프백 주소(`http://127.0.0.1/metrics/api`)를 호출하거나, 동일한 Docker Compose 네트워크에 스크래퍼 컨테이너를 배치하여 직접 수집하십시오.
+
+11. **프록시 유휴 타임아웃 120초 미만 설정**:
+    - 공개 모드 Caddy는 HTTP 연결 유휴 타임아웃을 `idle 2m`(120초), 요청 헤더 읽기 타임아웃을 `read_header 10s`로 설정합니다.
+    - 앞단에 배치하는 외부 TLS 프록시의 업스트림 keepalive/idle timeout은 반드시 120초 미만(예: 60초~90초)으로 설정하십시오. 프록시의 타임아웃이 더 길면 프록시가 재사용하려는 연결을 Caddy가 먼저 닫아 일시적인 502 에러가 발생할 수 있습니다.
+
+12. **게스트 문서 생성과 사이트 폐쇄**:
+    - 공개 인터넷 모드에서도 기본적으로 게스트의 새 문서 생성이 허용됩니다. IP별 생성 한도와 전체 스토리지 상한은 존재하지만, 분산 봇넷에 의한 문서 및 데이터베이스 용량 증가를 완전히 차단하지는 못합니다.
+    - 허가된 사용자만 이용하는 비공개 사이트로 운영하려면 관리자 콘솔에서 `guestAllowed=false`로 설정하고 OIDC 또는 LDAP 인증 제공자를 연동하십시오.
+
+---
+
+<a id="18-windows-환경-설치-및-운영-wsl-2"></a>
+## 18. Windows 환경 설치 및 운영 (WSL 2)
+
+gachipad는 Windows 10 및 11 환경에서 WSL 2(Windows Subsystem for Linux 2)와 Docker Desktop을 통해 네이티브 Linux 환경과 동등한 성능과 보안으로 구동할 수 있습니다.
+
+### 18.1 시스템 요구사항
+
+- **운영체제**: 64비트 Windows 10 22H2 (빌드 19045) 또는 64비트 Windows 11 (빌드 22000 이상). 32비트 Windows는 지원하지 않습니다.
+- **CPU 가상화**: 메인보드 UEFI/BIOS에서 하드웨어 가상화(Intel VT-x 또는 AMD-V)가 활성화되어 있어야 하며, Windows 기능에서 가상 머신 플랫폼이 켜져 있어야 합니다 (`HypervisorPresent`).
+- **WSL 2**: WSL 버전 2가 필수입니다 (WSL 1은 컨테이너 네트워킹과 파일시스템 제약으로 지원하지 않음).
+- **Linux 배포판**: Ubuntu 등 지원되는 WSL 2 배포판이 설치되어 있어야 합니다 (Docker Desktop 전용 도우미 배포판인 `docker-desktop` 및 `docker-desktop-data`는 제외됨).
+- **컨테이너 런타임**: Docker Desktop이 설치되어 실행 중이어야 하며, 대상 WSL 배포판의 WSL 통합(Settings > Resources > WSL Integration)이 켜져 있어야 합니다 (또는 WSL 배포판 내부에 `systemd=true`가 활성화된 Docker Engine 및 Compose 플러그인이 동작해야 함).
+- **PowerShell**: Windows PowerShell 5.1 또는 PowerShell 7 이상.
+
+### 18.2 설치 절차
+
+1. **설치 명령 실행**:
+   관리자 권한 또는 일반 사용자 권한의 명령 프롬프트(`cmd.exe`)에서 `install.cmd`를 실행하거나, PowerShell에서 `install.ps1`을 직접 실행합니다:
+   ```cmd
+   install.cmd
+   ```
+   또는 PowerShell에서:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Network internal
+   ```
+
+2. **주요 매개변수 (`install.ps1`)**:
+   - `-Network internal|public`: 내부망 모드(기본값) 또는 공개 인터넷 모드 선택.
+   - `-Domain <domain>`: 공개 인터넷 모드에서 사용할 도메인 이름.
+   - `-AcmeEmail <email>`: 공개 인터넷 모드에서 ACME 인증서 발급에 등록할 이메일 주소.
+   - `-BehindProxy`: 외부 TLS 프록시 뒷단 모드 활성화.
+   - `-Db sqlite|postgres|mongodb|external`: 데이터베이스 백엔드 선택 (신규 기본값: `sqlite`).
+   - `-DatabaseUrl <URL>`: 외부 데이터베이스 접속 URL.
+   - `-Distro <distro>`: 설치에 사용할 WSL 배포판 이름 (지정하지 않으면 기본 배포판 자동 선택).
+   - `-InstallDir <dir>`: WSL Linux 파일시스템 내부의 설치 디렉터리 (기본값: `~/gachipad`). **반드시 Linux 파일시스템 경로여야 하며 `/mnt/c` 등의 Windows 마운트 경로는 거부됩니다.**
+   - `-OpenFirewall`: Windows Defender 방화벽에 HTTP/HTTPS 인바운드 허용 규칙을 자동 등록합니다 (관리자 권한 PowerShell 세션 필요).
+   - `-InstallWsl`: WSL이 설치되어 있지 않은 경우, 관리자 권한 세션에서 `wsl --install -d Ubuntu` 명령을 자동으로 실행합니다 (재부팅 필요).
+   - `-BundlePath <archive.tar.gz>`: 오프라인 배포 시 번들 아카이브 파일 경로.
+   - `-InstallArgs <arguments>`: 리눅스 `install.sh` 스크립트로 직접 전달할 추가 플래그.
+
+3. **내부 동작 흐름**:
+   - 호스트 사양(64비트, 지원 빌드, 가상화 상태)을 검증합니다.
+   - 레지스트리(`HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss`) 및 `wsl -l -q`를 통해 설치된 WSL 2 배포판을 탐색합니다.
+   - Docker 데몬 및 Docker Compose 플러그인의 연결 가능 여부를 확인합니다.
+   - 번들 아카이브의 SHA-256 체크섬을 검증하거나 소스 셸 스크립트의 줄바꿈(CRLF/LF)을 점검합니다.
+   - 설치 소스를 WSL Linux 파일시스템의 대상 폴더(`~/gachipad`)로 복사합니다.
+   - 대화형 콘솔 상속(TTY) 모드로 Linux `./install.sh`를 실행하여 컨테이너 이미지를 로드하고 스택을 구동합니다.
+   - `-OpenFirewall` 지정 시 방화벽 규칙을 구성하고, 미지정 시 수동 등록 명령을 출력합니다.
+   - `%LOCALAPPDATA%\gachipad\install.json`에 사용된 WSL 배포판 이름과 설치 디렉터리를 영구 저장합니다.
+
+### 18.3 오류 메시지 그룹별 원인 및 해결 방법
+
+설치 스크립트 실행 중 발생할 수 있는 주요 오류와 조치 방법은 다음과 같습니다:
+
+1. **호스트 OS 및 가상화 관련 오류**:
+   - `A 64-bit version of Windows is required. Upgrade to 64-bit Windows 10 22H2 or Windows 11.`: 32비트 Windows 환경에서는 구동할 수 없습니다. 64비트 Windows로 업그레이드하십시오.
+   - `Supported hosts are 64-bit Windows 10 22H2 (build 19045) or Windows 11. Install a supported Windows version and rerun.`: 지원되지 않는 오래된 Windows 10 빌드입니다. Windows Update를 통해 최신 22H2(빌드 19045 이상) 또는 Windows 11로 업데이트하십시오.
+   - `Virtualization: not detected; check that CPU virtualization is enabled in UEFI and Windows features`: CPU 가상화가 꺼져 있습니다. 컴퓨터 재부팅 시 UEFI/BIOS 설정에 진입하여 Intel VT-x 또는 AMD-V 가상화를 활성화하고, Windows 기능에서 '가상 머신 플랫폼' 및 'Linux용 Windows 하위 시스템'을 켜십시오.
+
+2. **WSL 환경 및 배포판 관련 오류**:
+   - `WSL 2 is not available. Run PowerShell as Administrator and execute: wsl --install -d Ubuntu. Reboot, then rerun this installer.`: WSL 2가 설치되어 있지 않습니다. 관리자 권한 PowerShell에서 `wsl --install -d Ubuntu`를 실행하고 재부팅하십시오.
+   - `WSL installation needs an elevated PowerShell session. Run PowerShell as Administrator and use -InstallWsl.`: `-InstallWsl` 스위치는 관리자 권한이 필요합니다. 관리자 권한으로 PowerShell을 열고 다시 실행하십시오.
+   - `No WSL distribution is installed. Run wsl --install -d Ubuntu, finish first-run setup, then rerun this installer.`: WSL은 켜져 있으나 Linux 배포판이 없거나 Docker Desktop 전용 배포판만 남아 있습니다. `wsl --install -d Ubuntu`를 실행한 후 Ubuntu 콘솔을 열어 초기 계정 생성을 완료하고 재실행하십시오.
+   - `WSL distro '<distro>' is version 1. Convert it with: wsl --set-version '<distro>' 2, then rerun this installer.`: 대상 배포판이 WSL 1 모드로 동작 중입니다. PowerShell에서 `wsl --set-version '<distro>' 2` 명령을 실행하여 WSL 2로 변환하십시오.
+   - `WSL distro '<distro>' was not found. Choose one of: ...; or install one with wsl --install -d Ubuntu.`: `-Distro`로 지정한 배포판이 존재하지 않습니다. 출력된 사용 가능 배포판 목록 중 하나를 지정하십시오.
+   - `Could not read WSL distribution versions. Run wsl --update, then wsl --list --verbose and retry.`: WSL 버전 목록 파싱 실패입니다. `wsl --update`로 WSL 커널을 최신 상태로 갱신한 뒤 재시도하십시오.
+
+3. **Docker 런타임 관련 오류**:
+   - `Docker socket permission was denied in '<distro>'. Add the WSL user to the docker group with sudo usermod -aG docker $USER, then run wsl --shutdown and reopen the distro.`: WSL 사용자가 docker 소켓 접근 권한이 없습니다. 해당 배포판 터미널에서 `sudo usermod -aG docker $USER`를 실행하고, PowerShell에서 `wsl --shutdown`을 실행하여 WSL을 재시작하십시오.
+   - `Docker Desktop is installed but is not running. Start Docker Desktop, wait for its engine to be ready, and enable WSL integration for the selected distro if needed.`: Docker Desktop이 종료되어 있습니다. Docker Desktop을 실행하고 시스템 트레이 아이콘이 실행 중 상태가 될 때까지 기다리십시오.
+   - `Docker Desktop is running, but WSL integration is off for '<distro>'. In Docker Desktop open Settings > Resources > WSL Integration, enable this distro, then Apply & Restart.`: 대상 WSL 배포판과의 Docker 통합이 꺼져 있습니다. Docker Desktop의 설정(Settings) > 리소스(Resources) > WSL Integration에서 대상 배포판의 토글을 켜고 `Apply & Restart`를 클릭하십시오.
+   - `Docker Engine is installed inside '<distro>' without systemd. Add [boot]\nsystemd=true\n to /etc/wsl.conf, then run wsl --shutdown and reopen the distro.`: Docker Desktop 없이 WSL 내부의 네이티브 Docker Engine을 사용할 때 systemd가 꺼져 있는 경우입니다. WSL 배포판 내부 `/etc/wsl.conf` 파일에 `[boot]` 섹션을 추가하고 `systemd=true`를 적은 뒤 `wsl --shutdown`을 실행하십시오.
+   - `Docker is installed but its engine is not reachable in '<distro>'. Start Docker Desktop or start the Docker Engine service inside WSL, then retry.`: Docker 데몬 서비스가 응답하지 않습니다. Docker Desktop을 시작하거나 WSL 내부에서 `sudo service docker start`를 실행하십시오.
+   - `Docker is not available inside '<distro>'. Install Docker Desktop and enable WSL integration for this distro, or install Docker Engine inside WSL.`: Docker가 전혀 설치되어 있지 않습니다. Windows용 Docker Desktop을 설치하십시오.
+   - `Docker works in '<distro>', but Docker Compose is missing. Install the Docker Compose plugin for this engine and retry.`: Docker는 동작하나 Compose 플러그인이 누락되었습니다. Docker Compose 플러그인을 설치하십시오.
+
+4. **파일시스템, 번들 및 줄바꿈 관련 오류**:
+   - `InstallDir must be inside the WSL Linux filesystem, not /mnt/c or another drvfs path. Choose ~/gachipad or another path under the Linux home directory.` (종료 코드 42): 설치 대상 폴더가 Windows 드라이브 마운트(`/mnt/c`, 9p, drvfs, virtiofs) 경로로 지정되었습니다. Windows 파일시스템은 Linux 파일 권한과 볼륨 마운트 호환성이 떨어지므로, 반드시 WSL Linux 네이티브 파일시스템 경로(기본값 `~/gachipad`)를 지정해야 합니다.
+   - `The source does not contain install.sh. Select an offline gachipad bundle or the repository deploy folder.` (종료 코드 43): 지정한 소스 경로에 `install.sh`가 없습니다. 압축을 푼 번들 폴더나 저장소의 `deploy` 폴더를 지정하십시오.
+   - `images.tar is missing. Use the full offline gachipad bundle, including images.tar, rather than the update-only bundle.` (종료 코드 44): 오프라인 설치에 필요한 컨테이너 이미지 패키지가 없습니다. 온라인 업데이트용 배포 아카이브(`gachipad-deploy-*`)가 아닌, 이미지가 포함된 전체 오프라인 번들(`gachipad-*`)을 사용하십시오.
+   - `A copied .sh file has CR line endings. Set git core.autocrlf=false or use the repository .gitattributes, then check out the files again.` (종료 코드 45): 소스 스크립트 파일에 Windows 스타일 캐리지 리턴(`\r\n`)이 포함되어 리눅스 셸에서 구문 오류가 발생합니다. `git config core.autocrlf false`를 설정하거나 저장소의 `.gitattributes` 규칙에 따라 줄바꿈을 LF로 변환한 뒤 다시 체크아웃하십시오.
+   - `Bundle checksum mismatch: <path>. Download the bundle and its matching .sha256 file again.`: 번들 아카이브 파일의 SHA-256 체크섬이 불일치합니다. 번들과 `.sha256` 파일을 다시 다운로드하십시오.
+
+### 18.4 방화벽 설정
+
+외부 네트워크의 다른 사용자가 Windows 호스트에서 실행 중인 gachipad에 접속할 수 있도록 인바운드 방화벽 규칙을 등록해야 합니다.
+
+- **자동 구성 (`-OpenFirewall`)**:
+  관리자 권한으로 실행된 PowerShell 세션에서 `-OpenFirewall` 플래그를 넘기면 다음 규칙을 자동 등록합니다:
+  - 이름: `'gachipad HTTP'` (로컬 포트: `HTTP_PORT`, 기본 80, 프로토콜: TCP)
+  - 이름: `'gachipad HTTPS'` (로컬 포트: `HTTPS_PORT`, 기본 443, 프로토콜: TCP)
+  - 적용 프로필: 내부망 모드는 `Domain, Private`, 공개 인터넷 모드는 `Domain, Private, Public`.
+- **수동 구성**:
+  일반 사용자 세션으로 실행한 경우 방화벽을 임의로 변경하지 않으며, 관리자 권한 PowerShell 창에서 실행할 수 있는 명령어를 화면에 안내합니다:
+  ```powershell
+  New-NetFirewallRule -DisplayName 'gachipad HTTP' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 80 -Profile Domain,Private
+  New-NetFirewallRule -DisplayName 'gachipad HTTPS' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 443 -Profile Domain,Private
+  ```
+  (공개 모드인 경우 `-Profile Domain,Private,Public`을 지정합니다).
+
+### 18.5 NAT vs 미러링(mirrored) 네트워킹
+
+사용하는 Docker 환경과 WSL 네트워킹 모드에 따라 외부 접근 방식에 차이가 있습니다:
+
+- **Docker Desktop 사용 시**: Docker Desktop이 내부 프록시를 통해 컨테이너의 바인딩 포트를 Windows 호스트의 모든 네트워크 인터페이스에 자동으로 노출하므로, 별도의 네트워크 포트포워딩 설정 없이 바로 접속할 수 있습니다.
+- **WSL 내부 독립 Docker Engine 사용 시**:
+  - **NAT 모드 (WSL 2 기본값)**: WSL 2가 가상 NAT 어댑터 뒤에 격리되어 있어, 외부의 다른 컴퓨터에서 WSL 내부 포트로 직접 접속할 수 없습니다.
+    - 해결 방법 1 (Windows 11 22H2 이상 권장): `%USERPROFILE%\.wslconfig` 파일의 `[wsl2]` 섹션에 `networkingMode=mirrored`를 추가하고 `wsl --shutdown`을 실행합니다. 미러링 모드가 활성화되면 Windows 호스트와 WSL이 네트워크 스택을 공유합니다.
+    - 해결 방법 2: Windows 호스트에서 `netsh` 포트프록시 규칙을 등록합니다:
+      ```cmd
+      netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=80 connectaddress=<WSL_IP> connectport=80
+      netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=443 connectaddress=<WSL_IP> connectport=443
+      ```
+      (여기서 `<WSL_IP>`는 WSL 내부에서 `hostname -I`로 확인한 가상 IP입니다).
+
+### 18.6 파일 위치 및 상태 저장
+
+- **설치 상태 메타데이터**: Windows 호스트의 `%LOCALAPPDATA%\gachipad\install.json` 파일에 JSON 형식(UTF-8, 버전 1)으로 저장됩니다. 사용된 WSL 배포판 이름(`Distro`)과 설치 경로(`InstallDir`)를 보관하여 이후 관리 스크립트가 해당 위치를 자동으로 찾을 수 있도록 합니다.
+- **애플리케이션 및 데이터 파일**: WSL Linux 파일시스템 내부(기본값: `~/gachipad`, 예: `/home/<사용자>/gachipad`)에 위치합니다. 데이터 볼륨과 `.env` 파일은 Linux 파일시스템 내부에서 안전하게 보호됩니다.
+
+### 18.7 추가 스크립트 실행 (`gachipad.ps1`)
+
+설치 완료 후에는 Windows 환경에서 `gachipad.ps1` 스크립트를 통해 WSL 내부의 관리 도구를 편리하게 실행할 수 있습니다:
+
+```powershell
+.\deploy\gachipad.ps1 <스크립트이름> [인자]
+```
+
+- **주요 실행 예시**:
+  - 최신 릴리스 업데이트 확인:
+    ```powershell
+    .\deploy\gachipad.ps1 update --check
+    ```
+  - 데이터베이스 백업 수행:
+    ```powershell
+    .\deploy\gachipad.ps1 backup
+    ```
+  - 컨테이너 실시간 로그 확인 (`docker compose logs -f` 실행):
+    ```powershell
+    .\deploy\gachipad.ps1 logs
+    ```
+- **실행 안전성**: `gachipad.ps1`은 `%LOCALAPPDATA%\gachipad\install.json`에 저장된 배포판과 폴더 정보를 자동으로 읽어 실행합니다. 스크립트 이름의 디렉터리 경로 탐색(`..` 또는 `/`), 셸 메타문자 사용을 차단하며, 대소문자를 엄격히 구분하여 설치된 `.sh` 스크립트 목록과 대조합니다. 내부 도우미 스크립트인 `lib.sh`의 직접 실행은 차단됩니다.
+
+### 18.8 알려진 미검증 영역 및 한계
+
+Windows 설치 도구는 회귀 테스트 스위트, WSL 모의 프로세스 경계 테스트, Pester CI 환경을 통해 철저하게 검증되었습니다. 다만 실제 다양한 물리 Windows 시스템 환경에서 다음 영역에 대한 추가 검증이 지속적으로 진행되고 있습니다:
+- 다양한 언어팩(한국어, 독일어 등 비영문 로캘)이 적용된 Windows 환경에서 `wsl.exe` 출력 문자열(UTF-16LE, NUL 문자) 디코딩의 완전한 동작.
+- Windows Terminal 및 클래식 콘솔 환경에서의 ConPTY TTY 스트리밍 및 장시간 로그 실행 중 Ctrl-C 시그널 전파 동작.
+- 실제 Windows Defender 방화벽 규칙 적용 및 다양한 물리 네트워크 장비에서의 인바운드 접근성.
+- Docker Desktop 엔진의 다양한 버전별 실제 클라이언트 IP 소스 주소 보존 동작.
 
 
