@@ -1,7 +1,7 @@
 import { EditorState, Transaction } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { ySyncAnnotation } from "y-codemirror.next";
-import { glides, localCaretActivity } from "./smooth-caret";
+import { glides, hangulStep, localCaretActivity } from "./smooth-caret";
 
 const state = EditorState.create({ doc: "one\ntwo\nthree\nfour\nfive" });
 
@@ -59,5 +59,69 @@ describe("caret transaction intent", () => {
       ),
     ).toBe(true);
     expect(localCaretActivity(state.update({ selection: { anchor: 2 } }))).toBe(true);
+  });
+});
+
+describe("caret during IME composition", () => {
+  // A composition is applied to the document as it goes: each step swaps the composing text.
+  const composing = (doc: string, at: number, from: number, insert: string, userEvent: string) =>
+    EditorState.create({ doc, selection: { anchor: at } }).update({
+      changes: { from, to: at, insert },
+      selection: { anchor: from + insert.length },
+      userEvent,
+    });
+
+  it("glides when a Hangul composition moves on to the next syllable", () => {
+    for (const userEvent of ["input.type.compose", "input.type.compose.start"]) {
+      // first jamo of a syllable, after the text already there
+      const next = composing("한", 1, 1, "ㄱ", userEvent);
+      expect(hangulStep(next)).toBe(true);
+      expect(glides(next)).toBe(true);
+      // a syllable that splits into a finished one and a new composing one
+      expect(glides(composing("각", 1, 0, "가가", userEvent))).toBe(true);
+    }
+  });
+
+  it("snaps while jamo join the syllable the cursor is already on", () => {
+    for (const { before, after } of [
+      { before: "ㅎ", after: "하" },
+      { before: "하", after: "한" },
+      { before: "한", after: "하" },
+    ]) {
+      const step = composing(before, 1, 0, after, "input.type.compose");
+      expect(hangulStep(step)).toBe(false);
+      expect(glides(step)).toBe(false);
+    }
+  });
+
+  it("snaps for compositions that show a candidate window", () => {
+    for (const { doc, insert } of [
+      { doc: "", insert: "か" }, // Japanese kana
+      { doc: "か", insert: "かん" },
+      { doc: "", insert: "ni" }, // pinyin letters
+      { doc: "ni", insert: "你" }, // Chinese
+      { doc: "한", insert: "韓" }, // Hanja chosen from the candidates
+      { doc: "", insert: "한a" }, // Hangul mixed with other text
+    ]) {
+      const at = doc.length;
+      const step = composing(doc, at, at, insert, "input.type.compose");
+      expect(hangulStep(step)).toBe(false);
+      expect(glides(step)).toBe(false);
+    }
+  });
+
+  it("snaps for a composition step that inserts nothing", () => {
+    expect(glides(composing("한", 1, 0, "", "input.type.compose"))).toBe(false);
+  });
+
+  it("still snaps for Hangul that is pasted or arrives from a remote edit", () => {
+    expect(glides(composing("한", 1, 1, "ㄱ", "input.paste"))).toBe(false);
+    const remote = EditorState.create({ doc: "한" }).update({
+      changes: { from: 1, insert: "ㄱ" },
+      selection: { anchor: 2 },
+      userEvent: "input.type.compose",
+      annotations: Transaction.remote.of(true),
+    });
+    expect(glides(remote)).toBe(false);
   });
 });

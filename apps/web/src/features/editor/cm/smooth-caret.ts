@@ -13,14 +13,20 @@ import { ySyncAnnotation } from "y-codemirror.next";
  * It is drawn in its own layer and moved with a CSS transform, so the compositor animates it and
  * layout never reruns; CodeMirror's own main cursor is hidden while this is on (editor.css). Typing,
  * deleting and keyboard moves glide; clicks, pastes, undo, remote edits, resizes and jumps of more
- * than a few lines snap. So does everything while an IME composes: the caret must not animate under
- * a candidate window. Under `prefers-reduced-motion` the CSS drops the transition. The layer is
+ * than a few lines snap. So does everything while an IME composes, except Hangul: its syllables are
+ * composed for nearly every keystroke, with no candidate window, so the caret glides when a
+ * composition carries it to the next syllable and stays put while jamo join the one it is on.
+ * Japanese, Chinese and Hanja composition snap: the caret must not animate under a candidate
+ * window. Under `prefers-reduced-motion` the CSS drops the transition. The layer is
  * not a `.cm-cursorLayer`, so `.cm-cursorLayer .cm-cursor` still counts the selections; editor.css
  * shows and blinks it the way CodeMirror does its own.
  */
 
 /** Vertical distance, in lines, up to which the cursor glides; a longer move jumps. */
 const GLIDE_MAX_LINES = 3;
+
+/** Hangul syllables and jamo: the compatibility block, the conjoining blocks and their extensions. */
+const HANGUL = /^[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7a3\ud7b0-\ud7ff]+$/;
 
 /** Yjs maps our selection through remote edits without an explicit local selection move. */
 export function localCaretActivity(tr: Transaction): boolean {
@@ -36,8 +42,25 @@ export function glides(tr: Transaction): boolean {
   if (!localCaretActivity(tr)) return false;
   if (tr.isUserEvent("input.paste") || tr.isUserEvent("input.drop")) return false;
   if (tr.isUserEvent("select.pointer")) return false;
-  if (tr.isUserEvent("input.type.compose")) return false;
+  if (tr.isUserEvent("input.type.compose")) return hangulStep(tr);
   return tr.isUserEvent("input") || tr.isUserEvent("delete") || tr.isUserEvent("select");
+}
+
+/**
+ * A composition step that only inserts Hangul and moves the cursor on: a new syllable starts or a
+ * committed one is followed by the next. Jamo joining the syllable already there leave the cursor
+ * in the same place and only change its width, so that stays a snap. Judged by the composed text,
+ * not by the UI language or the keyboard layout.
+ */
+export function hangulStep(tr: Transaction): boolean {
+  if (!tr.docChanged || tr.newSelection.main.head === tr.startState.selection.main.head) {
+    return false;
+  }
+  let hangul = true;
+  tr.changes.iterChanges((_from, _to, _fromB, _toB, inserted) => {
+    if (!HANGUL.test(inserted.toString())) hangul = false;
+  });
+  return hangul;
 }
 
 class GlidingCaret implements LayerMarker {
@@ -78,6 +101,9 @@ class GlidingCaret implements LayerMarker {
 export function smoothCaret(): Extension {
   // Set by each update for the markers measured after it.
   let glide = false;
+  // The first measure after a composition step glides only if it found the cursor somewhere new.
+  let composeStep = false;
+  let spot: { left: number; top: number } | undefined;
   const caretLayer = layer({
     above: true,
     class: "cm-smooth-caret-layer",
@@ -89,6 +115,13 @@ export function smoothCaret(): Extension {
         EditorSelection.cursor(main.head, main.assoc),
       );
       if (!rect) return [];
+      // While composing, the browser can report the new text late: an empty or unmoved rect means
+      // the measure came before the layout. Snap to it, and to the corrected one that follows.
+      if (composeStep) {
+        composeStep = false;
+        if (rect.height <= 0 || (spot?.left === rect.left && spot.top === rect.top)) glide = false;
+      }
+      spot = { left: rect.left, top: rect.top };
       return [new GlidingCaret(rect.left, rect.top, rect.height, glide)];
     },
     update(update: ViewUpdate, dom: HTMLElement) {
@@ -99,9 +132,10 @@ export function smoothCaret(): Extension {
         glide =
           moved &&
           update.transactions.length > 0 &&
-          !update.view.composing &&
+          (!update.view.composing || update.transactions.every(hangulStep)) &&
           update.transactions.every(glides) &&
           !(update.geometryChanged && !update.docChanged);
+        composeStep = glide && update.view.composing;
       }
       // Restart fully visible only for our input/moves. Remote Yjs changes must keep the rhythm.
       // Rapid typing keeps restarting the opaque part of the cycle, so the caret stays solid.
