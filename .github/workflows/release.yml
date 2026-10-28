@@ -190,9 +190,10 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           pnpm --filter @gachipad/web build
-          mkdir -p dist/web-sourcemaps/assets
-          cp apps/web/dist/assets/*.map dist/web-sourcemaps/assets/
-          tar -czf "dist/gachipad-web-sourcemaps-${VERSION}.tar.gz" -C dist/web-sourcemaps assets
+          # Staged outside dist/: every file in dist/ is uploaded as a release asset.
+          mkdir -p dist sourcemaps/assets
+          cp apps/web/dist/assets/*.map sourcemaps/assets/
+          tar -czf "dist/gachipad-web-sourcemaps-${VERSION}.tar.gz" -C sourcemaps assets
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: bundle-*
