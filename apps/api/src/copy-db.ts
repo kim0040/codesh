@@ -19,7 +19,7 @@ const windowValid =
   windowMinutes >= COPY_WINDOW_MINUTES.min && windowMinutes <= COPY_WINDOW_MINUTES.max;
 
 const quiescent =
-  "Source must be quiescent: stop the API and collab service first, and do not move, replace or relink a SQLite source until the copy ends.";
+  "Source must be quiescent: stop the API and collab services first, and do not move, replace or relink a SQLite source until the copy finishes.";
 console.log(
   windowValid
     ? `${quiescent} Copy window: ${windowMinutes} minutes (GACHIPAD_COPY_WINDOW_MINUTES, ${COPY_WINDOW_MINUTES.min} to ${COPY_WINDOW_MINUTES.max}; unset or empty means ${COPY_WINDOW_MINUTES.default}). Not copied: diagnostics, records that expired or expire within ${windowMinutes} minutes, and records of such or missing shares. The copy must finish within ${windowMinutes - 5} minutes.`

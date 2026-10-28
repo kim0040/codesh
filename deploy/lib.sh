@@ -118,9 +118,9 @@ migration_recovery_hint() {
     printf 'migrate-db: restore configuration: cp -p %q/original.env .env\n' "$stage"
     if [ -f "$stage/original.kind" ]; then
       printf 'migrate-db: restore marker: cp -p %q/original.kind state/database-kind\n' "$stage"
-    else echo 'migrate-db: original had no marker: rm -f state/database-kind'; fi
+    else echo 'migrate-db: if there was no marker before: rm -f state/database-kind'; fi
     echo 'migrate-db: restart the saved backend and check shares/uploads: docker compose up -d --pull never --wait'
-    printf 'migrate-db: only after recovery succeeds: rm -rf -- %q state/transaction\n' "$stage"
+    printf 'migrate-db: only after recovery succeeds, remove the snapshot and the transaction marker: rm -rf -- %q state/transaction\n' "$stage"
   else
     echo 'migrate-db: locate the private .env.migrate-db.*/original.env snapshot; restore it and its original.kind (or remove the marker if originally absent), restart the saved backend and check shares/uploads before removing the snapshot and state/transaction.'
   fi

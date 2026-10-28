@@ -42,7 +42,7 @@ const WRITE_CONCERN_TIMEOUT_MS = 60_000;
 export const CLOSE_TIMEOUT_MS = 10_000;
 /** pg drops a query stuck this long with its connection, after the copy's own timeout reported it. */
 export const PG_QUERY_TIMEOUT_MS = OPERATION_TIMEOUT_MS + 5_000;
-const SAME_DATABASE = "Source and destination are the same";
+const SAME_DATABASE = "Source and destination are the same database";
 const NOT_EMPTY = "Destination is not empty";
 const NOT_PRIMARY = "MongoDB source is not the primary";
 const NOT_MAJORITY = "MongoDB source has writes not yet replicated to a majority";
@@ -893,7 +893,9 @@ export async function copyDatabase(
     fromKind = storageKindFromUrl(fromUrl);
     toKind = storageKindFromUrl(toUrl);
   } catch {
-    throw new CopyRefusedError("Unsupported database URL scheme");
+    throw new CopyRefusedError(
+      "Unsupported database URL scheme (supported: memory, mongodb, mongodb+srv, sqlite, postgres, postgresql, mysql, mariadb)",
+    );
   }
 
   if (sqliteUri(fromKind, fromUrl) || sqliteUri(toKind, toUrl))

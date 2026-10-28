@@ -120,7 +120,7 @@ migration_cleanup() {
   [ -z "$ACTIVE_PID" ] || kill "$ACTIVE_PID" 2>/dev/null || true
   if [ "$SUCCESS" = 0 ] && [ -n "$STAGE" ]; then
     if [ "$recovered" != 1 ]; then
-      migration_message 'migrate-db: could not verify migration container removal; writers will not be restarted.'
+      migration_message 'migrate-db: could not confirm migration container removal; writers stay stopped.'
     elif [ "$STOPPED" = 1 ]; then
       stop_writes restore >&2 || recovered=0
     fi
@@ -343,9 +343,9 @@ try {
   phase = "DATA_SPACE";
   const space = statfsSync(process.env.GACHIPAD_PREFLIGHT_DATA_PATH || "/data", { bigint: true });
   const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
-  console.log(`migrate-db: required local bytes ${required}`);
+  console.log(`migrate-db: required local disk space: ${required} bytes`);
   const rate = target.startsWith("sqlite:") ? 85 : 40;
-  console.log(`migrate-db: estimated minimum window minutes ${Math.max(15, Math.ceil(Number(bytes) / 1000000 / rate / 60 * 2 + 5))}; allow more for network and record count.`);
+  console.log(`migrate-db: estimated minimum copy window: ${Math.max(15, Math.ceil(Number(bytes) / 1000000 / rate / 60 * 2 + 5))} minutes; allow more for network and record count.`);
   if (space.bavail * space.bsize < required) throw new Error();
   phase = "DESTINATION";
   // Bundled destinations are checked read-only by the shell. Never initialize a DB in preflight.
@@ -381,7 +381,7 @@ if [ "$preflight_status" != 0 ]; then
   exit "$preflight_status"
 fi
 ACTIVE_CONTAINER=""
-required="$(sed -n 's/^migrate-db: required local bytes //p' "$STAGE/preflight.log")"
+required="$(sed -n 's/^migrate-db: required local disk space: \([0-9][0-9]*\) bytes$/\1/p' "$STAGE/preflight.log")"
 [[ "$required" =~ ^[0-9]+$ ]] || die 'preflight did not report disk-space requirement'
 mkdir -p backups
 df -Pk backups | awk -v required="$required" 'NR == 2 {exit !($4 * 1024 >= required)}' ||

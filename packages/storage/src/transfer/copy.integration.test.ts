@@ -739,7 +739,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
       await opened.stores.settings.put({ ...defaultSettings(), contact: "same@example.invalid" });
       await opened.close();
       await expect(copyDatabase(url, alias)).rejects.toThrow(
-        new CopyRefusedError("Source and destination are the same"),
+        new CopyRefusedError("Source and destination are the same database"),
       );
     } finally {
       await dropDatabase("mongodb", name, url);
@@ -802,9 +802,9 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
           filled,
           "couchdb://user:cli-secret@localhost/db",
           2,
-          "Result: refused (Unsupported database URL scheme).",
+          "Result: refused (Unsupported database URL scheme (supported: memory, mongodb, mongodb+srv, sqlite, postgres, postgresql, mysql, mariadb)).",
         ],
-        [filled, filled, 2, "Result: refused (Source and destination are the same)."],
+        [filled, filled, 2, "Result: refused (Source and destination are the same database)."],
         [empty, filled, 2, "Result: refused (Destination is not empty)."],
         [
           filled,
@@ -841,7 +841,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
           mongo,
           `${mongo}${mongo.includes("?") ? "&" : "?"}appName=gp-copy-cli`,
           2,
-          "Result: refused (Source and destination are the same).",
+          "Result: refused (Source and destination are the same database).",
         ],
         [
           filled,
@@ -1156,7 +1156,7 @@ describe.skipIf(!enabled)("real backend database transfer", () => {
         expect(existsSync(`/tmp/${name}.sqlite`)).toBe(false);
         // The secondary answers with another process id, but the same set and members.
         await expect(copyDatabase(primary, secondary)).rejects.toThrow(
-          new CopyRefusedError("Source and destination are the same"),
+          new CopyRefusedError("Source and destination are the same database"),
         );
         const check = await openStores(primary);
         expect((await check.stores.settings.get()).contact).toBe("rs@example.invalid");

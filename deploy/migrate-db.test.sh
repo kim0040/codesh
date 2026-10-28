@@ -101,7 +101,7 @@ if [[ "$*" == *' api node --import '* ]]; then
   cat >"$FIXTURE/preflight-source"
   grep -q '^const watchdog = setTimeout' "$FIXTURE/preflight-source" || exit 89
   echo preflight >>"$FIXTURE/events"
-  echo 'migrate-db: required local bytes 67108864'
+  echo 'migrate-db: required local disk space: 67108864 bytes'
   if [ "${PREFLIGHT_STATUS:-0}" = 2 ]; then echo 'Result: refused (Destination is not empty).'; fi
   exit "${PREFLIGHT_STATUS:-0}"
 fi
@@ -234,7 +234,7 @@ for refusal in 'SQLite source is open elsewhere or was not closed cleanly' 'SQLi
 done
 echo 'ok: source copy refusals retain exit 2 and give source-only recovery guidance'
 make_fixture generic-refused sqlite
-if COPY_STATUS=2 COPY_REFUSAL='Unsupported database URL scheme' run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
+if COPY_STATUS=2 COPY_REFUSAL='Unsupported database URL scheme (supported: memory, mongodb, mongodb+srv, sqlite, postgres, postgresql, mysql, mariadb)' run --to postgres --yes; then exit 1; else [ "$?" = 2 ]; fi
 grep -q 'copy refused before writing' "$FIXTURE/install/state/migrate-db.log"
 if grep -Eq 'use an empty destination|destination may hold a partial copy' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
 clean_state
@@ -449,7 +449,7 @@ echo 'ok: incomplete recovery preserves snapshots/transaction and gives concrete
 make_fixture container-removal-failed sqlite
 if COPY_STATUS=1 FAIL_CONTAINER_REMOVE=1 run --to postgres --yes; then exit 1; else [ "$?" = 3 ]; fi
 if grep -qx start "$FIXTURE/events"; then exit 1; fi
-grep -q 'writers will not be restarted' "$FIXTURE/install/state/migrate-db.log"
+grep -q 'writers stay stopped' "$FIXTURE/install/state/migrate-db.log"
 [ -e "$FIXTURE/install/state/transaction" ]
 echo 'ok: unverified copy container removal prevents source restart and returns exit 3'
 for signal_target in HUP:postgres INT:sqlite TERM:external; do

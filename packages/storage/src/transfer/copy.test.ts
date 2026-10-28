@@ -1091,7 +1091,7 @@ describe("database transfer", () => {
       });
     };
     const process = (processId: string) => ({ topologyVersion: { processId } });
-    const same = new CopyRefusedError("Source and destination are the same");
+    const same = new CopyRefusedError("Source and destination are the same database");
     const primary = {
       ...process("p1"),
       setName: "rs0",
@@ -1148,7 +1148,7 @@ describe("database transfer", () => {
       ],
     ] as const)
       await expect(copyDatabase(from, to, { openStores: neverOpen })).rejects.toThrow(
-        new CopyRefusedError("Source and destination are the same"),
+        new CopyRefusedError("Source and destination are the same database"),
       );
     for (const [from, to] of [
       ["postgres://gp@localhost/gp?host=/run/GP-A", "postgres://gp@localhost/gp?host=/run/gp-a"],
@@ -1427,7 +1427,7 @@ describe("database transfer", () => {
         if (connectsTo(from) === connectsTo(to)) {
           same++;
           expect(outcome, `${from} and ${to}`).toEqual(
-            new CopyRefusedError("Source and destination are the same"),
+            new CopyRefusedError("Source and destination are the same database"),
           );
         } else expect(outcome, `${from} and ${to}`).toMatchObject({ counts: { shares: 1 } });
       }
