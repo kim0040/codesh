@@ -1,5 +1,5 @@
-import { EditorState, Transaction } from "@codemirror/state";
-import { describe, expect, it } from "vitest";
+import { EditorState, type Text, Transaction } from "@codemirror/state";
+import { describe, expect, it, vi } from "vitest";
 import { ySyncAnnotation } from "y-codemirror.next";
 import { GlidingCaret, glides, hangulStep, localCaretActivity } from "./smooth-caret";
 
@@ -186,7 +186,7 @@ describe("caret in a long run of conjoining jamo", () => {
   });
 
   it("glides for the next syllable after a long cluster", () => {
-    for (const length of [15, 16, 17, 40]) {
+    for (const length of [15, 16, 17, 40, 5000]) {
       const doc = leading + vowel.repeat(length);
       const next = EditorState.create({ doc, selection: { anchor: doc.length } }).update({
         changes: { from: doc.length, insert: "\u1102" },
@@ -194,6 +194,51 @@ describe("caret in a long run of conjoining jamo", () => {
         userEvent: "input.type.compose",
       });
       expect(glides(next)).toBe(true);
+    }
+  });
+
+  it("bounds document reads across repeated composing appends to a long cluster", () => {
+    let current = EditorState.create({
+      doc: leading + vowel.repeat(5000),
+      selection: { anchor: 5001 },
+    });
+    let reads = 0;
+    const watched = new WeakSet<Text>();
+    const restore: Array<() => void> = [];
+    const watchReads = (doc: Text) => {
+      if (watched.has(doc)) return;
+      const original = doc.sliceString;
+      const slice = vi.spyOn(doc, "sliceString").mockImplementation(function (
+        this: Text,
+        from,
+        to,
+        lineSep,
+      ) {
+        reads += (to ?? this.length) - (from ?? 0);
+        return original.call(this, from, to, lineSep);
+      });
+      restore.push(() => slice.mockRestore());
+      watched.add(doc);
+    };
+
+    try {
+      for (let i = 0; i < 200; i++) {
+        const before = reads;
+        const at = current.selection.main.head;
+        const tr = current.update({
+          changes: { from: at, insert: vowel },
+          selection: { anchor: at + 1 },
+          userEvent: "input.type.compose",
+        });
+        watchReads(tr.startState.doc);
+        watchReads(tr.newDoc);
+        expect(glides(tr)).toBe(false);
+        expect(reads - before).toBeLessThanOrEqual(132);
+        current = tr.state;
+      }
+      expect(reads).toBeLessThan(20 * current.doc.length);
+    } finally {
+      for (const restoreSpy of restore) restoreSpy();
     }
   });
 });

@@ -62,30 +62,108 @@ export function hangulStep(tr: Transaction): boolean {
   tr.changes.iterChanges((_from, _to, _fromB, _toB, inserted) => {
     if (!HANGUL.test(inserted.toString())) hangul = false;
   });
-  return (
-    hangul &&
-    syllableStart(tr.startState.doc, tr.startState.selection.main.head) !==
-      syllableStart(tr.newDoc, tr.newSelection.main.head)
-  );
+  return hangul && hangulSyllableStep(tr);
+}
+
+function hangulSyllableStep(tr: Transaction): boolean {
+  const oldHead = tr.startState.selection.main.head;
+  const oldStart = syllableStart(tr.startState.doc, oldHead);
+  const appended = mapAppendedSyllableStart(tr, oldHead, oldStart);
+  if (appended !== undefined) return appended;
+  const newStart = syllableStart(tr.newDoc, tr.newSelection.main.head);
+  return oldStart !== null && newStart !== null && oldStart !== newStart;
 }
 
 /** Characters read at a time when walking back to where a syllable starts. */
 const SYLLABLE_CHUNK = 16;
+/** Maximum uncached text read to find a syllable start. */
+const SYLLABLE_READ_LIMIT = 128;
 
-/** Position where the syllable ending at `head` starts, or -1 when there is nothing before it. */
-function syllableStart(doc: Text, head: number): number {
+type SyllableStart = number | null;
+
+/** A document version and head do not change; later composing transactions can reuse this result. */
+const syllableStarts = new WeakMap<Text, Map<number, SyllableStart>>();
+
+/** Position where the syllable ending at `head` starts, or null when the start is not known. */
+function syllableStart(doc: Text, head: number): SyllableStart {
+  const cached = syllableStarts.get(doc)?.get(head);
+  if (cached !== undefined) return cached;
+
   let start = head - 1;
-  // A cluster of any length has a true start: keep reading back until a pair no longer joins, so a
-  // long run of jamo never looks like several syllables.
+  let remaining = SYLLABLE_READ_LIMIT;
   while (start > 0) {
-    const from = Math.max(0, start - SYLLABLE_CHUNK);
+    const span = Math.min(SYLLABLE_CHUNK, remaining - 1);
+    if (span < 1) return rememberSyllableStart(doc, head, null);
+    const from = Math.max(0, start - span);
     const text = doc.sliceString(from, start + 1);
+    remaining -= text.length;
     let i = text.length - 1;
     while (i > 0 && joins(text.charCodeAt(i - 1), text.charCodeAt(i))) i--;
     start = from + i;
-    if (i > 0) break;
+    if (i > 0 || from === 0) return rememberSyllableStart(doc, head, start);
   }
+  return rememberSyllableStart(doc, head, start);
+}
+
+function rememberSyllableStart(doc: Text, head: number, start: SyllableStart): SyllableStart {
+  let starts = syllableStarts.get(doc);
+  if (!starts) {
+    starts = new Map();
+    syllableStarts.set(doc, starts);
+  }
+  starts.set(head, start);
   return start;
+}
+
+/**
+ * Carry the current boundary through a small append at the caret. This keeps repeated composition
+ * edits incremental, including when the old cluster was too long to find within the read limit.
+ */
+function mapAppendedSyllableStart(
+  tr: Transaction,
+  oldHead: number,
+  oldStart: SyllableStart,
+): boolean | undefined {
+  const newHead = tr.newSelection.main.head;
+  let count = 0;
+  let isAppend = false;
+  let startsNewSyllable = false;
+  let mappedStart: SyllableStart = oldStart;
+
+  tr.changes.iterChanges((from, to, fromB, toB, inserted) => {
+    count++;
+    if (
+      from !== oldHead ||
+      to !== oldHead ||
+      fromB !== oldHead ||
+      toB !== newHead ||
+      inserted.length === 0 ||
+      inserted.length > SYLLABLE_READ_LIMIT
+    ) {
+      return;
+    }
+
+    isAppend = true;
+    const text = inserted.toString();
+    let previous =
+      oldHead > 0 ? tr.startState.doc.sliceString(oldHead - 1, oldHead).charCodeAt(0) : undefined;
+    if (previous === undefined) {
+      mappedStart = oldHead;
+      startsNewSyllable = true;
+    }
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (previous !== undefined && !joins(previous, code)) {
+        mappedStart = oldHead + i;
+        startsNewSyllable = true;
+      }
+      previous = code;
+    }
+  });
+
+  if (count !== 1 || !isAppend) return undefined;
+  rememberSyllableStart(tr.newDoc, newHead, mappedStart);
+  return startsNewSyllable;
 }
 
 /** Role of a Hangul code in a syllable: leading, vowel or trailing jamo, or a whole syllable. */
