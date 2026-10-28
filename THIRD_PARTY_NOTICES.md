@@ -8,7 +8,7 @@ lives. The MIT licence of gachipad covers gachipad's code only; every component 
 licence.
 
 Versions are those pinned in `pnpm-lock.yaml`, `deploy/mdns/package-lock.json` and
-`deploy/docker-compose.yml` (checked 2026-10-25).
+`deploy/docker-compose.yml` (checked 2026-10-28).
 
 Where the licence texts are shipped:
 
@@ -82,14 +82,14 @@ reproduced in full in `/THIRD-PARTY-LICENSES.txt` and is part of the npm package
 
 The production dependency trees of the web app, `apps/api` and `apps/collab` (the packages a
 production install puts on disk, workspace packages followed, installed peer dependencies included),
-and, listed separately below, the mDNS sidecar. Development tools are in section 6. 304
+and, listed separately below, the mDNS sidecar. Development tools are in section 6. 327
 distinct package versions in the first three trees:
 
 | Licence | Package versions |
 |---|---|
-| MIT | 270 |
-| ISC | 13 |
-| Apache-2.0 | 11 |
+| MIT | 291 |
+| ISC | 14 |
+| Apache-2.0 | 12 |
 | BSD-3-Clause | 4 |
 | BSD-2-Clause | 1 |
 | 0BSD | 1 |
@@ -97,13 +97,13 @@ distinct package versions in the first three trees:
 | OFL-1.1 | 2 |
 | UNLICENSED | 1 |
 
-Web: 206 package versions, API: 91, collab: 40; many are shared. The web
+Web: 206 package versions, API: 114, collab: 64; many are shared. The web
 count is the superset of what the minified bundle contains (it includes type-only packages). All
 licence texts of the web tree are in `/THIRD-PARTY-LICENSES.txt`.
 
 **Apache-2.0 and NOTICE files.** Apache-2.0 §4(d) requires the contents of a component's `NOTICE`
-file to be passed on. The 11 Apache-2.0 packages below were checked for a `NOTICE` file in the
-installed package on 2026-10-25: none ships one, so there is no NOTICE text to reproduce. The web
+file to be passed on. The 12 Apache-2.0 packages below were checked for a `NOTICE` file in the
+installed package on 2026-10-28: none ships one, so there is no NOTICE text to reproduce. The web
 build writes the `NOTICE` file of any package that has one into `/THIRD-PARTY-LICENSES.txt` (the same
 code picks up `LICENSE`, `COPYING`, `NOTICE` and similar files), so a package that adds one later is
 carried along automatically; the API and collab images keep the files of each package, `NOTICE`
@@ -119,6 +119,7 @@ included.
 | `codemirror-lang-elixir` 4.0.1 | web |
 | `denque` 2.1.0 | api, collab |
 | `lezer-elixir` 1.1.3 | web |
+| `long` 5.3.2 | api, collab |
 | `mongodb` 7.7.0 | api, collab |
 | `mongodb-connection-string-url` 7.0.2 | api, collab |
 | `prom-client` 15.1.3 | api, collab |
@@ -131,6 +132,9 @@ Special cases:
 - `isbot` (web, Unlicense): public-domain dedication.
 - `mongodb`, `bson` and `mongodb-connection-string-url` (Apache-2.0) are MongoDB's Node.js driver, not
   the MongoDB server (see section 5). `tslib` is 0BSD.
+- `pg` and `mysql2` are the PostgreSQL and MySQL/MariaDB client drivers; no PostgreSQL, MySQL or
+  MariaDB server code is in the npm trees. SQLite support uses Node.js's built-in `node:sqlite`
+  module (part of Node.js, MIT, already covered by the node image row); no SQLite npm package.
 - Packages without a licence file in their tarball: `abstract-logging`, `react-remove-scroll-bar`, `strict-event-emitter-types`. Their `package.json` declares the
   licence; the web build says so in `/THIRD-PARTY-LICENSES.txt` for the ones it contains.
 
@@ -314,6 +318,7 @@ All packages (name, version, declared licence, where it is in the production tre
 | `async-mutex` | 0.5.0 | MIT | collab |
 | `atomic-sleep` | 1.0.0 | MIT | api |
 | `avvio` | 9.3.1 | MIT | api |
+| `aws-ssl-profiles` | 1.1.2 | MIT | api, collab |
 | `bintrees` | 1.0.2 | MIT | api, collab |
 | `bson` | 7.3.3 | Apache-2.0 | api, collab |
 | `camelcase` | 5.3.1 | MIT | web |
@@ -348,12 +353,15 @@ All packages (name, version, declared licence, where it is in the production tre
 | `fflate` | 0.8.3 | MIT | web, api |
 | `find-my-way` | 9.10.0 | MIT | api |
 | `find-up` | 4.1.0 | MIT | web |
+| `generate-function` | 2.3.1 | MIT | api, collab |
 | `get-caller-file` | 2.0.5 | ISC | web |
 | `get-nonce` | 1.0.1 | MIT | web |
+| `iconv-lite` | 0.7.3 | MIT | api, collab |
 | `ioredis` | 5.6.1 | MIT | collab |
 | `ioredis` | 6.0.0 | MIT | api |
 | `ipaddr.js` | 2.5.0 | MIT | api |
 | `is-fullwidth-code-point` | 3.0.0 | MIT | web |
+| `is-property` | 1.0.2 | MIT | api, collab |
 | `isbot` | 5.2.2 | Unlicense | web |
 | `isomorphic.js` | 0.2.5 | MIT | web, api, collab |
 | `jose` | 6.2.13 | MIT | api |
@@ -368,11 +376,15 @@ All packages (name, version, declared licence, where it is in the production tre
 | `locate-path` | 5.0.0 | MIT | web |
 | `lodash.defaults` | 4.2.0 | MIT | collab |
 | `lodash.isarguments` | 3.1.0 | MIT | collab |
+| `long` | 5.3.2 | Apache-2.0 | api, collab |
+| `lru.min` | 1.1.5 | MIT | api, collab |
 | `lucide-react` | 1.61.0 | ISC | web |
 | `memory-pager` | 1.5.0 | MIT | api, collab |
 | `mongodb` | 7.7.0 | Apache-2.0 | api, collab |
 | `mongodb-connection-string-url` | 7.0.2 | Apache-2.0 | api, collab |
 | `ms` | 2.1.3 | MIT | api, collab |
+| `mysql2` | 3.24.6 | MIT | api, collab |
+| `named-placeholders` | 1.1.6 | MIT | api, collab |
 | `oauth4webapi` | 3.8.8 | MIT | api |
 | `on-exit-leak-free` | 2.1.2 | MIT | api |
 | `openapi-types` | 12.1.3 | MIT | api |
@@ -381,10 +393,22 @@ All packages (name, version, declared licence, where it is in the production tre
 | `p-locate` | 4.1.0 | MIT | web |
 | `p-try` | 2.2.0 | MIT | web |
 | `path-exists` | 4.0.0 | MIT | web |
+| `pg` | 8.23.1 | MIT | api, collab |
+| `pg-cloudflare` | 1.4.1 | MIT | api, collab |
+| `pg-connection-string` | 2.14.1 | MIT | api, collab |
+| `pg-int8` | 1.0.1 | ISC | api, collab |
+| `pg-pool` | 3.14.0 | MIT | api, collab |
+| `pg-protocol` | 1.16.1 | MIT | api, collab |
+| `pg-types` | 2.2.0 | MIT | api, collab |
+| `pgpass` | 1.0.5 | MIT | api, collab |
 | `pino` | 10.4.0 | MIT | api |
 | `pino-abstract-transport` | 3.0.0 | MIT | api |
 | `pino-std-serializers` | 7.1.0 | MIT | api |
 | `pngjs` | 5.0.0 | MIT | web |
+| `postgres-array` | 2.0.0 | MIT | api, collab |
+| `postgres-bytea` | 1.0.1 | MIT | api, collab |
+| `postgres-date` | 1.0.7 | MIT | api, collab |
+| `postgres-interval` | 1.2.0 | MIT | api, collab |
 | `pretendard` | 1.3.9 | OFL-1.1 | web |
 | `prettier` | 3.9.10 | MIT | web |
 | `process-warning` | 5.1.1 | MIT | api |
@@ -409,6 +433,7 @@ All packages (name, version, declared licence, where it is in the production tre
 | `rfdc` | 1.4.1 | MIT | api |
 | `safe-regex2` | 5.1.2 | MIT | api |
 | `safe-stable-stringify` | 2.5.0 | MIT | api |
+| `safer-buffer` | 2.1.2 | MIT | api, collab |
 | `scheduler` | 0.28.0 | MIT | web |
 | `secure-json-parse` | 4.1.1 | BSD-3-Clause | api |
 | `semver` | 7.8.5 | ISC | api |
@@ -418,7 +443,8 @@ All packages (name, version, declared licence, where it is in the production tre
 | `set-cookie-parser` | 3.2.1 | MIT | api |
 | `sonic-boom` | 4.2.1 | MIT | api |
 | `sparse-bitfield` | 3.0.3 | MIT | api, collab |
-| `split2` | 4.2.0 | ISC | api |
+| `split2` | 4.2.0 | ISC | api, collab |
+| `sql-escaper` | 1.5.2 | MIT | api, collab |
 | `standard-as-callback` | 2.1.0 | MIT | api, collab |
 | `strict-event-emitter-types` | 2.0.0 | ISC | api |
 | `string-width` | 4.2.3 | MIT | web |
@@ -437,6 +463,7 @@ All packages (name, version, declared licence, where it is in the production tre
 | `whatwg-url` | 14.2.0 | MIT | api, collab |
 | `which-module` | 2.0.1 | ISC | web |
 | `wrap-ansi` | 6.2.0 | MIT | web |
+| `xtend` | 4.0.2 | MIT | api, collab |
 | `y-codemirror.next` | 0.3.6 | MIT | web |
 | `y-indexeddb` | 9.0.12 | MIT | web |
 | `y-protocols` | 1.0.7 | MIT | web, collab |
@@ -457,17 +484,20 @@ column apply to you.
 
 | Image | Licence of the main component | What to carry along |
 |---|---|---|
-| `mongo:8.0.34` (Ubuntu 24.04) | MongoDB Community Server: **SSPL v1** (source-available, not OSI open source). MongoDB Shell and Database Tools: Apache-2.0. Ubuntu packages: various, including GPL and LGPL. | The SSPL text (https://www.mongodb.com/legal/licensing/server-side-public-license) and the licence files inside the image. gachipad runs MongoDB unmodified as its internal database and never exposes MongoDB as a service, so SSPL §13 (publishing service source code) does not apply; it is not part of this repository. Do not modify the image. |
+| `mongo:8.0.34` (Ubuntu 24.04) | MongoDB Community Server: **SSPL v1** (source-available, not OSI open source). MongoDB Shell and Database Tools: Apache-2.0. Ubuntu packages: various, including GPL and LGPL. | The SSPL text (https://www.mongodb.com/legal/licensing/server-side-public-license) and the licence files inside the image. MongoDB is now an optional backend (SQLite is the default for new installs) and is pulled only for the `mongodb` profile and existing installs; it remains in the offline bundle. gachipad runs MongoDB unmodified as its internal database and never exposes MongoDB as a service, so SSPL §13 (publishing service source code) does not apply; it is not part of this repository. Do not modify the image. |
+| `postgres:17.11-alpine` (official image; used by the optional bundled PostgreSQL profile and included in the offline bundle's `images.tar`) | PostgreSQL: PostgreSQL License (permissive, OSI approved). Alpine and BusyBox: MIT and GPL-2.0. | The PostgreSQL License text (https://www.postgresql.org/about/licence/) and the licence files inside the image; used unmodified. |
 | `valkey/valkey:8.1.10` (Debian 13) | Valkey: BSD-3-Clause. Debian packages: various. | The BSD notice inside the image. |
 | `caddy:2.11.7-alpine` | Caddy: Apache-2.0 (stock upstream build with no plugins). Alpine and BusyBox: MIT and GPL-2.0. | The Apache-2.0 text (https://github.com/caddyserver/caddy/blob/master/LICENSE; it is also reproduced in `/THIRD-PARTY-LICENSES.txt`). The image has no `NOTICE` file and the Caddy repository has none. |
 | `node:22.23.3-slim` (Debian 12), base of `gachipad-api`, `gachipad-collab`, `gachipad-mdns` and the web build stage | Node.js: MIT with the bundled-component notices of `/usr/local/LICENSE` in the image. Debian packages: various, including GPL and LGPL. | `/usr/local/LICENSE` (inside the image, unchanged). |
+
+MySQL and MariaDB server images are not used, pulled or bundled (GPL-2.0 servers); gachipad connects to an operator-run external server only.
 
 Operating-system packages in these images are under their own licences (GPL and LGPL among them). Their
 source is available from the Debian (https://www.debian.org/distrib/packages), Ubuntu
 (https://packages.ubuntu.com) and Alpine (https://pkgs.alpinelinux.org) archives; anyone who
 redistributes the images must make the corresponding source available or point to these archives.
 
-MongoDB, Valkey, Caddy, Node.js, Docker, Debian, Ubuntu, Alpine, Fastify, React and other product
+MongoDB, PostgreSQL, Valkey, Caddy, Node.js, Docker, Debian, Ubuntu, Alpine, Fastify, React and other product
 names are trademarks of their respective owners and are used here only to name the software.
 
 ## 6. Build and development tools (not shipped)

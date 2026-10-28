@@ -268,7 +268,7 @@ gachipad는 SQLite, 번들 PostgreSQL, 번들 MongoDB 및 외부 데이터베이
 | 백엔드 | 운영 노력 | 백업 방식 | Collab 인스턴스 확장 | 리소스 사용량 | 권장 시점 |
 |---|---|---|---|---|---|
 | **SQLite** (신규 기본값) | 가장 낮음 (별도 서버 프로세스 및 자격 증명 없음, 파일 기반) | `backup.sh`: `VACUUM INTO` 온라인 스냅샷 (`gachipad-data` 볼륨 내부 임시 생성 후 압축), live WAL 잠금 없음 | 단일 호스트 (공유 볼륨 내 복제본 간 공유, 다중 호스트 불가) | 매우 낮음 (별도 DB 컨테이너 없음, 메모리 오버헤드 최소) | 신규 설치 기본값, 단일 서버 배포, 설정 간소화 및 최소 자원 소모 환경 |
-| **번들 PostgreSQL** | 낮음 (Compose `postgres` 프로필로 `postgres:17-alpine` 자동 구동) | `backup.sh`: `pg_dump --format=custom` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 중간 (수백 MB 수준의 메모리 점유) | 복수 협업 인스턴스 확장이 필요하고 표준 관계형 데이터베이스를 선호하는 단일 호스트 환경 |
+| **번들 PostgreSQL** | 낮음 (Compose `postgres` 프로필로 `postgres:17.11-alpine` 자동 구동) | `backup.sh`: `pg_dump --format=custom` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 중간 (수백 MB 수준의 메모리 점유) | 복수 협업 인스턴스 확장이 필요하고 표준 관계형 데이터베이스를 선호하는 단일 호스트 환경 |
 | **번들 MongoDB** | 중간 (Compose `mongodb` 프로필로 `mongo:8.0.34` 및 `mongo-users` 구동) | `backup.sh`: `mongodump` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 높음 (WiredTiger 캐시 기본 2GB + 컨테이너 메모리) | 1.0.x 기존 설치를 데이터 마이그레이션 없이 그대로 유지하며 업그레이드하는 환경 |
 | **외부 PostgreSQL** | 운영자 관리 (별도 전용 DB 인프라 운영 및 모니터링) | 운영자 자체 백업 도구 (`pg_dump` 등). gachipad 로컬 백업 스크립트는 로컬 아카이브를 만들지 않음 | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 (외부 서버 리소스 활용) | 고가용성 PostgreSQL 클러스터 및 자체 백업 체계가 이미 갖춰진 엔터프라이즈 환경 |
 | **외부 MySQL/MariaDB** | 운영자 관리 (번들 서비스 없음, 외부 연결 전용) | 운영자 자체 백업 도구 (`mysqldump`, logical backup 등) | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 | 기존에 운영 중인 중앙 MySQL 또는 MariaDB 인프라를 연동하고자 하는 환경 |

@@ -25,7 +25,7 @@ curl http://localhost/healthz
 gachipad supports multiple database backends, selected during installation or configured via `.env`:
 
 - **SQLite** (default for new installs): Stored in `/data/gachipad.db` on the shared `gachipad-data` volume in WAL mode. Requires no server setup, external credentials, or extra containers. Recommended for single-host deployments. Budget at least twice the uncompressed database size as free operational disk headroom for snapshots and restores.
-- **Bundled PostgreSQL**: Runs `postgres:17-alpine` under Compose profile `postgres`. Multi-replica collab scale-out ready. Password generated automatically.
+- **Bundled PostgreSQL**: Runs `postgres:17.11-alpine` under Compose profile `postgres`. Multi-replica collab scale-out ready. Password generated automatically.
 - **Bundled MongoDB**: Runs `mongo:8.0.34` under Compose profile `mongodb`. Upgraded 1.0.x installations retain MongoDB automatically without data migration.
 - **External database**: Connect to external PostgreSQL, MySQL, MariaDB, or MongoDB via `DATABASE_URL` (`GACHIPAD_DB=external`). MySQL and MariaDB are supported as external servers only; bundled images are not provided for them.
 - **Valkey**: Required for every database choice (document locks, presence, rate limits, join codes).
