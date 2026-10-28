@@ -125,7 +125,7 @@ assert_no_database_migration() {
   fi
   if [ -e state/transaction.tmp ] || [ -L state/transaction.tmp ] ||
     compgen -G '.env.migrate-db.*' >/dev/null; then
-    die 'unfinished database migration staging files or state/transaction.tmp; preserve them and recover manually per OPERATIONS 9.6 before continuing'
+    die 'unfinished database migration staging files or state/transaction.tmp; preserve them and recover manually per OPERATIONS 9.6, or for an interrupted update per OPERATIONS 15.7, before continuing'
   fi
 }
 
@@ -133,12 +133,19 @@ assert_no_database_migration() {
 # transaction until the selected backend is healthy; a hard crash can interrupt the env/marker pair.
 migration_recovery_hint() {
   local stage="${1:-$(sed -n 's/^snapshot=//p' state/transaction 2>/dev/null)}"
-  local phase source target volume run owner project
+  local phase source target volume run owner project boot boot_time lock_time
   owner="$(cat state/install.lock.d/owner 2>/dev/null || true)"
-  if [[ "$owner" =~ ^[0-9]+$ ]] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null; then
+  boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+  boot_time="$(awk '$1 == "btime" {print $2}' /proc/stat 2>/dev/null || true)"
+  lock_time="$(stat -c %Y state/install.lock.d 2>/dev/null || true)"
+  if [[ "$owner" =~ ^[0-9]+$ ]] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null &&
+    [ -n "$boot" ] && [ "$(cat state/install.lock.d/boot 2>/dev/null)" = "$boot" ] &&
+    [[ "$boot_time" =~ ^[0-9]+$ && "$lock_time" =~ ^[0-9]+$ ]] && [ "$lock_time" -ge "$boot_time" ] &&
+    tr '\0' '\n' 2>/dev/null <"/proc/$owner/cmdline" | grep -Eq '(^|/)migrate-db\.sh$'; then
     printf 'migrate-db: migration in progress (pid %s); wait.\n' "$owner"
     return
   fi
+  echo 'migrate-db: if no migrate-db.sh process is running, this marker may be stale; follow the recovery recipe below.'
   phase="$(sed -n 's/^phase=//p' state/transaction 2>/dev/null)"
   source="$(sed -n 's/^source=//p' state/transaction 2>/dev/null)"
   target="$(sed -n 's/^destination=//p' state/transaction 2>/dev/null)"
@@ -160,6 +167,9 @@ migration_recovery_hint() {
     esac
   fi
   if [[ "$stage" =~ ^\.env\.migrate-db\.[A-Za-z0-9]+$ ]] && [ -f "$stage/original.env" ]; then
+    if [ "$phase" = live ]; then
+      printf 'migrate-db: identify the active backend configuration: cmp -s .env %q/.env (exit 0: new backend is active; roll forward; exit 1: old backend was restored; treat as rollback and reconcile destination writes; other exits: inspect manually).\n' "$stage"
+    fi
     if [ "$phase" != preflight ] && [ "$phase" != live ]; then
       case "$target" in
         postgres) printf 'migrate-db: stop and remove the destination containers: docker compose --env-file %q/.env rm -sf postgres\n' "$stage" ;;
@@ -193,7 +203,7 @@ migration_recovery_hint() {
           case "$target" in postgres | mongodb)
             printf 'migrate-db: remove a destination volume only if it is empty and this command lists that exact name: docker volume ls -q --filter label=gachipad.migration=%s\n' "$run"
             # shellcheck disable=SC2016 # print the operator's command, do not execute it
-            printf 'migrate-db: with destination containers stopped, prove it is empty using a read-only inspection: docker run --rm --pull never --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 0 --cap-add DAC_OVERRIDE --mount type=volume,src=%s,dst=/probe,volume-nocopy,readonly --entrypoint node "$(docker compose images -q api | head -n1)" -e %q; only exit 0 proves emptiness.\n' "$volume" 'process.exit(require("node:fs").readdirSync("/probe").length === 0 ? 0 : 1)'
+            printf 'migrate-db: with destination containers stopped, prove it is empty using a read-only inspection: docker volume inspect %s >/dev/null && docker run --rm --pull never --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 0 --cap-add DAC_OVERRIDE --mount type=volume,src=%s,dst=/probe,volume-nocopy,readonly --entrypoint node "$(docker compose images -q api | head -n1)" -e %q; only exit 0 proves emptiness.\n' "$volume" "$volume" 'process.exit(require("node:fs").readdirSync("/probe").length === 0 ? 0 : 1)'
             ;;
           esac
         fi

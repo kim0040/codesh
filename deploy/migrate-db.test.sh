@@ -176,7 +176,7 @@ database_backup() { crash_pause backup; [ "${FAIL_BACKUP:-0}" = 0 ] || return 1;
 # shellcheck disable=SC2317
 stop_writes() { if [ "${FAIL_STOP:-0}" = 1 ] && [ "${1:-}" != restore ]; then return 1; fi; touch "$FIXTURE/stopped"; echo stopped >>"$FIXTURE/events"; }
 # shellcheck disable=SC2317
-database_start() { [ "${FAIL_RECOVERY:-0}" = 0 ] || return 1; echo start >>"$FIXTURE/events"; }
+database_start() { if [ "${FAIL_RECOVERY:-0}" = 1 ] && [ "$(database_kind)" = "$(cat "$FIXTURE/before.kind")" ]; then return 1; fi; echo start >>"$FIXTURE/events"; }
 # shellcheck disable=SC2317
 wait_api() { crash_pause switch; }
 # shellcheck disable=SC2317
@@ -462,6 +462,18 @@ if grep -q 'inspect and clear' "$FIXTURE/install/state/migrate-db.log"; then exi
 # Recovery health is also failed here, so snapshots must remain.
 [ -e "$FIXTURE/install/state/transaction" ]
 echo 'ok: ingress-opened failure retains destination writes and snapshots'
+make_fixture ingress-recovery-failed sqlite
+if FAIL_INGRESS=1 FAIL_RECOVERY=1 run --to postgres --yes; then exit 1; else [ "$?" = 3 ]; fi
+cmp "$FIXTURE/install/.env" "$FIXTURE/before.env"
+cmp "$FIXTURE/install/state/database-kind" "$FIXTURE/before.kind"
+grep -qx phase=live "$FIXTURE/install/state/transaction"
+stage="$(sed -n 's/^snapshot=//p' "$FIXTURE/install/state/transaction")"
+if cmp -s "$FIXTURE/install/.env" "$FIXTURE/install/$stage/.env"; then exit 1; else [ "$?" = 1 ]; fi
+grep -Fq "cmp -s .env $stage/.env" "$FIXTURE/install/state/migrate-db.log"
+grep -q 'old backend was restored; treat as rollback and reconcile destination writes' "$FIXTURE/install/state/migrate-db.log"
+[ -e "$FIXTURE/volumes/gp-dbdeploy-fixture_postgres-data" ]
+if grep -q 'rm -sf postgres' "$FIXTURE/install/state/migrate-db.log"; then exit 1; fi
+echo 'ok: ingress and source-restart failure returns 3; live recipe identifies restored source configuration'
 make_fixture incomplete sqlite
 if COPY_STATUS=1 FAIL_RECOVERY=1 run --to postgres --yes; then exit 1; else [ "$?" = 3 ]; fi
 [ -e "$FIXTURE/install/state/transaction" ]
@@ -549,13 +561,15 @@ grep -q 'requires a server scheme' "$FIXTURE/run.log"
 [ ! -e "$FIXTURE/backup" ]; clean_state
 echo 'ok: malformed server URL refuses before downtime without printing its value'
 # SIGKILL bypasses EXIT recovery: all entrypoints must preserve the crash evidence.
-for phase in preflight backup copy switch live publish; do
-  make_fixture "crash-$phase" sqlite
-  CRASH_PHASE="$phase" python3 - <<'CRASH'
+for crash in preflight:postgres backup:postgres copy:postgres switch:postgres live:postgres publish:postgres copy:mongodb; do
+  phase="${crash%:*}"; target="${crash#*:}"
+  make_fixture "crash-$phase-$target" sqlite
+  CRASH_PHASE="$phase" CRASH_TARGET="$target" python3 - <<'CRASH'
 import os, pathlib, signal, subprocess, time
 root = pathlib.Path(os.environ["FIXTURE"])
 with (root / "run.log").open("w") as log:
-    p = subprocess.Popen(["./migrate-db.sh", "--to", "postgres", "--yes"],
+    target = os.environ["CRASH_TARGET"]
+    p = subprocess.Popen(["./migrate-db.sh", "--to", target, "--yes"],
         cwd=root / "install", stdout=log, stderr=log, start_new_session=True)
     try:
         deadline = time.monotonic() + 10
@@ -571,9 +585,10 @@ with (root / "run.log").open("w") as log:
         if os.environ["CRASH_PHASE"] == "publish":
             assert "phase=copy\n" in (root / "install/state/transaction.tmp").read_text()
         assert "source=sqlite\n" in marker
-        assert "destination=postgres\n" in marker
+        assert "destination=" + target + "\n" in marker
         assert (root / "install/state/transaction").stat().st_mode & 0o777 == 0o600
-        assert "volume=gp-dbdeploy-fixture_postgres-data\n" in marker
+        suffix = "postgres-data" if target == "postgres" else "mongo-data"
+        assert "volume=gp-dbdeploy-fixture_" + suffix + "\n" in marker
     finally:
         os.killpg(p.pid, signal.SIGKILL)
         p.wait()
@@ -589,11 +604,13 @@ CRASH
     if (cd "$FIXTURE/install"; "./$command.sh" --yes) >"$FIXTURE/refusal.log" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
     grep -q 'unfinished or running database migration.*recovery recipe' "$FIXTURE/refusal.log"
     if [ "$phase" != live ]; then grep -q 'remove any surviving one-off containers' "$FIXTURE/refusal.log"; fi
-    grep -q 'destination volume to inspect.*gp-dbdeploy-fixture_postgres-data' "$FIXTURE/refusal.log"
+    if [ "$target" = postgres ]; then suffix=postgres-data; else suffix=mongo-data; fi
+    grep -q "destination volume to inspect.*gp-dbdeploy-fixture_$suffix" "$FIXTURE/refusal.log"
     grep -q 'state/transaction.tmp' "$FIXTURE/refusal.log"
     if [ "$phase" != live ]; then
       grep -Eq 'docker volume ls -q --filter label=gachipad.migration=[a-f0-9]{32}$' "$FIXTURE/refusal.log"
       grep -q 'only exit 0 proves emptiness' "$FIXTURE/refusal.log"
+      grep -Fq "docker volume inspect gp-dbdeploy-fixture_$suffix >/dev/null && docker run" "$FIXTURE/refusal.log"
     fi
     if [ "$phase" = preflight ] || [ "$phase" = live ]; then
       if grep -Eq 'keep writers stopped|restore configuration:|restart the saved backend' "$FIXTURE/refusal.log"; then exit 1; fi
@@ -609,7 +626,10 @@ CRASH
     esac
     case "$phase" in
       preflight | live) if grep -q 'rm -sf postgres' "$FIXTURE/refusal.log"; then exit 1; fi ;;
-      *) grep -q 'rm -sf postgres' "$FIXTURE/refusal.log" ;;
+      *)
+        if [ "$target" = postgres ]; then grep -q 'rm -sf postgres' "$FIXTURE/refusal.log"
+        else grep -q 'rm -sfv mongo-users mongo' "$FIXTURE/refusal.log"; fi
+        ;;
     esac
     (cd "$FIXTURE/install"; find . -type f -exec sha256sum {} + | sort) >"$FIXTURE/files-after"
     cmp "$FIXTURE/files-before" "$FIXTURE/files-after"
@@ -617,7 +637,7 @@ CRASH
     [ "$(stat -c %a "$FIXTURE/install/state")" = 700 ]
     if grep -Eq 'private@|[a-zA-Z][a-zA-Z0-9+.-]*://' "$FIXTURE/refusal.log"; then exit 1; fi
   done
-  echo "ok: SIGKILL during $phase retains phase; all five commands refuse without changes"
+  echo "ok: SIGKILL during $phase to $target retains phase; all five commands refuse without changes"
 done
 # An older marker without phase metadata still gets conservative restoration guidance.
 make_fixture crash-legacy mongodb
@@ -672,13 +692,54 @@ done
 printf 'database migration\nsnapshot=.env.migrate-db.bad\nname\n' >"$FIXTURE/install/state/transaction"
 (cd "$FIXTURE/install"; . ./lib.sh; migration_recovery_hint "") >"$FIXTURE/refusal.log"
 if grep -q 'rm -rf' "$FIXTURE/refusal.log"; then exit 1; fi
-# An alive install-lock owner gets a wait message, without the crash recipe.
+# Only a verified, current-boot migrate-db owner can suppress the crash recipe.
 mkdir -p "$FIXTURE/install/state/install.lock.d"
-printf '%s\n' "$$" >"$FIXTURE/install/state/install.lock.d/owner"
 printf 'database migration\n' >"$FIXTURE/install/state/transaction"
-if (cd "$FIXTURE/install"; ./backup.sh) >"$FIXTURE/refusal.log" 2>&1; then exit 1; fi
-grep -q "migration in progress (pid $$); wait" "$FIXTURE/refusal.log"
-if grep -q 'docker compose' "$FIXTURE/refusal.log"; then exit 1; fi
+python3 - <<'OWNER'
+import os, pathlib, signal, subprocess, time
+root = pathlib.Path(os.environ["FIXTURE"])
+lock = root / "install/state/install.lock.d"
+boot = pathlib.Path("/proc/sys/kernel/random/boot_id").read_text()
+boot_time = next(int(line.split()[1]) for line in pathlib.Path("/proc/stat").read_text().splitlines()
+                 if line.startswith("btime "))
+script = root / "migrate-db.sh"
+script.write_text('#!/usr/bin/env bash\ntouch "$FIXTURE/owner-ready"\nwhile :; do sleep 0.1; done\n')
+p = subprocess.Popen(["bash", str(script)], start_new_session=True)
+def hint(wait):
+    result = subprocess.run(["./backup.sh"], cwd=root / "install", capture_output=True)
+    assert result.returncode == 1, result.stderr
+    text = result.stderr.decode()
+    if wait:
+        assert f"migration in progress (pid {p.pid}); wait" in text, text
+        assert "docker compose" not in text, text
+    else:
+        assert "marker may be stale" in text, text
+        assert "keep writers stopped: docker compose stop" in text, text
+        assert "migration in progress" not in text, text
+try:
+    deadline = time.monotonic() + 5
+    while not (root / "owner-ready").exists() and time.monotonic() < deadline:
+        assert p.poll() is None
+        time.sleep(0.01)
+    assert (root / "owner-ready").exists()
+    (lock / "owner").write_text(str(p.pid))
+    (lock / "boot").write_text(boot)
+    hint(True)
+    (lock / "boot").write_text("different-boot\n")
+    hint(False)
+    (lock / "boot").write_text(boot)
+    os.utime(lock, (boot_time - 1, boot_time - 1))
+    hint(False)
+    os.utime(lock, None)
+    (lock / "boot").unlink()
+    hint(False)
+    (lock / "boot").write_text(boot)
+    (lock / "owner").write_text(str(os.getpid()))
+    hint(False)
+finally:
+    os.killpg(p.pid, signal.SIGKILL)
+    p.wait()
+OWNER
 rm -rf "$FIXTURE/install/state/install.lock.d"
 for marker in '' 'database migration' 'FROM' 'unknown transaction'; do
   printf '%s' "$marker" >"$FIXTURE/install/state/transaction"
@@ -691,6 +752,7 @@ done
 printf 'FROM=1.0.0\nTARGET=1.1.0\nPHASE=installed\nBACKUP=backups/fixture.archive.gz\n' >"$FIXTURE/install/state/transaction"
 chmod 000 "$FIXTURE/install/state/transaction"
 chmod 755 "$F" "$FIXTURE" "$FIXTURE/install" "$FIXTURE/install/state"
+chmod a+rX "$FIXTURE/install/"*.sh
 python3 - <<'UNREADABLE'
 import os, pathlib, subprocess
 root = pathlib.Path(os.environ["FIXTURE"]) / "install"
@@ -726,10 +788,10 @@ for leftover in snapshot temporary; do
   else : >"$FIXTURE/install/state/transaction.tmp"; fi
   for command in install backup restore update upgrade; do
     if (cd "$FIXTURE/install"; "./$command.sh") >"$FIXTURE/refusal.log" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
-    grep -q 'unfinished database migration staging files' "$FIXTURE/refusal.log"
+    grep -q 'unfinished database migration staging files.*interrupted update.*OPERATIONS 15.7' "$FIXTURE/refusal.log"
   done
 done
-echo 'ok: hostile, duplicate, empty, unreadable and minimal markers; alive lock; post-lock races; orphan staging'
+echo 'ok: hostile, duplicate, empty, unreadable and minimal markers; verified/stale/unrelated owners; post-lock races; orphan staging'
 make_fixture update-transaction sqlite
 printf 'FROM=1.0.0\nTARGET=1.1.0\nPHASE=installed\nBACKUP=backups/fixture.archive.gz\n' >"$FIXTURE/install/state/transaction"
 if run --to postgres --yes; then exit 1; else [ "$?" = 1 ]; fi
@@ -751,7 +813,13 @@ for command in install backup restore update upgrade; do
 done
 # Update rollback markers continue to permit backup/restore during manual recovery.
 printf 'FROM=1.0.0\nTARGET=1.1.0\nPHASE=installed\nBACKUP=backups/fixture.archive.gz\n' >"$FIXTURE/install/state/transaction"
+mkdir "$FIXTURE/install/.env.migrate-db.orphan"
+: >"$FIXTURE/install/state/transaction.tmp"
 (cd "$FIXTURE/install"; . ./lib.sh; assert_no_database_migration)
-echo 'ok: absent migration markers allow all five entrypoints; update markers keep recovery available'
+for command in install backup restore update upgrade; do
+  if (cd "$FIXTURE/install"; "./$command.sh") >"$FIXTURE/refusal.log" 2>&1; then exit 1; else [ "$?" = 77 ]; fi
+  if grep -q 'unfinished database migration' "$FIXTURE/refusal.log"; then exit 1; fi
+done
+echo 'ok: absent migration markers allow all five entrypoints; update markers ignore migration staging and keep recovery available'
 PATH="$BASE_PATH" node "$ROOT/deploy/migrate-preflight.verify.mjs"
 echo 'migrate-db.test.sh: all checks passed'

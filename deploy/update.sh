@@ -673,7 +673,7 @@ main() {
   MODE="$mode"
   case "$mode:$DRY" in
     check:* | disable-auto:* | enable-auto:1) ;;
-    *) RECORDED=1; assert_no_database_migration; RECORDED=0 ;;
+    *) assert_no_database_migration ;;
   esac
 
   mkdir -p "$STATE" && chmod 755 "$STATE"
