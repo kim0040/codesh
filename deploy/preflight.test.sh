@@ -7,7 +7,9 @@ F="$(mktemp -d)"
 trap 'rm -rf "$F"' EXIT
 mkdir -p "$F/bin" "$F/install/tls" "$F/procnet"
 cp "$ROOT"/{install.sh,preflight.sh,lib.sh,generate-secrets.sh,docker-compose.yml,.env.example} "$F/install/"
-printf '1.1.0\n' >"$F/install/VERSION"
+TEMPLATE_VERSION="$(sed -n 's/^GACHIPAD_VERSION=//p' "$ROOT/.env.example")"
+export TEMPLATE_VERSION
+printf '%s\n' "$TEMPLATE_VERSION" >"$F/install/VERSION"
 cat >"$F/bin/fixture" <<'FIXTURE'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -47,7 +49,7 @@ case "${0##*/}" in
         [[ "$*" != *' pull '* ]] || [ "${STUB_PULL:-ok}" = ok ] || exit 1
         # Pull must precede any new credentials file, and must use template version.
         [ ! -e .env ] || [ "${STUB_EXISTING:-0}" = 1 ]
-        [ "$GACHIPAD_VERSION" = 1.1.0 ] ;;
+        [ "$GACHIPAD_VERSION" = "$TEMPLATE_VERSION" ] ;;
     esac ;;
   ss) [ "${STUB_SS_FAIL:-0}" = 0 ] || exit 1; printf '%s\n' "${STUB_LISTENERS:-}" ;;
   netstat) printf '%s\n' "${STUB_NETSTAT:-}" ;;
