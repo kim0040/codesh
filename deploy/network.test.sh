@@ -16,11 +16,12 @@ cat >"$WORK/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$DOCKER_CALLS"
 case "$1 ${2:-}" in
-  'info --format') case "$*" in *Architecture*) echo amd64 ;; *DockerRootDir*) echo /data ;; *SecurityOptions*) echo '[]' ;; *OperatingSystem*) echo Debian ;; *) echo linux ;; esac ;;
+  'info --format') case "$*" in *Architecture*) echo amd64 ;; *DockerRootDir*) echo /data ;; *'json .'*) if [ -n "${DOCKER_INFO:-}" ]; then echo "$DOCKER_INFO"; else echo '{}'; fi ;; *OperatingSystem*) echo Debian ;; *) echo linux ;; esac ;;
   'context inspect') echo unix:///var/run/docker.sock ;;
   'volume inspect') exit 1 ;;
   'compose up')
     printf 'start network-env=%s file-network=%s\n' "${GACHIPAD_NETWORK-unset}" "$(sed -n 's/^GACHIPAD_NETWORK=//p' .env)" >>"$DOCKER_CALLS"
+    printf 'network subnet=%s gateway=%s trust=%s\n' "${NETWORK_SUBNET-unset}" "${NETWORK_GATEWAY-unset}" "${TRUST_PROXY-unset}" >>"$DOCKER_CALLS"
     if [ -n "${FAIL_START:-}" ] && [ ! -f "$DOCKER_CALLS.failed" ]; then touch "$DOCKER_CALLS.failed"; exit 1; fi ;;
   'compose --profile')
     case "$*" in *' stop '*) [ -z "${FAIL_MDNS_STOP:-}" ] || exit 1 ;; esac ;;
@@ -47,7 +48,7 @@ else printf '200'; fi
 CURL
 chmod +x "$WORK/bin/"*
 export PATH="$WORK/bin:$PATH" DOCKER_CALLS="$WORK/calls"
-unset GACHIPAD_NETWORK PUBLIC_URL SITE_ADDRESS ACME_EMAIL GACHIPAD_MDNS COMPOSE_PROFILES GACHIPAD_DB DATABASE_URL
+unset GACHIPAD_NETWORK PUBLIC_URL SITE_ADDRESS ACME_EMAIL GACHIPAD_MDNS COMPOSE_PROFILES GACHIPAD_DB DATABASE_URL NETWORK_SUBNET NETWORK_GATEWAY TRUST_PROXY GACHIPAD_BIND_ADDRESS
 cd "$WORK/install"
 . ./lib.sh
 run() { ./install.sh --db sqlite "$@" </dev/null >"$WORK/log" 2>&1 || { cat "$WORK/log"; return 1; }; }
@@ -93,6 +94,24 @@ GACHIPAD_NETWORK=internal run
 env_set RATE_LIMIT_API_PER_MIN 123
 run
 [ "$(env_get RATE_LIMIT_API_PER_MIN)" = 123 ]
+# Reinstallation retains both an explicitly empty dual-stack binding and a custom IPv4 binding.
+env_set GACHIPAD_BIND_ADDRESS ''
+run
+[ "$(env_get GACHIPAD_BIND_ADDRESS)" = '' ]
+env_set GACHIPAD_BIND_ADDRESS '192.0.2.8:'
+DOCKER_INFO='{"OperatingSystem":"Docker Desktop","SecurityOptions":["name=rootless"],"ip6tables":false,"userland-proxy":true}' run
+[ "$(env_get GACHIPAD_BIND_ADDRESS)" = '192.0.2.8:' ]
+grep -q 'docker info reports rootless Docker or Docker Desktop' "$WORK/log"
+grep -q 'disabled ip6tables or enabled userland-proxy' "$WORK/log"
+grep -q 'rewritten private address can satisfy the public ADMIN_ALLOW_CIDR default' "$WORK/log"
+# One effective subnet supplies validation, API trust, metrics gateway and Compose for the run.
+NETWORK_SUBNET=172.30.77.0/24 NETWORK_GATEWAY=172.29.88.1 TRUST_PROXY=192.0.2.0/24 run
+[ "$(env_get NETWORK_SUBNET)" = 172.30.77.0/24 ]
+[ "$(env_get NETWORK_GATEWAY)" = 172.30.77.1 ]
+[ "$(env_get TRUST_PROXY)" = 172.30.77.0/24 ]
+grep -q 'network subnet=172.30.77.0/24 gateway=172.30.77.1 trust=172.30.77.0/24' "$DOCKER_CALLS"
+if NETWORK_SUBNET=172.30.78.0/24 ./install.sh --db sqlite --network public --behind-proxy 172.30.78.7/32 </dev/null >"$WORK/log" 2>&1; then echo 'environment subnet overlap accepted'; exit 1; fi
+NETWORK_SUBNET=172.29.88.0/24 run
 # Invalid public settings fail before loading images or rewriting .env.
 cp .env "$WORK/saved"
 for domain in 127.0.0.1 192.168.1.1 '[::1]' gachipad.local GACHIPAD.LOCAL localhost one-label x..org '-x.org' 'x-.org' 'x.org/path' 'x.org:443' "x.org\$BAD"; do
@@ -118,6 +137,11 @@ HTTP_PORT=18480 HTTPS_PORT=18443 fresh --network public --domain share.example.o
 [ "$(env_get SITE_ADDRESS)" = http://share.example.org ]
 [ "$(env_get CADDY_TRUSTED_PROXIES)" = 192.0.2.7/32 ]
 [ "$(env_get TRUST_PROXY)" = 172.29.88.0/24,192.0.2.7/32 ]
+grep -q 'single host (/32 for IPv4 or /128 for IPv6)' "$WORK/log"
+run --behind-proxy 10.0.0.0/8
+grep -q 'broader than /16' "$WORK/log"
+run --behind-proxy 192.0.2.7/32
+if grep -q 'broader than /16' "$WORK/log"; then echo 'single-host proxy warned as broad'; exit 1; fi
 grep -q 'nonstandard host ports' "$WORK/log"
 run
 [ "$(env_get GACHIPAD_BEHIND_PROXY)" = 192.0.2.7/32 ]
@@ -236,9 +260,26 @@ with tempfile.TemporaryDirectory() as tmp:
             result = subprocess.check_output(command + ['-v', f'{root / "caddy/Caddyfile"}:/etc/caddy/Caddyfile:ro', image, 'caddy', 'adapt', '--config', '/etc/caddy/Caddyfile'])
         adapted = json.loads(result)
         text = json.dumps(adapted)
+        def objects(value):
+            if isinstance(value, dict):
+                yield value
+                for child in value.values(): yield from objects(child)
+            elif isinstance(value, list):
+                for child in value: yield from objects(child)
+        metrics = [obj for obj in objects(adapted) if obj.get('path') in [['/metrics/api'], ['/metrics/collab']]]
+        assert len(metrics) == 2
+        gateway = edge['METRICS_GATEWAY']
         if mode == 'public':
             assert 'read_header_timeout' in text and 'idle_timeout' in text and 'write_timeout' not in text
             assert 'noindex' in text and 'max-age=31536000' in text
+            for matcher in metrics:
+                exclusions = [entry for group in matcher.get('not', []) for entry in objects(group)]
+                assert any(entry.get('remote_ip', {}).get('ranges') == [gateway] for entry in exclusions)
+                assert any(entry.get('client_ip', {}).get('ranges') == [gateway] for entry in exclusions)
+        else:
+            assert not any(key in text for key in ['read_header_timeout', 'idle_timeout', 'read_timeout', 'write_timeout'])
+            assert 'Strict-Transport-Security' not in text and 'noindex' not in text
+            assert all('not' not in matcher for matcher in metrics)
         if tls == 'proxy':
             # The first mutually-exclusive handle must be the ingress refusal, ahead of every handler.
             groups = []

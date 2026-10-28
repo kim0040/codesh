@@ -39,6 +39,15 @@ const errors24h = (snapshots: DiagnosticSnapshot[]) =>
 export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
   app.get("/api/admin/overview", async (): Promise<AdminOverview> => {
     const { snapshots } = await ctx.diagnostics.recent();
+    const cutoff = Math.floor(Date.now() / 60_000) - 4;
+    const identities = snapshots
+      .filter((s) => s.source === "api")
+      .flatMap((s) => s.clientIdentityMinutes ?? [])
+      .filter(([minute]) => minute >= cutoff)
+      .reduce<[number, number]>(
+        ([total, unknown], [, count, misses]) => [total + count, unknown + misses],
+        [0, 0],
+      );
     const live = snapshots.filter(
       (s) => s.source === "collab" && Date.now() - Date.parse(s.at) < 20_000,
     );
@@ -57,6 +66,8 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
       uptimeSeconds: Math.floor((Date.now() - ctx.startedAt) / 1000),
       version: ctx.version,
       errors24h: errors24h(snapshots),
+      unknownClientIdentity:
+        ctx.config.network === "public" && (identities[1] ?? 0) > (identities[0] ?? 0) * 0.05,
       health: await health(ctx, Math.max(0, ...live.map((s) => Date.parse(s.at)))),
     };
   });

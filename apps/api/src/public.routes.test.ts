@@ -1,4 +1,4 @@
-import { keys } from "@gachipad/shared";
+import { apiKeys, keys } from "@gachipad/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "./config.js";
 import { createHarness, type Harness, integration } from "./testing/harness.js";
@@ -101,9 +101,7 @@ describe.skipIf(!integration)("public network boundaries", () => {
     expect((await attackers[0]?.get(`/api/codes/${code}`, https))?.statusCode).toBe(200);
     expect(await h.valkey.hget(key, "count")).toBe("0");
     expect(await h.valkey.ttl(key)).toBeGreaterThan(0);
-    expect(await h.valkey.ttl(keys.rateLimit("198.51.100.1", "code-recent-miss"))).toBeGreaterThan(
-      0,
-    );
+    expect(await h.valkey.exists(keys.rateLimit("198.51.100.1", "code-recent-miss"))).toBe(0);
     // An IPv6 address change inside a /64 cannot shed its recent misses.
     expect(
       (await h.client({ ip: "2001:db8:1::1" }).get("/api/codes/999999", https)).statusCode,
@@ -115,6 +113,54 @@ describe.skipIf(!integration)("public network boundaries", () => {
     expect(
       (await h.client({ ip: "2001:db8:2::1" }).get(`/api/codes/${code}`, https)).statusCode,
     ).toBe(200);
+  });
+
+  it("admits only one free parallel miss per address and per IPv6 /48", async () => {
+    h = await createHarness({ config: { ...publicConfig, codeFailureBudgetPerMinute: 4 } });
+    const seed = h.client({ ip: "198.51.100.1" });
+    for (let i = 0; i < 5; i++)
+      expect((await seed.get("/api/codes/999999", https)).statusCode).toBe(404);
+    const burst = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        h.client({ ip: "198.51.100.2" }).get("/api/codes/999999", https),
+      ),
+    );
+    expect(burst.filter((r) => r.statusCode === 404)).toHaveLength(1);
+    expect(burst.filter((r) => r.statusCode === 429)).toHaveLength(9);
+    const rotating = await Promise.all(
+      Array.from({ length: 16 }, (_, i) =>
+        h.client({ ip: `2001:db8:1:${i.toString(16)}::1` }).get("/api/codes/999999", https),
+      ),
+    );
+    expect(rotating.filter((r) => r.statusCode === 404)).toHaveLength(1);
+    expect(rotating.filter((r) => r.statusCode === 429)).toHaveLength(15);
+    expect(
+      await h.valkey.ttl(keys.rateLimit("2001:db8:1::/48", "code-recent-miss")),
+    ).toBeGreaterThan(0);
+    expect(await h.valkey.hget(keys.rateLimit("global", "code-failures"), "count")).toBe("4");
+  });
+
+  it("caps fleet-wide free misses and rejects even fresh correct codes once both caps fill", async () => {
+    h = await createHarness({ config: { ...publicConfig, codeFailureBudgetPerMinute: 2 } });
+    const { id, code } = (
+      await h.client().request("POST", "/api/shares", { body: {}, headers: https })
+    ).json<{ id: string; code: string }>();
+    const replies = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        h.client({ ip: `2001:db8:${(i + 1).toString(16)}::1` }).get("/api/codes/999999", https),
+      ),
+    );
+    expect(replies.filter((r) => r.statusCode === 404)).toHaveLength(8);
+    expect(replies.filter((r) => r.statusCode === 429)).toHaveLength(12);
+    const budget = keys.rateLimit("global", "code-failures");
+    expect(await h.valkey.hmget(budget, "count", "free")).toEqual(["2", "6"]);
+    const clean = h.client({ ip: "2001:db8:ffff::1" });
+    expect((await clean.get(`/api/codes/${code}`, https)).statusCode).toBe(429);
+    expect(
+      (await clean.request("POST", `/api/shares/${id}/join`, { body: {}, headers: https }))
+        .statusCode,
+    ).toBe(200);
+    expect(await h.valkey.hmget(budget, "count", "free")).toEqual(["2", "6"]);
   });
 
   it("allows thirty successful code joins per minute behind one NAT with a ten-miss limit", async () => {
@@ -158,6 +204,61 @@ describe.skipIf(!integration)("public network boundaries", () => {
     expect(await h.valkey.get(keys.rateLimit("unknown", "api"))).toBe("3");
   });
 
+  it("records unknown requests once and flags more than five percent in the overview API", async () => {
+    h = await createHarness({ config: publicConfig });
+    const admin = h.client({ ip: "10.1.2.3" });
+    const bearer = { ...https, authorization: "Bearer admin-token-for-tests" };
+    for (let i = 0; i < 18; i++)
+      expect((await admin.get("/api/session", https)).statusCode).toBe(200);
+    expect((await h.client({ ip: "127.0.0.1" }).get("/api/session", https)).statusCode).toBe(200);
+    expect((await admin.get("/api/admin/overview", bearer)).json().unknownClientIdentity).toBe(
+      false,
+    );
+    expect((await h.client({ ip: "127.0.0.1" }).get("/api/session", https)).statusCode).toBe(200);
+    expect((await admin.get("/api/admin/overview", bearer)).json().unknownClientIdentity).toBe(
+      true,
+    );
+    expect((await admin.get("/api/admin/diagnostics", bearer)).json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "client_identity_unknown" })]),
+    );
+  });
+
+  it("never turns an unknown participant ban into a ban of every visitor", async () => {
+    h = await createHarness({ config: publicConfig });
+    const owner = h.client();
+    const { id } = (await owner.request("POST", "/api/shares", { body: {}, headers: https })).json<{
+      id: string;
+    }>();
+    const guest = h.client({ ip: "127.0.0.1" });
+    const { clientId } = (await guest.get("/api/session", https)).json<{ clientId: string }>();
+    expect(
+      (await guest.request("POST", `/api/shares/${id}/join`, { body: {}, headers: https }))
+        .statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await owner.request("POST", `/api/shares/${id}/kick`, {
+          body: { clientId, ban: true },
+          headers: https,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(await h.valkey.sismember(apiKeys.bannedNetworks(id), "unknown")).toBe(0);
+    // A stale ban from an older installation must not identify every new visitor either.
+    await h.valkey.sadd(apiKeys.bannedNetworks(id), "unknown");
+    expect(
+      (await guest.request("POST", `/api/shares/${id}/join`, { body: {}, headers: https }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await h
+          .client({ ip: "127.0.0.1" })
+          .request("POST", `/api/shares/${id}/join`, { body: {}, headers: https })
+      ).statusCode,
+    ).toBe(200);
+  });
+
   it("caps held upload storage per IPv4 address and IPv6 /64 despite fresh cookies, and releases failed batches", async () => {
     const config = loadConfig({ UPLOAD_STORAGE_MAX_BYTES: "100" });
     h = await createHarness({ config: { ...publicConfig, limits: config.limits } });
@@ -170,10 +271,13 @@ describe.skipIf(!integration)("public network boundaries", () => {
     for (const ip of ["198.51.100.7", "2001:db8:1::1"])
       expect((await upload(ip, "x".repeat(25))).statusCode).toBe(200);
     for (const ip of ["198.51.100.7", "2001:db8:1::2"])
-      expect((await upload(ip, "x")).statusCode).toBe(503);
-    expect((await upload("198.51.100.8", "x".repeat(26))).statusCode).toBe(503);
+      expect((await upload(ip, "x")).json().error).toMatchObject({ code: "upload_pool_limited" });
+    expect((await upload("198.51.100.8", "x".repeat(26))).statusCode).toBe(429);
     expect((await upload("198.51.100.8", "x".repeat(25))).statusCode).toBe(200);
     expect((await upload("2001:db8:2::1", "x".repeat(25))).statusCode).toBe(200);
+    const global = await upload("198.51.100.9", "x");
+    expect(global.statusCode).toBe(503);
+    expect(global.json().error.code).toBe("unavailable");
   });
 
   it("keeps the internal code path independent of the global budget", async () => {
@@ -181,6 +285,13 @@ describe.skipIf(!integration)("public network boundaries", () => {
     for (let i = 0; i < 4; i++)
       expect((await h.client().get("/api/codes/999999")).statusCode).toBe(404);
     expect(await h.valkey.exists(keys.rateLimit("global", "code-failures"))).toBe(0);
+    expect(
+      (
+        await h
+          .client()
+          .get("/api/admin/security", { authorization: "Bearer admin-token-for-tests" })
+      ).json().codeFailures,
+    ).toBeNull();
   });
 
   it("does not treat internet neighbours or a shared NAT as a trusted discovery group", async () => {

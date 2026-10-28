@@ -125,8 +125,10 @@ Download `gachipad-<version>-linux-amd64.tar.gz` (or `-linux-arm64`) and its `.s
 ```sh
 sha256sum -c gachipad-<version>-linux-amd64.tar.gz.sha256
 tar xzf gachipad-<version>-linux-amd64.tar.gz && cd gachipad-<version>-linux-amd64
-PUBLIC_URL=http://gachipad.local ./install.sh       # loads the images, writes .env with new secrets, starts, waits for /healthz
+PUBLIC_URL=http://gachipad.local ./install.sh       # loads images, writes .env, offers gachipad.local on Linux, starts stack
 ```
+
+On native Linux, `install.sh` offers `gachipad.local` via mDNS by default (with automated LAN conflict checks); pass `--no-mdns` (or `GACHIPAD_MDNS=0`) to skip it, and unforced reruns preserve your choice. See the [Operations guide (mDNS)](docs/OPERATIONS.md#5-mdns-gachipadlocal-옵션).
 
 `install.sh` checks every file of the bundle against the `SHA256SUMS` inside it before loading anything. A checksum is not a signature: compare the `.sha256` value with one you received over a trusted channel. Release files also carry build attestations (`gh attestation verify`, see [RELEASING.md](RELEASING.md)). The bundle contains the unmodified official MongoDB, PostgreSQL, Valkey, Caddy and Node images next to the gachipad images, plus `backup.sh`, `restore.sh`, `upgrade.sh`, `update.sh` and `migrate-db.sh`.
 

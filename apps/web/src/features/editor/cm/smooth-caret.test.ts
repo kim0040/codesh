@@ -1,7 +1,7 @@
-import { EditorState, Transaction } from "@codemirror/state";
-import { describe, expect, it } from "vitest";
+import { EditorState, type Text, Transaction } from "@codemirror/state";
+import { describe, expect, it, vi } from "vitest";
 import { ySyncAnnotation } from "y-codemirror.next";
-import { glides, hangulStep, localCaretActivity } from "./smooth-caret";
+import { GlidingCaret, glides, hangulStep, localCaretActivity } from "./smooth-caret";
 
 const state = EditorState.create({ doc: "one\ntwo\nthree\nfour\nfive" });
 
@@ -123,5 +123,157 @@ describe("caret during IME composition", () => {
       annotations: Transaction.remote.of(true),
     });
     expect(glides(remote)).toBe(false);
+  });
+});
+
+describe("caret during decomposed and extended jamo composition", () => {
+  const composing = (doc: string, at: number, from: number, insert: string) =>
+    EditorState.create({ doc, selection: { anchor: at } }).update({
+      changes: { from, to: at, insert },
+      selection: { anchor: from + insert.length },
+      userEvent: "input.type.compose",
+    });
+  // han as conjoining jamo: leading U+1112, vowel U+1161, trailing U+11AB
+  const [h, a, n] = ["\u1112", "\u1161", "\u11ab"];
+
+  it("glides for the first jamo and snaps while the same syllable grows jamo by jamo", () => {
+    expect(glides(composing("", 0, 0, h))).toBe(true);
+    // the cursor moves with every jamo, but the syllable under it does not change
+    expect(glides(composing(h, 1, 0, h + a))).toBe(false);
+    expect(glides(composing(h + a, 2, 0, h + a + n))).toBe(false);
+    expect(glides(composing(h + a, 2, 2, n))).toBe(false);
+    // a precomposed syllable takes a trailing jamo the same way
+    expect(glides(composing("\ud558", 1, 1, n))).toBe(false);
+  });
+
+  it("glides when the next syllable starts, after the last one or by splitting it", () => {
+    const next = "\u1102";
+    expect(glides(composing(h + a + n, 3, 3, next))).toBe(true);
+    expect(glides(composing("\ud55c", 1, 1, next))).toBe(true);
+    // the final jamo moves on as the leading jamo of the next syllable
+    expect(glides(composing(h + a + n, 3, 2, next + a))).toBe(true);
+  });
+
+  it("treats the extended jamo blocks like the main ones", () => {
+    const [leading, vowel, trailing] = ["\ua960", "\ud7b0", "\ud7cb"];
+    expect(glides(composing("", 0, 0, leading))).toBe(true);
+    expect(glides(composing(leading, 1, 0, leading + vowel))).toBe(false);
+    expect(glides(composing(leading + vowel, 2, 0, leading + vowel + trailing))).toBe(false);
+    expect(glides(composing(leading + vowel + trailing, 3, 3, "\u1100"))).toBe(true);
+  });
+});
+
+describe("caret in a long run of conjoining jamo", () => {
+  const composing = (doc: string, userEvent = "input.type.compose") =>
+    EditorState.create({ doc, selection: { anchor: doc.length } }).update({
+      changes: { from: doc.length, insert: "\u1161" },
+      selection: { anchor: doc.length + 1 },
+      userEvent,
+    });
+  const [leading, vowel] = ["\u1112", "\u1161"];
+
+  it("snaps while a cluster grows past the span read at a time", () => {
+    // every pair joins, so the whole run is one syllable however long it gets
+    for (const length of [15, 16, 17, 31, 32, 33, 80]) {
+      expect(glides(composing(leading + vowel.repeat(length)))).toBe(false);
+    }
+  });
+
+  it("finds the start of a long cluster that follows other text", () => {
+    for (const length of [14, 15, 16, 17, 40]) {
+      expect(glides(composing(`\ud55c${leading}${vowel.repeat(length)}`))).toBe(false);
+    }
+  });
+
+  it("glides for the next syllable after a long cluster", () => {
+    for (const length of [15, 16, 17, 40, 5000]) {
+      const doc = leading + vowel.repeat(length);
+      const next = EditorState.create({ doc, selection: { anchor: doc.length } }).update({
+        changes: { from: doc.length, insert: "\u1102" },
+        selection: { anchor: doc.length + 1 },
+        userEvent: "input.type.compose",
+      });
+      expect(glides(next)).toBe(true);
+    }
+  });
+
+  it("glides for a new syllable after a long cluster whose start was not found", () => {
+    const doc = leading + vowel.repeat(5000);
+    const base = EditorState.create({ doc, selection: { anchor: doc.length } });
+    // The IME replaces the composing tail and a leading jamo starts the next syllable.
+    const replaced = base.update({
+      changes: { from: doc.length - 1, to: doc.length, insert: vowel + "\u1102" },
+      selection: { anchor: doc.length + 1 },
+      userEvent: "input.type.compose",
+    });
+    expect(glides(replaced)).toBe(true);
+    // An append too long for the incremental path still finds the new syllable.
+    const insert = vowel.repeat(128) + "\u1102";
+    const appended = base.update({
+      changes: { from: doc.length, insert },
+      selection: { anchor: doc.length + insert.length },
+      userEvent: "input.type.compose",
+    });
+    expect(glides(appended)).toBe(true);
+    // Replacing within the cluster without starting a syllable still snaps.
+    const same = base.update({
+      changes: { from: doc.length - 1, to: doc.length, insert: vowel + vowel },
+      selection: { anchor: doc.length + 1 },
+      userEvent: "input.type.compose",
+    });
+    expect(glides(same)).toBe(false);
+  });
+
+  it("bounds document reads across repeated composing appends to a long cluster", () => {
+    let current = EditorState.create({
+      doc: leading + vowel.repeat(5000),
+      selection: { anchor: 5001 },
+    });
+    let reads = 0;
+    const watched = new WeakSet<Text>();
+    const restore: Array<() => void> = [];
+    const watchReads = (doc: Text) => {
+      if (watched.has(doc)) return;
+      const original = doc.sliceString;
+      const slice = vi.spyOn(doc, "sliceString").mockImplementation(function (
+        this: Text,
+        from,
+        to,
+        lineSep,
+      ) {
+        reads += (to ?? this.length) - (from ?? 0);
+        return original.call(this, from, to, lineSep);
+      });
+      restore.push(() => slice.mockRestore());
+      watched.add(doc);
+    };
+
+    try {
+      for (let i = 0; i < 200; i++) {
+        const before = reads;
+        const at = current.selection.main.head;
+        const tr = current.update({
+          changes: { from: at, insert: vowel },
+          selection: { anchor: at + 1 },
+          userEvent: "input.type.compose",
+        });
+        watchReads(tr.startState.doc);
+        watchReads(tr.newDoc);
+        expect(glides(tr)).toBe(false);
+        expect(reads - before).toBeLessThanOrEqual(132);
+        current = tr.state;
+      }
+      expect(reads).toBeLessThan(20 * current.doc.length);
+    } finally {
+      for (const restoreSpy of restore) restoreSpy();
+    }
+  });
+});
+
+describe("gliding caret marker", () => {
+  it("is not equal to one at the same place that moves differently", () => {
+    expect(new GlidingCaret(10, 4, 16, true).eq(new GlidingCaret(10, 4, 16, true))).toBe(true);
+    expect(new GlidingCaret(10, 4, 16, true).eq(new GlidingCaret(10, 4, 16, false))).toBe(false);
+    expect(new GlidingCaret(10, 4, 16, false).eq(new GlidingCaret(11, 4, 16, false))).toBe(false);
   });
 });

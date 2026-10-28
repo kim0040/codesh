@@ -1,6 +1,6 @@
 import { toast } from "@gachipad/ui";
 import { type DragEvent, useState } from "react";
-import { api } from "../../lib/api";
+import { api, isApiError } from "../../lib/api";
 import { useT } from "../../lib/i18n";
 import { collectDroppedFiles } from "./dropped-files";
 
@@ -63,8 +63,13 @@ export function useTransferTarget(shareId: string, to: string, name: string) {
               await api.invite({ to: to as never, shareId, uploadId: result.uploadId });
             }
             toast({ title: t("toast.sent", { name }), tone: "success" });
-          } catch {
-            toast({ title: t("toast.uploadFailed"), tone: "danger" });
+          } catch (error) {
+            const limited = isApiError(error, "upload_pool_limited");
+            toast({
+              title: t(limited ? "error.upload_pool_limited" : "toast.uploadFailed"),
+              description: limited ? t("error.upload_pool_limited.hint") : undefined,
+              tone: "danger",
+            });
           }
         });
       },

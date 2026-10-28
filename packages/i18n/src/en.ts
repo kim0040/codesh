@@ -1179,6 +1179,8 @@ export const en = {
   "error.pending_approval.hint": "Keep this page open. It continues once the owner approves.",
   "error.rate_limited": "Too many attempts",
   "error.rate_limited.hint": "Wait a few minutes, then try again.",
+  "error.upload_pool_limited": "This address has reached its upload storage limit",
+  "error.upload_pool_limited.hint": "Try again after earlier uploads expire.",
   "error.too_large": "That's too large to save",
   "error.too_large.hint": "Shorten the text, split it into files, or upload a smaller file.",
   "error.expired": "This share has expired",

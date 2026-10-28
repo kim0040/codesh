@@ -197,7 +197,7 @@ install_cleanup() {
     else rm -f .env || restored=0; fi
     if [ "$restored" = 1 ] && [ "$FRESH" = 0 ] && [ "$START_ATTEMPTED" = 1 ]; then
       # Candidate process overrides must not mask the restored file during rollback.
-      unset GACHIPAD_NETWORK PUBLIC_URL SITE_ADDRESS COMPOSE_PROFILES GACHIPAD_DB DATABASE_URL HTTP_PORT HTTPS_PORT COLLAB_REPLICAS
+      unset GACHIPAD_NETWORK PUBLIC_URL SITE_ADDRESS COMPOSE_PROFILES GACHIPAD_DB DATABASE_URL HTTP_PORT HTTPS_PORT COLLAB_REPLICAS NETWORK_SUBNET NETWORK_GATEWAY TRUST_PROXY
       local -a restart_command=(docker compose up -d --wait --wait-timeout 120)
       # macOS does not ship GNU timeout; Compose still bounds the readiness wait there.
       if command -v timeout >/dev/null 2>&1; then restart_command=(timeout -k 5 150 "${restart_command[@]}"); fi

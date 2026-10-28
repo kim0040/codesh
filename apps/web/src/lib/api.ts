@@ -60,6 +60,7 @@ const KNOWN_CODES: readonly string[] = [
   "banned",
   "pending_approval",
   "rate_limited",
+  "upload_pool_limited",
   "too_large",
   "expired",
   "validation",

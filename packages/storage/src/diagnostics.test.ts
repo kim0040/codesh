@@ -6,22 +6,60 @@ import { ingestCrashDiagnostic, ServerDiagnostics, writeCrashDiagnostic } from "
 import { createMemoryStores } from "./memory.js";
 
 describe("server diagnostic mirror", () => {
+  it("bounds public request counts to five minutes and refreshes the cached local snapshot", async () => {
+    const stores = createMemoryStores();
+    const recorder = new ServerDiagnostics("api", stores.diagnostics);
+    const at = Math.floor(Date.now() / 60_000) * 60_000;
+    await recorder.recent();
+    recorder.recordClientIdentity(false, at);
+    recorder.recordClientIdentity(true, at);
+    expect((await recorder.recent()).snapshots[0]?.clientIdentityMinutes).toEqual([
+      [at / 60_000, 2, 1],
+    ]);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at + 300_000);
+    try {
+      expect(recorder.snapshot().clientIdentityMinutes).toEqual([]);
+      recorder.recordClientIdentity(false);
+      expect(recorder.snapshot().clientIdentityMinutes).toEqual([[at / 60_000 + 5, 1, 0]]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it("restores deduplicated events and minute counters after a restart", async () => {
     const stores = createMemoryStores();
     const before = new ServerDiagnostics("api", stores.diagnostics, "stable-instance");
     before.record("server_error", {}, "error");
     before.record("server_error", {}, "error");
+    before.recordClientIdentity(false);
+    before.recordClientIdentity(true);
     await before.flush();
     const after = new ServerDiagnostics("api", stores.diagnostics, "stable-instance");
     await after.start();
     try {
       expect(after.ring.list()[0]?.count).toBe(2);
+      expect(after.snapshot().clientIdentityMinutes?.[0]?.slice(1)).toEqual([2, 1]);
       expect(after.snapshot().errorMinutes?.reduce((n, [, count]) => n + count, 0)).toBe(2);
       after.record("server_error", {}, "error");
       expect(after.ring.list()[0]?.count).toBe(3);
     } finally {
       await after.close();
     }
+  });
+  it("mirrors only valid request counts from the current five minutes", async () => {
+    const stores = createMemoryStores();
+    const recorder = new ServerDiagnostics("api", stores.diagnostics);
+    const minute = Math.floor(Date.now() / 60_000);
+    await stores.diagnostics.replace({
+      ...recorder.snapshot(),
+      clientIdentityMinutes: [
+        [minute - 5, 1, 1],
+        [minute + 1, 1, 1],
+        [minute, 2, 3],
+        [minute, -1, 0],
+        [minute, 5, 1],
+      ],
+    });
+    expect((await stores.diagnostics.list())[0]?.clientIdentityMinutes).toEqual([[minute, 5, 1]]);
   });
   it("records synchronously while a single bounded mirror write is in flight", async () => {
     let resolve: () => void = () => {};

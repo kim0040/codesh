@@ -45,7 +45,8 @@ export function moderationRoutes(app: App, ctx: Ctx): void {
         const shared = Object.entries(admitted).some(
           ([other, value]) => other !== clientId && other !== share.ownerId && value === address,
         );
-        if (address && !shared) await ctx.valkey.sadd(apiKeys.bannedNetworks(share.id), address);
+        if (address && address !== "unknown" && !shared)
+          await ctx.valkey.sadd(apiKeys.bannedNetworks(share.id), address);
         await ctx.stores.shares.addBan(share.id, clientId);
         // A banned client could neither unsave the share nor would its entry ever let the share expire.
         const settings = await ctx.settings();

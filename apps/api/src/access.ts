@@ -68,9 +68,11 @@ export async function accessOf(
   if (share.bans.includes(clientId))
     throw new ApiError("banned", "You were removed from this share");
   const owner = share.ownerId === clientId;
+  const address = addressKey(session.ip);
   if (
     !owner &&
-    (await ctx.valkey.sismember(apiKeys.bannedNetworks(share.id), addressKey(session.ip)))
+    address !== "unknown" &&
+    (await ctx.valkey.sismember(apiKeys.bannedNetworks(share.id), address))
   )
     throw new ApiError("banned", "This network address was removed from this share");
   const lab = share.labId ? await ctx.stores.labs.get(share.labId) : null;
