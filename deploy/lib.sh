@@ -115,6 +115,22 @@ network_gateway() {
   printf '%s.%s.%s.%s' "$((address>>24))" "$(((address>>16)&255))" "$(((address>>8)&255))" "$((address&255))"
 }
 
+network_docker_warning() {
+  local info
+  info="$(docker info --format '{{json .}}' 2>/dev/null)" || info=''
+  case "$info" in
+    *rootless* | *[Dd]esktop*)
+      echo 'warning: docker info reports rootless Docker or Docker Desktop; published ports may rewrite client addresses even over IPv4.' >&2 ;;
+    '') echo 'warning: docker info could not report source-address preservation settings.' >&2 ;;
+  esac
+  if printf '%s' "$info" | grep -Eiq '"ip6tables"[[:space:]]*:[[:space:]]*false|"userland-?proxy"[[:space:]]*:[[:space:]]*true'; then
+    echo 'warning: docker info reports disabled ip6tables or enabled userland-proxy; verify source-address preservation before publishing IPv6.' >&2
+  else
+    echo 'install: verify ip6tables is enabled and userland-proxy is disabled before publishing IPv6; docker info may not expose these daemon settings.'
+  fi
+  echo 'warning: public port forwarding may rewrite source addresses (rootless Docker / Docker Desktop); a rewritten private address can satisfy the public ADMIN_ALLOW_CIDR default. Set ADMIN_ALLOW_CIDR to source-preserving administrator addresses and verify the forwarding path.' >&2
+}
+
 select_network() {
   local fresh="$1" answer url previous
   previous="$(env_get GACHIPAD_NETWORK internal)"
@@ -131,6 +147,8 @@ select_network() {
   fi
   case "$GACHIPAD_NETWORK" in internal | public) ;; *) die 'GACHIPAD_NETWORK / --network must be internal or public' ;; esac
   if [ "$GACHIPAD_NETWORK" = public ]; then
+    NETWORK_SUBNET="${NETWORK_SUBNET:-$(env_get NETWORK_SUBNET 172.29.88.0/24)}"
+    NETWORK_GATEWAY="$(network_gateway "$NETWORK_SUBNET")"
     url="${PUBLIC_URL:-$(env_get PUBLIC_URL)}"
     if [ -n "$DOMAIN_OPTION" ]; then NETWORK_DOMAIN="$(printf '%s' "$DOMAIN_OPTION" | tr '[:upper:]' '[:lower:]')"
     else
@@ -141,7 +159,7 @@ select_network() {
     network_domain "$NETWORK_DOMAIN" || die 'public mode requires a DNS name you own; IP addresses, .local and single-label names are not allowed'
     if [ "$PROXY_OPTION_SET" = 0 ] && [ "$previous" = public ]; then PROXY_OPTION="$(env_get GACHIPAD_BEHIND_PROXY)"; fi
     [ -z "$PROXY_OPTION" ] || network_proxy_cidr "$PROXY_OPTION" || die '--behind-proxy requires an IPv4 prefix >= 8 or IPv6 prefix >= 32'
-    if [ -n "$PROXY_OPTION" ] && network_proxy_overlaps "$PROXY_OPTION" "${NETWORK_SUBNET:-$(env_get NETWORK_SUBNET 172.29.88.0/24)}"; then
+    if [ -n "$PROXY_OPTION" ] && network_proxy_overlaps "$PROXY_OPTION" "$NETWORK_SUBNET"; then
       die '--behind-proxy must not overlap NETWORK_SUBNET; use a separate proxy network'
     fi
     [ -n "$ACME_OPTION" ] || ACME_OPTION="$(env_get ACME_EMAIL)"
@@ -149,7 +167,8 @@ select_network() {
     PUBLIC_URL="https://$NETWORK_DOMAIN"
     SITE_ADDRESS="$NETWORK_DOMAIN"
     [ -z "$PROXY_OPTION" ] || SITE_ADDRESS="http://$NETWORK_DOMAIN"
-    export PUBLIC_URL SITE_ADDRESS
+    TRUST_PROXY="$NETWORK_SUBNET${PROXY_OPTION:+,$PROXY_OPTION}"
+    export PUBLIC_URL SITE_ADDRESS NETWORK_SUBNET NETWORK_GATEWAY TRUST_PROXY
   elif [ "$previous" = public ]; then
     PUBLIC_URL="${PUBLIC_URL-$(env_get GACHIPAD_INTERNAL_PUBLIC_URL)}"
     SITE_ADDRESS="${SITE_ADDRESS-$(env_get GACHIPAD_INTERNAL_SITE_ADDRESS :80)}"
@@ -175,16 +194,20 @@ persist_network() {
     env_set SITE_ADDRESS "$SITE_ADDRESS"
     env_set SITE_ALIASES ''
     env_set GACHIPAD_PUBLIC_TLS "$(if [ -n "$PROXY_OPTION" ]; then echo proxy; else echo acme; fi)"
-    # The shipped compose network is IPv4-only: published IPv6 would use docker-proxy and lose IPs.
-    env_set GACHIPAD_BIND_ADDRESS '0.0.0.0:'
-    echo 'install: public ports bind IPv4 only; IPv6 requires a dual-stack Docker network with ip6tables enabled and userland-proxy disabled.'
+    # Default once for the shipped IPv4 network; later runs retain operator changes, including empty.
+    if [ "$previous" != public ]; then
+      env_set GACHIPAD_BIND_ADDRESS "${GACHIPAD_BIND_ADDRESS-$(env_get GACHIPAD_BIND_ADDRESS 0.0.0.0:)}"
+    elif [ "${GACHIPAD_BIND_ADDRESS+x}" = x ]; then
+      env_set GACHIPAD_BIND_ADDRESS "$GACHIPAD_BIND_ADDRESS"
+    fi
+    echo "install: public port binding: $(env_get GACHIPAD_BIND_ADDRESS) (empty means all host addresses); IPv6 requires a source-preserving dual-stack Docker network."
+    network_docker_warning
     env_set GACHIPAD_BEHIND_PROXY "$PROXY_OPTION"
     env_set ACME_EMAIL "$ACME_OPTION"
     env_set CADDY_TRUSTED_PROXIES "${PROXY_OPTION:-127.0.0.1/32}"
-    value="$(env_get NETWORK_SUBNET 172.29.88.0/24)"
-    env_set NETWORK_GATEWAY "$(network_gateway "$value")"
-    [ -z "$PROXY_OPTION" ] || value+=",$PROXY_OPTION"
-    env_set TRUST_PROXY "$value"
+    env_set NETWORK_SUBNET "$NETWORK_SUBNET"
+    env_set NETWORK_GATEWAY "$NETWORK_GATEWAY"
+    env_set TRUST_PROXY "$TRUST_PROXY"
     if [ -z "$(env_get ADMIN_ALLOW_CIDR)" ]; then
       env_set ADMIN_ALLOW_CIDR '127.0.0.0/8,::1/128,10.0.0.0/8,192.168.0.0/16,fc00::/7'
     fi
@@ -227,6 +250,8 @@ LIMITS
     for name in SITE_ALIASES CADDY_TRUSTED_PROXIES TRUST_PROXY ADMIN_ALLOW_CIDR GACHIPAD_BIND_ADDRESS; do
       env_set "$name" "$(env_get "GACHIPAD_INTERNAL_$name")"
     done
+    TRUST_PROXY="$(env_get TRUST_PROXY)"
+    export TRUST_PROXY
     env_set GACHIPAD_BEHIND_PROXY ''
     env_set GACHIPAD_PUBLIC_TLS acme
   fi
@@ -242,6 +267,10 @@ network_addresses() {
     echo 'install: for a large shared NAT, raise SSE_MAX_PER_IP, RATE_LIMIT_API_PER_MIN and RATE_LIMIT_CODE_PER_MIN as needed.'
     if [ -n "$(env_get GACHIPAD_BEHIND_PROXY)" ]; then
       echo 'install: open TCP 443 on the TLS proxy; forward HTTP to Caddy only from the configured proxy CIDR. Send X-Forwarded-For and X-Forwarded-Proto: https.'
+      echo 'install: --behind-proxy should name a single host (/32 for IPv4 or /128 for IPv6); broad ranges can turn real clients into unknown and share their limits.'
+      if [[ "$PROXY_OPTION" != *:* ]] && [ "${PROXY_OPTION##*/}" -lt 16 ]; then
+        echo 'warning: --behind-proxy is broader than /16; use a single-host CIDR to preserve client identities.' >&2
+      fi
     else
       echo 'install: open/forward internet TCP 80 and 443 to Caddy for HTTPS redirects and free ACME certificates.'
       echo 'install: the first certificate may take a minute; local API health was checked independently of ACME.'

@@ -1179,6 +1179,8 @@ export const ko: KoDictionary = {
   "error.pending_approval.hint": "이 페이지를 열어 두세요. 승인되면 자동으로 이어져요.",
   "error.rate_limited": "시도 횟수가 너무 많아요",
   "error.rate_limited.hint": "몇 분 기다린 뒤 다시 시도해 주세요.",
+  "error.upload_pool_limited": "이 주소의 업로드 저장 한도에 도달했어요",
+  "error.upload_pool_limited.hint": "이전 업로드가 만료된 뒤 다시 시도해 주세요.",
   "error.too_large": "저장하기에 너무 커요",
   "error.too_large.hint": "텍스트를 줄이거나 파일로 나누거나, 더 작은 파일을 올려 주세요.",
   "error.expired": "만료된 공유예요",

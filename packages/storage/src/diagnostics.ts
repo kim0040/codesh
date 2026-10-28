@@ -32,6 +32,7 @@ export class ServerDiagnostics {
     | undefined;
   private recentCacheDirty = false;
   private readonly errorMinutes = new Map<number, number>();
+  private readonly clientIdentityMinutes = new Map<number, [number, number]>();
   private readonly startedAt = Date.now();
   private timer: ReturnType<typeof setInterval> | undefined;
   readonly slot: string;
@@ -64,6 +65,18 @@ export class ServerDiagnostics {
     }
     this.dirty = true;
   }
+  /** Count once per public API request; the bounded mirror aggregates replicas for the admin. */
+  recordClientIdentity(unknown: boolean, at = Date.now()): void {
+    const minute = Math.floor(at / 60_000);
+    const counts = this.clientIdentityMinutes.get(minute) ?? [0, 0];
+    counts[0]++;
+    if (unknown) counts[1]++;
+    this.clientIdentityMinutes.set(minute, counts);
+    for (const key of this.clientIdentityMinutes.keys())
+      if (key < minute - 4) this.clientIdentityMinutes.delete(key);
+    this.dirty = true;
+    if (this.recentCache) this.recentCacheDirty = true;
+  }
   start(): Promise<void> {
     this.starting ??= (async () => {
       try {
@@ -78,6 +91,10 @@ export class ServerDiagnostics {
               minute,
               Math.min(Number.MAX_SAFE_INTEGER, (this.errorMinutes.get(minute) ?? 0) + count),
             );
+          for (const [minute, total, unknown] of previous.clientIdentityMinutes ?? []) {
+            const current = this.clientIdentityMinutes.get(minute) ?? [0, 0];
+            this.clientIdentityMinutes.set(minute, [current[0] + total, current[1] + unknown]);
+          }
           this.pruneErrors();
         }
       } catch {
@@ -97,6 +114,9 @@ export class ServerDiagnostics {
   }
   snapshot(): DiagnosticSnapshot {
     this.pruneErrors();
+    const cutoff = Math.floor(Date.now() / 60_000) - 4;
+    for (const key of this.clientIdentityMinutes.keys())
+      if (key < cutoff) this.clientIdentityMinutes.delete(key);
     return {
       slot: this.slot,
       source: this.source,
@@ -105,6 +125,11 @@ export class ServerDiagnostics {
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       ...this.counts(),
       errorMinutes: [...this.errorMinutes.entries()],
+      clientIdentityMinutes: [...this.clientIdentityMinutes].map(([minute, [total, unknown]]) => [
+        minute,
+        total,
+        unknown,
+      ]),
       events: this.ring.list(),
       breadcrumbs: this.ring.listBreadcrumbs(),
     };

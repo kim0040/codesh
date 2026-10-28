@@ -9,6 +9,10 @@ describe("errorText", () => {
       hint: "error.not_found.hint",
     });
     expect(errorText(new ApiError(0, "network", "x", null)).title).toBe("error.network");
+    expect(errorText(new ApiError(429, "upload_pool_limited", "x", null))).toEqual({
+      title: "error.upload_pool_limited",
+      hint: "error.upload_pool_limited.hint",
+    });
   });
 
   it("treats anything else as a generic error", () => {

@@ -32,6 +32,7 @@ export const DIAGNOSTIC_KINDS = [
   "update_error",
   "rate_limit",
   "admin_login_failed",
+  "client_identity_unknown",
   "background_error",
 ] as const;
 export type DiagnosticKind = (typeof DIAGNOSTIC_KINDS)[number];
@@ -253,7 +254,7 @@ function scrubMessage(message: string): string | null {
 }
 
 const CODES = new Set(
-  "network unknown forbidden not_found validation unavailable rate_limited pin_required pin_invalid pending_approval banned expired too_large unauthorized lock_lost ECONNREFUSED ETIMEDOUT ECONNRESET ENOTFOUND EAI_AGAIN EPIPE".split(
+  "network unknown forbidden not_found validation unavailable rate_limited upload_pool_limited pin_required pin_invalid pending_approval banned expired too_large unauthorized lock_lost ECONNREFUSED ETIMEDOUT ECONNRESET ENOTFOUND EAI_AGAIN EPIPE".split(
     " ",
   ),
 );
@@ -685,6 +686,8 @@ export interface DiagnosticSnapshot {
   participants?: Record<string, number>;
   /** Minute-resolution rolling error counts, independent of deduplicated 14-day events. */
   errorMinutes?: [number, number][];
+  /** Five minute public request totals: [minute, total, unknown], without client identities. */
+  clientIdentityMinutes?: [number, number, number][];
   events: DiagnosticEvent[];
   breadcrumbs: DiagnosticBreadcrumb[];
 }
@@ -711,11 +714,12 @@ export interface AdminOverview {
   uptimeSeconds: number;
   version: string;
   errors24h: number;
+  unknownClientIdentity: boolean;
   activity: number[];
   health: { mongo: boolean; valkey: boolean; collab: "healthy" | "unknown" };
 }
 export interface AdminSecurity {
-  codeFailures: { count: number; limit: number; exhausted: boolean };
+  codeFailures: { count: number; limit: number; exhausted: boolean } | null;
   cidrRestricted: boolean;
   proxyRestricted: boolean;
   loginPerMinute: number;
@@ -753,7 +757,8 @@ export function scrubDiagnosticSnapshot(input: DiagnosticSnapshot): DiagnosticSn
   const ring = new DiagnosticRing();
   ring.load({ events: input.events, breadcrumbs: input.breadcrumbs });
   const integer = (value: number) => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
-  const minMinute = Math.floor(Date.now() / 60_000) - 1440;
+  const currentMinute = Math.floor(Date.now() / 60_000);
+  const minMinute = currentMinute - 1440;
   const result: DiagnosticSnapshot = {
     slot: input.slot,
     source: input.source,
@@ -777,11 +782,24 @@ export function scrubDiagnosticSnapshot(input: DiagnosticSnapshot): DiagnosticSn
         ([minute, count]) =>
           Number.isSafeInteger(minute) &&
           minute >= minMinute &&
-          minute <= minMinute + 1440 &&
+          minute <= currentMinute &&
           Number.isSafeInteger(count) &&
           count >= 0,
       )
       .slice(-DIAGNOSTIC_SERVER_CAPS.errorMinutes),
+    clientIdentityMinutes: (input.clientIdentityMinutes ?? [])
+      .filter(
+        ([minute, total, unknown]) =>
+          Number.isSafeInteger(minute) &&
+          minute >= currentMinute - 4 &&
+          minute <= currentMinute &&
+          Number.isSafeInteger(total) &&
+          total >= 0 &&
+          Number.isSafeInteger(unknown) &&
+          unknown >= 0 &&
+          unknown <= total,
+      )
+      .slice(-5),
     events: ring.list(),
     breadcrumbs: ring.listBreadcrumbs(),
   };

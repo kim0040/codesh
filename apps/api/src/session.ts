@@ -33,6 +33,7 @@ export interface Session {
 declare module "fastify" {
   interface FastifyRequest {
     session: Session;
+    clientAddress: string | undefined;
   }
 }
 
@@ -60,6 +61,7 @@ export const guestName = (clientId: string) => `Guest-${clientId.slice(0, 4)}`;
 
 /** The client address after applying the trusted-proxy rules of §7. */
 export function clientIp(ctx: Ctx, request: FastifyRequest): string {
+  if (request.clientAddress !== undefined) return request.clientAddress;
   const forwarded = request.headers["x-forwarded-for"];
   const resolved = resolveClientIp(
     request.ip,
@@ -67,19 +69,23 @@ export function clientIp(ctx: Ctx, request: FastifyRequest): string {
     ctx.trusted,
   );
   const bytes = parseIp(resolved);
-  if (
+  const unknown =
     ctx.config.network === "public" &&
-    (!bytes || ctx.trusted.some((cidr) => cidrContains(cidr, bytes)))
-  ) {
+    (!bytes || ctx.trusted.some((cidr) => cidrContains(cidr, bytes)));
+  if (ctx.config.network === "public") ctx.diagnostics.recordClientIdentity(unknown);
+  if (unknown) {
     if (Date.now() - ctx.unknownClientWarningAt >= 60_000) {
       ctx.unknownClientWarningAt = Date.now();
+      ctx.diagnostics.record("client_identity_unknown");
       request.log.warn(
         "Public client identity is unknown: check Docker userland-proxy/IPv6 port bindings and the TLS proxy X-Forwarded-For chain",
       );
     }
-    return "unknown";
+    request.clientAddress = "unknown";
+  } else {
+    request.clientAddress = resolved;
   }
-  return resolved;
+  return request.clientAddress;
 }
 
 /** Starts a session for the browser: a new client id in the signed `gachipad_sid` cookie. */

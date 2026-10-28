@@ -97,6 +97,7 @@ export function buildApp(deps: Deps, options: FastifyServerOptions = {}) {
     limits: { fileSize: MULTIPART_CEILING_BYTES, files: 1000, parts: 1200, fields: 50 },
   });
   app.decorateRequest("session");
+  app.decorateRequest("clientAddress");
   app.decorateRequest("diagnosticCode", "unknown");
 
   app.addHook("onRequest", async (request, reply) => {

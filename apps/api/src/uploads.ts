@@ -175,7 +175,7 @@ async function* reserveUploadPool(
       Math.floor(ctx.config.limits.UPLOAD_STORAGE_MAX_BYTES / 4),
     );
     if (Number(admitted) !== 1)
-      throw new ApiError("unavailable", "Upload storage capacity for this address reached");
+      throw new ApiError("upload_pool_limited", "Upload storage capacity for this address reached");
     yield chunk;
   }
 }

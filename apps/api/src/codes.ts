@@ -1,7 +1,7 @@
 import { generateJoinCode, JOIN_CODE_COOLDOWN_SECONDS, keys } from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
-import { abuseKeys } from "./net.js";
+import { addressKey, formatIp, parseIp } from "./net.js";
 
 export type CodeKind = "share" | "lab";
 
@@ -87,17 +87,22 @@ export async function resolveCode(
   ip = "unknown",
 ): Promise<{ shareId: string } | { labId: string } | null> {
   const budget = keys.rateLimit("global", "code-failures");
-  const address = abuseKeys(ip).at(-1)?.key ?? "unknown";
+  const bytes = parseIp(ip);
+  if (bytes?.length === 16) bytes.fill(0, 6);
+  const address = bytes?.length === 16 ? `${formatIp(bytes)}/48` : addressKey(ip);
   const recentMiss = keys.rateLimit(address, "code-recent-miss");
-  let window = 0;
+  let shareId: string | null;
+  let labId: string | null;
   if (ctx.config.network === "public") {
-    const [admitted, audit] = (await ctx.valkey.eval(
+    const [admitted, audit, share, lab] = (await ctx.valkey.eval(
       RESERVE_LOOKUP,
-      2,
+      4,
       budget,
       recentMiss,
+      keys.code(code),
+      keys.labCode(code),
       ctx.config.codeFailureBudgetPerMinute,
-    )) as [number, number];
+    )) as [number, number, string | null, string | null];
     if (admitted < 0) {
       ctx.diagnostics.record("rate_limit");
       ctx.metrics.rateLimited.inc({ bucket: "code-global" });
@@ -115,65 +120,66 @@ export async function resolveCode(
         "Retry-After": String(-admitted),
       });
     }
-    window = admitted;
-  }
-  const [shareId, labId] = await ctx.valkey.mget(keys.code(code), keys.labCode(code));
-  if (ctx.config.network === "public" && !shareId && !labId)
-    await ctx.valkey.set(recentMiss, "1", "EX", 600);
-  if (window && (shareId || labId)) await ctx.valkey.eval(REFUND_LOOKUP, 1, budget, window);
+    shareId = share;
+    labId = lab;
+  } else
+    [shareId = null, labId = null] = await ctx.valkey.mget(keys.code(code), keys.labCode(code));
   if (shareId) return { shareId };
   if (labId) return { labId };
   return null;
 }
 
-// Reserve before the lookup, refund hits. One Valkey clock and atomic admission across replicas
-// bound parallel guesses; matching the window on refund prevents crossing-window undercounts.
+// Admission, lookup and accounting share one clock and script across replicas. Clean identities
+// bypass an exhausted shared budget only while the fleet-wide free allowance has room.
 const RESERVE_LOOKUP = `
-if redis.call('EXISTS', KEYS[2]) == 0 then return {0, 0} end
+local fresh = redis.call('SET', KEYS[2], '1', 'NX', 'EX', 600)
 local now = tonumber(redis.call('TIME')[1])
 local window = math.floor(now / 60) + 1
-local state = redis.call('HMGET', KEYS[1], 'window', 'count', 'logged')
+local state = redis.call('HMGET', KEYS[1], 'window', 'count', 'free')
 local count = tonumber(state[2]) or 0
+local free = tonumber(state[3]) or 0
 if tonumber(state[1]) ~= window then
   count = 0
-  redis.call('HSET', KEYS[1], 'window', window, 'count', 0, 'logged', 0)
+  free = 0
+  redis.call('HSET', KEYS[1], 'window', window, 'count', 0, 'free', 0, 'logged', 0)
 end
 redis.call('EXPIRE', KEYS[1], 120)
-if count >= tonumber(ARGV[1]) then
+local function refused()
   local log = tonumber(redis.call('HGET', KEYS[1], 'logged')) == 0 and 1 or 0
   redis.call('HSET', KEYS[1], 'logged', 1)
-  return {-(60 - now % 60), log}
+  return {-(60 - now % 60), log, false, false}
 end
-redis.call('HINCRBY', KEYS[1], 'count', 1)
-return {window, 0}
-`;
-
-const REFUND_LOOKUP = `
-if tonumber(redis.call('HGET', KEYS[1], 'window')) == tonumber(ARGV[1]) then
-  redis.call('HINCRBY', KEYS[1], 'count', -1)
+local limit = tonumber(ARGV[1])
+if (not fresh or free >= 3 * limit) and count >= limit then return refused() end
+local targets = redis.call('MGET', KEYS[3], KEYS[4])
+if targets[1] or targets[2] then
+  redis.call('DEL', KEYS[2])
+  return {0, 0, targets[1], targets[2]}
 end
-return 1
+if fresh and free < 3 * limit then
+  redis.call('HINCRBY', KEYS[1], 'free', 1)
+elseif count >= limit then return refused()
+else redis.call('HINCRBY', KEYS[1], 'count', 1) end
+return {0, 0, false, false}
 `;
 
 /** Read with Valkey's clock so expired windows are never shown as exhausted. */
 export async function codeFailureStatus(
   ctx: Ctx,
-): Promise<{ count: number; limit: number; exhausted: boolean }> {
+): Promise<{ count: number; limit: number; exhausted: boolean } | null> {
+  if (ctx.config.network !== "public") return null;
   const limit = ctx.config.codeFailureBudgetPerMinute;
-  const count =
-    ctx.config.network === "public"
-      ? Number(
-          await ctx.valkey.eval(
-            `
+  const count = Number(
+    await ctx.valkey.eval(
+      `
 local window = math.floor(tonumber(redis.call('TIME')[1]) / 60) + 1
 local state = redis.call('HMGET', KEYS[1], 'window', 'count')
 if tonumber(state[1]) ~= window then return 0 end
 return tonumber(state[2]) or 0
 `,
-            1,
-            keys.rateLimit("global", "code-failures"),
-          ),
-        )
-      : 0;
+      1,
+      keys.rateLimit("global", "code-failures"),
+    ),
+  );
   return { count, limit, exhausted: count >= limit };
 }
