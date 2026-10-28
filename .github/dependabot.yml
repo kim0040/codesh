@@ -8,6 +8,13 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # @types/node follows the Node.js line in .nvmrc (22); raise it together with Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # collab's @hocuspocus/extension-redis pins ioredis 5; move with Hocuspocus.
+      - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
