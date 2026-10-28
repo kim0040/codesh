@@ -4,12 +4,15 @@
 # Run through verify-update.sh --rename, on the box only. Every Docker resource is isolated.
 set -euo pipefail
 ROOT="$(pwd)"
-WORK="${VERIFY_DIR:-/data/workspace/gp-upgrade-test}"
-PROJECT="${VERIFY_PROJECT:-gp-upgrade-test}"
+# shellcheck source=verify-lib.sh
+. "$ROOT/deploy/verify-lib.sh"
+WORK="${VERIFY_DIR:-/data/workspace/gp-dbdeploy-rename}"
+PROJECT="${VERIFY_PROJECT:-gp-dbdeploy-rename}"
+case "$PROJECT" in gp-dbdeploy-*) ;; *) echo "verification requires a gp-dbdeploy- project" >&2; exit 1 ;; esac
 P="${VERIFY_HTTP_PORT:-18080}"
 TLS_P="${VERIFY_HTTPS_PORT:-18443}"
 REG_PORT="${VERIFY_REGISTRY_PORT:-5056}"
-REG="localhost:$REG_PORT/rename-test"
+REG="localhost:$REG_PORT/gp-dbdeploy-rename"
 TARGET=1.0.2
 INSTALL="$WORK/install"
 SERVER_PID=""
@@ -17,6 +20,13 @@ REGISTRY_STARTED=0
 BUILDER_STARTED=0
 BUILDER_VOLUME_STARTED=0
 BUILDER_VOLUME="buildx_buildkit_${PROJECT}0_state"
+OLD_IMAGES=(
+  ghcr.io/kim0040/codesh-api:1.0.1
+  ghcr.io/kim0040/codesh-collab:1.0.1
+  ghcr.io/kim0040/codesh-web:1.0.1
+)
+PREEXISTING_OLD_IMAGES=()
+PREEXISTING_IMAGE_IDS=()
 REPORT="$ROOT/.box-out/rename2-real-upgrade.log"
 mkdir -p "$ROOT/.box-out"
 [ ! -e "$WORK" ] || { echo "$WORK already exists; choose a fresh VERIFY_DIR" >&2; exit 1; }
@@ -24,22 +34,81 @@ mkdir -p "$WORK" "$INSTALL" "$WORK/registry"
 exec > >(tee "$REPORT") 2>&1
 
 in_install() { (cd "$INSTALL" && COMPOSE_PROJECT_NAME="$PROJECT" "$@"); }
+# Published 1.0.1 loads these unused platform images beside the current tagged bases.
+# Only these published image IDs may be reclaimed, and never while tagged or in use.
+cleanup_legacy_layers() {
+  local image
+  for image in \
+    sha256:01f1fb6bf474533926d54689d63aaf150d8e16c1d1c05b44113c1c8068162c50 \
+    sha256:e88e49eb39dd0c0377ce8b13369dc8a3a3c4e9b4b272ea70d8581c2c02b913e1; do
+    docker image inspect "$image" >/dev/null 2>&1 || continue
+    [ -z "$(docker ps -aq --filter "ancestor=$image")" ] || continue
+    [ "$(docker image inspect --format '{{len .RepoTags}}' "$image")" = 0 ] || continue
+    docker image rm "$image" >/dev/null 2>&1 || true
+  done
+}
+prepare_old_bundle_images() {
+  local name
+  docker load -i "$INSTALL/images.tar" >/dev/null
+  cleanup_legacy_layers
+  verification_mongo_volume "$PROJECT" "$WORK"
+  for name in api collab web; do
+    docker tag "ghcr.io/kim0040/codesh-$name:1.0.1" "$REG/codesh-$name:1.0.1"
+  done
+  sed -i "s|^CODESH_REGISTRY=.*|CODESH_REGISTRY=$REG|" "$INSTALL/.env"
+}
 cleanup() {
-  local status=$?
+  local status=$? image saved existing id title
   trap - EXIT
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true
+  if [ "$status" != 0 ] && [ -f "$INSTALL/.env" ]; then
+    df -h / /data
+    for id in $(in_install docker compose ps -aq api collab 2>/dev/null); do
+      docker inspect --format 'failure-state {{.Name}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} status={{.State.Status}}' "$id" || true
+    done
+    in_install docker compose logs --no-color --tail 40 api collab 2>&1 | python3 -c '
+import pathlib, re, sys
+text = sys.stdin.read()
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    key, sep, value = line.partition("=")
+    if sep and (key.endswith(("_SECRET", "_TOKEN", "_PASSWORD")) or key in ("DATABASE_URL", "GACHIPAD_DATABASE_URL", "MONGO_URL")):
+        value = value.strip().strip(chr(39) + chr(34))
+        if value: text = text.replace(value, "[redacted]")
+text = re.sub(r"(?:sqlite|postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?):\S+", "[database-url]", text)
+sys.stdout.write(text)
+' "$INSTALL/.env" || true
+  fi
   if [ -f "$INSTALL/docker-compose.yml" ]; then
     in_install docker compose down -v --remove-orphans >/dev/null 2>&1 || true
   fi
+  verification_cleanup_unused_volumes "$PROJECT" || true
   if [ "$REGISTRY_STARTED" = 1 ]; then
     docker rm -fv "$PROJECT-registry" >/dev/null 2>&1 || true
   fi
   if [ "$BUILDER_STARTED" = 1 ]; then docker buildx rm "$PROJECT" >/dev/null 2>&1 || true; fi
   if [ "$BUILDER_VOLUME_STARTED" = 1 ]; then docker volume rm "$BUILDER_VOLUME" >/dev/null 2>&1 || true; fi
   if [ "$REGISTRY_STARTED" = 1 ]; then
-    docker run --rm --pull never -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry /w/buildkit
+    docker run --rm --pull never -v "$WORK:/w" --entrypoint rm registry:2.8.3 -rf /w/registry /w/buildkit /w/volume-data
   fi
   docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -F "$REG/" | xargs -r docker image rm -f >/dev/null 2>&1 || true
+  for image in "${OLD_IMAGES[@]}"; do
+    saved=0
+    for existing in "${PREEXISTING_OLD_IMAGES[@]}"; do [ "$existing" = "$image" ] && saved=1; done
+    [ "$saved" = 1 ] || docker image rm -f "$image" >/dev/null 2>&1 || true
+  done
+  # Containerd can leave the loaded legacy image's platform manifest dangling after its
+  # tags are removed. Remove only new legacy app images, never a base/pre-existing image.
+  for id in $(docker image ls -aq --filter dangling=true --filter label=org.opencontainers.image.version=1.0.1); do
+    saved=0
+    for existing in "${PREEXISTING_IMAGE_IDS[@]}"; do [ "$existing" = "$id" ] && saved=1; done
+    [ "$saved" = 0 ] || continue
+    title="$(docker image inspect "$id" --format '{{index .Config.Labels "org.opencontainers.image.title"}}')"
+    case "$title" in codesh-api | codesh-collab | codesh-web) docker image rm -f "$id" >/dev/null 2>&1 || true ;; esac
+  done
+  cleanup_legacy_layers
+  if [ -f "$WORK/preexisting-image-tags" ]; then
+    verification_restore_image_tags "$WORK/preexisting-image-tags" || status=1
+  fi
   rm -rf "$WORK"
   echo "cleanup: isolated stack, volumes, registry, branch image tags and working files removed (status=$status)"
   exit "$status"
@@ -57,8 +126,26 @@ volumes() {
   docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" | sort |
     xargs -r docker volume inspect --format '{{.Name}} {{.CreatedAt}}'
 }
+same_volumes() {
+  local before="$1" after="$2" line name
+  while IFS= read -r line; do
+    grep -qxF "$line" "$after" || fail "existing volume changed or disappeared: ${line%% *}"
+  done <"$before"
+  while IFS= read -r line; do
+    grep -qxF "$line" "$before" && continue
+    name="${line%% *}"
+    [ "$name" = "${PROJECT}_gachipad-data" ] || fail "unexpected volume created: $name"
+  done <"$after"
+}
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
-[ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 3 ] || fail 'need 3 GiB free in Docker root'
+MIN_DOCKER_GIB="${VERIFY_MIN_DOCKER_GIB:-3}"
+[ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge "$MIN_DOCKER_GIB" ] ||
+  fail "need $MIN_DOCKER_GIB GiB free in Docker root"
+for image in "${OLD_IMAGES[@]}"; do
+  docker image inspect "$image" >/dev/null 2>&1 && PREEXISTING_OLD_IMAGES+=("$image")
+done
+mapfile -t PREEXISTING_IMAGE_IDS < <(docker image ls -aq)
+verification_snapshot_image_tags "$WORK/preexisting-image-tags"
 
 echo 'build: all four production Dockerfiles from a branch snapshot (synthetic next release 1.0.2)'
 mkdir -p "$WORK/source"
@@ -80,12 +167,22 @@ docker volume create --driver local --opt type=none --opt "device=$WORK/buildkit
 BUILDER_VOLUME_STARTED=1
 docker buildx create --name "$PROJECT" --node "${PROJECT}0" --driver docker-container --driver-opt default-load=true,memory=3g >/dev/null
 BUILDER_STARTED=1
-for service in api collab caddy mdns; do
-  [ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 2 ] || fail 'need 2 GiB free before the next build'
-  BUILDX_BUILDER="$PROJECT" docker compose --env-file "$WORK/build.env" --profile mdns -f "$WORK/source/deploy/docker-compose.yml" build --build-arg "GACHIPAD_VERSION=$TARGET" "$service"
+# Build each version and service serially. These are real versioned production images, so the
+# selection verifier exercises a genuine install -> update rather than an up-to-date no-op.
+for version in 1.0.1 "$TARGET"; do
+  node --input-type=module -e '
+    import { readFileSync, writeFileSync } from "node:fs";
+    const path = process.argv[1]; const data = JSON.parse(readFileSync(path));
+    data.version = process.argv[2]; writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+  ' "$WORK/source/package.json" "$version"
+  sed -i "s/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=$version/" "$WORK/source/deploy/.env.example" "$WORK/build.env"
+  for service in api collab caddy mdns; do
+    [ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 1 ] || fail 'need 1 GiB free before the next build'
+    BUILDX_BUILDER="$PROJECT" docker compose --env-file "$WORK/build.env" --profile mdns -f "$WORK/source/deploy/docker-compose.yml" build --build-arg "GACHIPAD_VERSION=$version" "$service"
+  done
+  for name in api collab web mdns; do docker push -q "$REG/gachipad-$name:$version" >/dev/null; done
+  (cd "$WORK/source/deploy" && BUNDLE_SOURCE=registry GACHIPAD_REGISTRY="$REG" BUNDLE_SUFFIX=-linux-amd64 bash bundle.sh "$version")
 done
-for name in api collab web mdns; do docker push -q "$REG/gachipad-$name:$TARGET" >/dev/null; done
-(cd "$WORK/source/deploy" && BUNDLE_SOURCE=registry GACHIPAD_REGISTRY="$REG" BUNDLE_SUFFIX=-linux-amd64 bash bundle.sh "$TARGET")
 
 echo 'install: official v1.0.1 offline bundle, unmodified updater and application images'
 base=https://github.com/kim0040/gachipad/releases/download/v1.0.1
@@ -94,6 +191,7 @@ curl -fsSL --retry 2 "$base/codesh-1.0.1-linux-amd64.tar.gz.sha256" -o "$WORK/ol
 [ "$(sha256sum "$WORK/old.tar.gz" | cut -d' ' -f1)" = "$(cut -d' ' -f1 "$WORK/old.sha256")" ] || fail 'published old bundle checksum'
 tar xzf "$WORK/old.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
+prepare_old_bundle_images
 for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" SITE_ADDRESS=http://codesh.local NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
   sed -i "s|^${setting%%=*}=.*|$setting|" "$INSTALL/.env"
 done
@@ -167,8 +265,10 @@ UPDATE_API_URL="http://127.0.0.1:$server_port/api" UPDATE_DOWNLOAD_URL="http://1
 grep -q 'codesh-deploy-1.0.2.tar.gz.*301' "$WORK/requests.log" || fail 'legacy filename/redirect not exercised'
 HEADER=X-Gachipad
 volumes >"$WORK/volumes-after"
-cmp "$WORK/volumes-before" "$WORK/volumes-after" || fail 'volumes were replaced'
+same_volumes "$WORK/volumes-before" "$WORK/volumes-after"
 [ "$(envv GACHIPAD_VERSION)" = "$TARGET" ] || fail 'new version missing'
+[ "$(envv GACHIPAD_DB)" = mongodb ] || fail 'legacy database selection changed'
+grep -q '^COMPOSE_PROFILES=.*mongodb' "$INSTALL/.env" || fail 'MongoDB profile was not enabled for the legacy install'
 [ "$(envv MONGO_DATABASE)" = codesh ] || fail 'old database not pinned'
 [ "$(envv MDNS_HOSTNAME)" = gachipad.local ] || fail 'new mDNS default missing'
 [ "$(envv MDNS_ALIASES)" = codesh.local ] || fail 'old mDNS alias missing'
@@ -192,6 +292,19 @@ in_install ./restore.sh "$backup" --yes
 call "/api/shares/$ID/history/7" >"$WORK/history-restored.bin"
 cmp "$WORK/history-before.bin" "$WORK/history-restored.bin" || fail 'renamed backup/restore lost history'
 echo 'PASS: same volumes, share content, guest ownership, session, profile/identity, history bytes, settings, upload, backup/restore'
+# The published updater has a fixed whitelist and cannot deliver a new script automatically.
+[ ! -f "$INSTALL/migrate-db.sh" ] || fail 'published updater unexpectedly changed its file whitelist'
+# shellcheck disable=SC2016 # expanded in the installed directory, never contains connection data
+in_install bash -c '
+  . ./lib.sh
+  verify_archive "$1"
+  bundle_root="$(tar -tzf "$1" | cut -d / -f 1 | sort -u)"
+  tar -xOf "$1" "$bundle_root/migrate-db.sh" >migrate-db.sh.new
+  chmod 700 migrate-db.sh.new
+  mv migrate-db.sh.new migrate-db.sh
+  ./migrate-db.sh --help >/dev/null
+' _ "$WORK/source/deploy/dist/gachipad-deploy-$TARGET.tar.gz"
+echo 'PASS: one-time verified-bundle extraction supplies migrate-db.sh after the unmodified 1.0.1 updater'
 
 echo 'offline: original 1.0.1 upgrader, with bundle images from a different registry'
 in_install docker compose down -v --remove-orphans
@@ -199,6 +312,7 @@ rm -rf "$INSTALL"
 mkdir "$INSTALL"
 tar xzf "$WORK/old.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
+prepare_old_bundle_images
 for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" SITE_ADDRESS=http://codesh.local NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
   sed -i "s|^${setting%%=*}=.*|$setting|" "$INSTALL/.env"
 done
@@ -211,7 +325,7 @@ in_install ./upgrade.sh "$WORK/source/deploy/dist/gachipad-$TARGET-linux-amd64.t
 HEADER=X-Gachipad
 [ "$(envv GACHIPAD_REGISTRY)" = "$REG" ] || fail 'offline registry not taken from bundle'
 volumes >"$WORK/offline-volumes-after"
-cmp "$WORK/offline-volumes-before" "$WORK/offline-volumes-after" || fail 'offline volumes replaced'
+same_volumes "$WORK/offline-volumes-before" "$WORK/offline-volumes-after"
 call "/api/shares/$OFFLINE_ID/download" -o "$WORK/offline.zip"
 unzip -p "$WORK/offline.zip" | grep -q 'offline registry data' || fail 'offline share ownership/content lost'
 echo 'PASS: unmodified 1.0.1 offline upgrader accepts the renamed bundle and its different registry; data and volumes preserved'
@@ -222,9 +336,10 @@ rm -rf "$INSTALL"
 mkdir "$INSTALL"
 tar xzf "$WORK/source/deploy/dist/gachipad-$TARGET-linux-amd64.tar.gz" -C "$INSTALL" --strip-components=1
 cp "$INSTALL/.env.example" "$INSTALL/.env"
-for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off; do
+for setting in HTTP_PORT="$P" HTTPS_PORT="$TLS_P" NETWORK_SUBNET=172.29.99.0/24 MONGO_CACHE_GB=0.25 VALKEY_MAXMEMORY=256mb UPDATE_CHECK=off GACHIPAD_DB=mongodb; do
   sed -i "s|^${setting%%=*}=.*|$setting|" "$INSTALL/.env"
 done
+verification_mongo_volume "$PROJECT" "$WORK"
 in_install ./install.sh
 ! grep -qi codesh "$INSTALL/.env" || fail 'legacy name in fresh .env'
 in_install docker compose config >"$WORK/fresh-config"
@@ -248,4 +363,7 @@ in_install docker compose exec -T -e "VERIFY_SHARE=$ID" mongo mongosh --quiet --
   if (db.getSiblingDB("codesh").getCollectionNames().length !== 0) throw new Error("legacy database recreated on fresh install");
 '
 echo 'PASS: legacy archive restores shares, history, uploads and settings into only the fresh gachipad namespace'
+in_install docker compose down -v --remove-orphans
+bash deploy/verify-databases.sh "$WORK/source/deploy/dist/gachipad-1.0.1-linux-amd64.tar.gz" \
+  "$WORK/source/deploy/dist/gachipad-$TARGET-linux-amd64.tar.gz" "$WORK" "$PROJECT-selection"
 echo 'verify-rename: all checks passed'

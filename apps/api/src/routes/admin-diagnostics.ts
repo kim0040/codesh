@@ -104,7 +104,7 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
           ADMIN_TOKEN_SET: ctx.config.adminToken !== "",
           SESSION_SECRET_SET: ctx.config.sessionSecret !== "",
           COLLAB_SECRET_SET: ctx.config.collabSecret !== "",
-          MONGO_URL_SET: ctx.config.mongoUrl !== "",
+          DATABASE_URL_SET: ctx.config.databaseUrlSet,
           VALKEY_URL_SET: ctx.config.valkeyUrl !== "",
           OIDC_CLIENT_SECRET_SET: settings
             ? typeof settings.auth.oidc?.clientSecret === "string" &&

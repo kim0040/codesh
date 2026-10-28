@@ -200,6 +200,8 @@ export interface LabStore {
 
 /** One person's own folder and tags for a share (§5 `share_labels`). */
 export interface LabelStore {
+  /** Optional set-based SQL cleanup; other backends use the sweeper's per-client fallback. */
+  deleteInaccessible?(): Promise<number>;
   get(clientId: string, shareId: string): Promise<ShareLabelRecord | null>;
   /** Creates or replaces the entry; callers delete instead of storing empty labels. */
   set(clientId: string, shareId: string, labels: ShareLabels, at: Date): Promise<ShareLabelRecord>;
@@ -239,6 +241,10 @@ export interface DiagnosticsStore {
 }
 
 export interface Stores {
+  /** Optional bounded expiry/orphan/retention cleanup; other backends use the existing sweeper calls. */
+  maintenance?: {
+    sweep(now: Date, renew: () => Promise<void>): Promise<{ orphans: number }>;
+  };
   diagnostics: DiagnosticsStore;
   shares: ShareStore;
   updates: UpdateLog;

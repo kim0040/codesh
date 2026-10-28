@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dumps the gachipad database (mongodump inside the mongo container) to <dir>/gachipad-<time>.archive.gz.
+# Backs up the selected database to <dir>/gachipad-<time>.archive.gz.
 #
 #   ./backup.sh [dir]        default dir: ./backups
 #
@@ -16,4 +16,4 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-mongo_backup "${1:-./backups}"
+database_backup "${1:-./backups}"

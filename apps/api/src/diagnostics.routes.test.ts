@@ -149,7 +149,7 @@ describe.skipIf(!integration)("admin operational API", () => {
     expect(bundle.header).toContain("gachipad server diagnostics");
     expect(bundle).toMatchObject({
       format: 1,
-      config: { ADMIN_TOKEN_SET: true },
+      config: { ADMIN_TOKEN_SET: true, storage: "memory", DATABASE_URL_SET: false },
       caps: { events: 500, bytes: 262144, days: 14 },
     });
     expect(JSON.stringify(bundle)).not.toMatch(
@@ -165,6 +165,24 @@ describe.skipIf(!integration)("admin operational API", () => {
     expect(audit.some((a) => a.action === "admin.login_failed" && a.ip.startsWith("hash:"))).toBe(
       true,
     );
+  });
+  it("reports the selected backend and URL presence without exporting the URL", async () => {
+    const selected = await createHarness({
+      config: {
+        storage: "postgresql",
+        databaseUrl: "postgresql://ops:private-value@db.example/test",
+        databaseUrlSet: true,
+      },
+    });
+    try {
+      const exported = await selected.client().get("/api/admin/diagnostics/export", bearer);
+      expect(exported.statusCode).toBe(200);
+      const bundle = exported.json<ServerDiagnosticBundle>();
+      expect(bundle.config).toMatchObject({ storage: "postgresql", DATABASE_URL_SET: true });
+      expect(JSON.stringify(bundle)).not.toMatch(/private-value|postgresql:\/\//);
+    } finally {
+      await selected.close();
+    }
   });
   it("limits audit samples and preserves legitimate access after parallel guesses", async () => {
     const strict = await createHarness({

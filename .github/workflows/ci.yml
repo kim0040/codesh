@@ -61,6 +61,8 @@ jobs:
           bash deploy/security-scripts.test.sh
           bash deploy/update.test.sh
           bash deploy/rename.test.sh
+          bash deploy/migrate-db.test.sh
+          bash deploy/verify-lib.test.sh
 
   e2e:
     name: End-to-end (Playwright)

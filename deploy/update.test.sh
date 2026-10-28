@@ -55,6 +55,11 @@ if [ "$1" = compose ]; then
       else for n in web api collab; do printf '%s/gachipad-%s:%s\n' "$registry" "$n" "$version"; done; fi ;;
     run)
       if [ -n "${FAKE_NO_API_IMAGE:-}" ]; then echo 'installed API image is missing' >&2; exit 125; fi
+      if [[ "$*" == *readdirSync* ]] && [ -n "${FAKE_NONEMPTY_VOLUME:-}" ]; then
+        printf 'nonempty'
+        exit 0
+      fi
+      if [[ " $* " == *' mongo-users '* ]]; then exit 0; fi
       while [ "$1" != -e ]; do shift; done
       node "$@" ;;
     pull)
@@ -105,6 +110,13 @@ if [ "$1" = compose ]; then
   esac
   exit 0
 fi
+if [ "$1" = run ] && [[ "$*" == *readdirSync* ]]; then
+  printf nonempty; exit 0
+fi
+if [ "$1" = volume ] && [ "$2" = inspect ]; then
+  [ "${FAKE_NONEMPTY_VOLUME:-}" = "${3:-}" ] && exit 0
+  exit 1
+fi
 if [ "$1" = inspect ]; then
   writer_exit="${FAKE_WRITER_EXIT:-0}"
   case "${!#}" in
@@ -140,7 +152,7 @@ digest() { printf '%s' "$1" | sha256sum | cut -c1-64; }
 release() {
   local v="$1" dir="$F/srv/dl/kim0040/gachipad/releases/download/v$1" stage="$F/stage/gachipad-$1"
   mkdir -p "$dir" "$stage/docs" "$stage/tls" "$stage/state"
-  cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml} "$stage/"
+  cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,docker-compose.yml} "$stage/"
   cp "$root/deploy/README.md" "$stage/README.md"
   printf '# doc\n' >"$stage/docs/OPERATIONS.md"
   printf '# tls\n' >"$stage/tls/tls.example"
@@ -189,12 +201,13 @@ for _ in $(seq 50); do curl -fs "$base/healthz" >/dev/null 2>&1 && break; sleep 
 
 # --- an installation of 1.0.0 --------------------------------------------------------------------
 I="$F/install"
-cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,docker-compose.yml,.env.example,README.md} "$I/"
-sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" "$I/.env.example" >"$I/.env"
+cp "$root"/deploy/{lib.sh,generate-secrets.sh,install.sh,upgrade.sh,update.sh,backup.sh,restore.sh,migrate-db.sh,docker-compose.yml,.env.example,README.md} "$I/"
+sed -e 's/^GACHIPAD_VERSION=.*/GACHIPAD_VERSION=1.0.0/' -e "s/^HTTP_PORT=.*/HTTP_PORT=$port/" -e 's/^GACHIPAD_DB=sqlite/GACHIPAD_DB=mongodb/' "$I/.env.example" >"$I/.env"
 (cd "$I" && ./generate-secrets.sh .env >/dev/null)
 envv() { sed -n "s/^$1=//p" "$I/.env" | tail -n 1; }
 status() { cat "$I/state/update.json"; }
-run() { (cd "$I" && "$@") >"$F/run.log" 2>&1; }
+# Wait for the updater's process-substitution logger to close before reading its output.
+run() { (cd "$I" && "$@") 2>&1 | cat >"$F/run.log"; }
 calls() { cat "$DOCKER_CALLS" 2>/dev/null || true; }
 
 step "--check: newest of this major and the new major, nothing changes"
@@ -224,11 +237,14 @@ status | grep -q '"result":"failed","from":"1.0.0","to":"1.0.2"' || fail "failur
 ok "1.0.2 with a wrong checksum refused; no backup, no pull, .env unchanged"
 
 step "happy path 1.0.0 -> 1.0.1"
+# A fixed-file-list legacy updater can leave the new command absent until this update.
+rm -f "$I/migrate-db.sh"
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.1 --yes || fail "update failed"
 [ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "GACHIPAD_VERSION not 1.0.1"
 [ "$(envv NEW_IN_1_0_1)" = yes ] || fail "new setting not added"
 [ "$(cat "$I/VERSION")" = 1.0.1 ] || fail "files not installed"
+[ -x "$I/migrate-db.sh" ] || fail "new migration command not installed"
 tail -n 1 "$I/update.sh" | grep -q '^# release 1.0.1' || fail "update.sh not replaced"
 grep -q 'exec -T .*mongo sh' "$DOCKER_CALLS" || fail "no backup"
 grep -q 'exec -T -e MONGO_DATABASE=gachipad -e MONGO_INITDB_ROOT_USERNAME=gachipad mongo' "$DOCKER_CALLS" || fail "backup did not name the database and user"
@@ -407,6 +423,112 @@ mongo_names() { # <env lines> -> the -e arguments the transfer passed to the con
 [ "$(mongo_names $'MONGO_DATABASE=mine\nMONGO_ROOT_USER=root1\nGACHIPAD_LEGACY_INSTALL=1\n')" = 'exec -T -e MONGO_DATABASE=mine -e MONGO_INITDB_ROOT_USERNAME=root1' ] || fail "explicit names"
 ok "database and root user resolved on the host: explicit, legacy codesh, else gachipad"
 
+step "backup and restore dispatch follow GACHIPAD_DB"
+for db in sqlite postgres mongodb; do
+  route="$F/route-$db"
+  mkdir -p "$route"
+  printf 'GACHIPAD_DB=%s\n' "$db" >"$route/.env"
+  : >"$DOCKER_CALLS"
+  (
+    cd "$route"
+    # shellcheck source=/dev/null
+    source "$I/lib.sh"
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    sqlite_backup() { echo sqlite-backup; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    postgres_backup() { echo postgres-backup; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    mongo_backup() { echo mongodb-backup; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    sqlite_restore() { echo sqlite-restore; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    postgres_restore() { echo postgres-restore; }
+    # shellcheck disable=SC2317 # selected indirectly by database_backup/database_restore
+    mongo_restore() { echo mongodb-restore; }
+    database_start 3
+    database_backup ./backups
+    database_restore fixture.archive.gz
+  ) >"$F/route-$db.log" 2>&1 || fail "$db backup/restore route failed"
+  grep -qx "$db-backup" "$F/route-$db.log" || fail "$db backup route"
+  grep -qx "$db-restore" "$F/route-$db.log" || fail "$db restore route"
+  case "$db" in
+    sqlite) grep -q '^compose up .* valkey$' "$DOCKER_CALLS"; ! grep -Eq '^compose up .* (mongo|postgres)' "$DOCKER_CALLS" ;;
+    postgres) grep -q '^compose up .* postgres valkey$' "$DOCKER_CALLS"; ! grep -q ' mongo' "$DOCKER_CALLS" ;;
+    mongodb)
+      grep -q '^compose up .* mongo valkey$' "$DOCKER_CALLS"
+      grep -q '^compose run --rm --no-deps --pull never -T mongo-users$' "$DOCKER_CALLS"
+      ;;
+  esac || fail "$db startup service selection"
+done
+ok "selected database startup and SQLite, PostgreSQL and MongoDB backup/restore dispatch match GACHIPAD_DB"
+
+route="$F/route-external"
+mkdir -p "$route"
+printf 'GACHIPAD_DB=external\nDATABASE_URL=postgresql://user:secret@db.invalid/gachipad\n' >"$route/.env"
+(
+  cd "$route"
+  # shellcheck source=/dev/null
+  source "$I/lib.sh"
+  GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 database_backup ./backups
+) >"$F/route-external.log" 2>&1 || fail "external backup acknowledgement failed"
+grep -q 'no local backup was made' "$F/route-external.log" || fail "external backup notice"
+if grep -q 'secret@db' "$F/route-external.log"; then fail "external URL was printed"; fi
+# shellcheck source=/dev/null
+if (cd "$route" && source "$I/lib.sh" && database_restore fixture.archive.gz) >"$F/route-external-restore.log" 2>&1; then
+  fail "external database accepted a local restore"
+fi
+grep -q 'external databases cannot be restored' "$F/route-external-restore.log" || fail "external restore notice"
+if grep -q 'secret@db' "$F/route-external-restore.log"; then fail "external URL leaked from restore"; fi
+ok "external backup prints its operator duty and creates no local archive; local restore is refused"
+
+mkdir -p "$F/route-switch/state"
+printf 'mongodb\n' >"$F/route-switch/state/database-kind"
+printf 'GACHIPAD_DB=postgres\n' >"$F/route-switch/.env"
+# shellcheck source=/dev/null
+if (cd "$F/route-switch" && source "$I/lib.sh" && assert_database_backend) >"$F/route-switch.log" 2>&1; then
+  fail "backend switch without data-copy support was accepted"
+fi
+grep -q 'database backend change refused (mongodb -> postgres)' "$F/route-switch.log" || fail "switch refusal message"
+ok "recorded MongoDB installations refuse a switch to PostgreSQL"
+
+mkdir -p "$F/route-volume"
+printf 'GACHIPAD_DB=postgres\nGACHIPAD_PROJECT=volume-switch\n' >"$F/route-volume/.env"
+export FAKE_NONEMPTY_VOLUME=volume-switch_mongo-data
+# shellcheck source=/dev/null
+if (cd "$F/route-volume" && source "$I/lib.sh" && assert_database_backend) >"$F/route-volume.log" 2>&1; then
+  fail "backend switch with an existing MongoDB volume was accepted"
+fi
+grep -q 'database backend change refused: non-empty mongodb volume volume-switch_mongo-data' "$F/route-volume.log" ||
+  fail "volume switch refusal message"
+unset FAKE_NONEMPTY_VOLUME
+ok "non-empty old MongoDB volume refuses a switch even without the state marker"
+
+step "external checks are read-only; updates require external backup acknowledgement"
+cp "$I/.env" "$F/external-original.env"
+# shellcheck source=/dev/null
+(cd "$I" && source ./lib.sh; env_set DATABASE_URL 'postgresql://fixture:private@external.invalid/db'; env_set GACHIPAD_DB external)
+printf 'external\n' >"$I/state/database-kind"
+: >"$DOCKER_CALLS"
+run ./update.sh --check || fail "external --check required a backup"
+if run ./update.sh --version 1.1.0 --yes; then fail "external update without acknowledgement accepted"; fi
+grep -q 'GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1' "$F/run.log" || fail "external backup guidance missing"
+grep -q 'stop\|dump\|pull$' "$DOCKER_CALLS" && fail "external refusal mutated the stack"
+# Persisted acknowledgement must work for timers, without inherited shell variables.
+# shellcheck source=/dev/null
+(cd "$I" && source ./lib.sh; env_set GACHIPAD_EXTERNAL_BACKUP_CONFIRMED 1)
+printf 'AT=03:00\nPOLICY=minor\n' >"$I/state/auto.conf"
+cp "$FAKE_DB" "$F/external-original-db"
+if FAKE_UNHEALTHY=1.1.0 run ./update.sh --auto; then fail "unhealthy external auto-update succeeded"; fi
+grep -q 'external database was not restored' "$F/run.log" || fail "persisted acknowledgement did not reach auto-update"
+grep -qF "cd $I && docker compose up -d --wait --wait-timeout 3 && rm -f state/transaction" "$F/run.log" || fail "exact external recovery command missing"
+[ -f "$I/state/transaction" ] || fail "failed external update lost recovery marker"
+# The operator restores the external backup before clearing the marker and restarting.
+cp "$F/external-original-db" "$FAKE_DB"
+rm -f "$I/state/transaction" "$I/state/auto.conf"
+cp "$F/external-original.env" "$I/.env"
+printf 'mongodb\n' >"$I/state/database-kind"
+ok "external --check works and unacknowledged update refuses before maintenance"
+
 step "Mongo image changes are refused before maintenance and backup"
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.6 --yes && fail "Mongo major change accepted"
@@ -544,6 +666,23 @@ grep -q 'stop\|pull' "$DOCKER_CALLS" && fail "unfinished transaction mutated sta
 rm "$I/state/transaction"
 ok "unfinished marker blocks rerun and preserves previous snapshot and status"
 
+step "migration marker gives snapshot recovery rather than update rollback instructions"
+mkdir "$I/.env.migrate-db.recovery"
+cp -p "$I/.env" "$I/.env.migrate-db.recovery/original.env"
+printf 'mongodb\n' >"$I/.env.migrate-db.recovery/original.kind"
+printf 'database migration\nsnapshot=.env.migrate-db.recovery\n' >"$I/state/transaction"
+cp -p "$I/state/transaction" "$F/migration-marker-before"
+: >"$DOCKER_CALLS"
+run ./update.sh --yes && fail "unfinished migration accepted"
+grep -q 'cp -p .env.migrate-db.recovery/original.env .env' "$F/run.log" || fail "migration env recipe missing"
+grep -q 'cp -p .env.migrate-db.recovery/original.kind state/database-kind' "$F/run.log" || fail "migration marker recipe missing"
+grep -q 'only after recovery succeeds' "$F/run.log" || fail "migration cleanup order missing"
+if grep -q 'OPERATIONS 15.7' "$F/run.log"; then fail "migration directed to update rollback"; fi
+cmp "$I/state/transaction" "$F/migration-marker-before" || fail "migration marker changed"
+if grep -q 'stop\|pull' "$DOCKER_CALLS"; then fail "migration marker mutated stack"; fi
+rm -rf "$I/.env.migrate-db.recovery" "$I/state/transaction"
+ok "unfinished migration retains marker and prints exact snapshot recovery recipe"
+
 step "offline release SHA256SUMS and a shared lock for every entry point"
 # Make an offline archive whose scripts are the same transaction engine.
 offline="$F/stage/gachipad-1.1.0"
@@ -675,5 +814,80 @@ grep -q '^accepted-at-ingress$' "$FAKE_DB" || fail "write accepted while ingress
 grep -q '^restored$' "$DOCKER_CALLS" && fail "restored an old DB after ingress could accept writes"
 status | grep -q 'current files and DB retained' || fail "ingress recovery state unclear"
 ok "ingress activation failure stops writers and retains current DB and files for recovery"
+
+
+step "SQLite snapshots use the data filesystem and clean up success and failure paths"
+sqlite_fixture="$F/sqlite-files"
+mkdir -p "$sqlite_fixture/data" "$sqlite_fixture/work"
+cat >"$sqlite_fixture/check-files.mjs" <<'JS'
+import fs from "node:fs";
+import { dirname } from "node:path";
+import { syncBuiltinESMExports } from "node:module";
+const root = process.env.SQLITE_DATA;
+for (const name of ["mkdtempSync", "createReadStream", "createWriteStream"]) {
+  const original = fs[name];
+  fs[name] = (path, ...args) => {
+    if (!String(path).startsWith(`${root}/`)) throw new Error("SQLite temporary file escaped data volume");
+    if (name === "mkdtempSync" && dirname(path) !== root) throw new Error("snapshot is not a sibling");
+    if (name === "createWriteStream" && process.env.SQLITE_FAIL_WRITE) throw new Error("injected write failure");
+    if (name === "createReadStream" && process.env.SQLITE_FAIL_READ) throw new Error("injected read failure");
+    if (name === "createWriteStream" && String(path).endsWith(".restore")) {
+      fs.writeFileSync(`${root}/custom.db-wal`, "stale fixture WAL");
+      fs.writeFileSync(`${root}/custom.db-shm`, "stale fixture SHM");
+    }
+    return original(path, ...args);
+  };
+}
+if (process.env.SQLITE_NO_SPACE) fs.statfsSync = () => ({ bavail: 0n, bsize: 4096n });
+const rename = fs.renameSync;
+fs.renameSync = (from, to) => {
+  if (fs.existsSync(`${to}-wal`) || fs.existsSync(`${to}-shm`)) throw new Error("stale WAL before rename");
+  return rename(from, to);
+};
+syncBuiltinESMExports();
+JS
+# shellcheck disable=SC2016 # SQLite fixture paths are expanded by node
+SQLITE_DATA="$sqlite_fixture/data" node --input-type=module -e '
+  import { DatabaseSync } from "node:sqlite";
+  const db = new DatabaseSync(`${process.env.SQLITE_DATA}/custom.db`);
+  db.exec("CREATE TABLE fixture (data BLOB); INSERT INTO fixture VALUES (randomblob(1048576))");
+  db.close();
+' >/dev/null 2>&1
+(
+  cd "$sqlite_fixture/work"
+  # shellcheck source=/dev/null
+  source "$I/lib.sh"
+  export SQLITE_DATA="$sqlite_fixture/data"
+  # shellcheck disable=SC2317 # backend helpers call this process-boundary replacement
+  docker() {
+    while [ "$1" != --entrypoint ]; do
+      if [ "$1" = -e ]; then export "${2?}"; shift; fi
+      shift
+    done
+    while [ "$1" != -e ]; do shift; done
+    shift
+    DATABASE_URL="sqlite:$SQLITE_DATA/custom.db" node --import "$sqlite_fixture/check-files.mjs" --input-type=module -e "$1"
+  }
+  mkdir "$SQLITE_DATA/.gachipad-backup-stale" "$SQLITE_DATA/.gachipad-validate-stale"
+  touch "$SQLITE_DATA/custom.db.restore" "$SQLITE_DATA/unrelated.restore"
+  sqlite_backup backups >snapshot.log
+  [ ! -e "$SQLITE_DATA/.gachipad-backup-stale" ] && [ ! -e "$SQLITE_DATA/.gachipad-validate-stale" ]
+  [ ! -e "$SQLITE_DATA/custom.db.restore" ]
+  archive="$(sed -n 's/^backup: \(.*\) (.*/\1/p' snapshot.log)"
+  sqlite_validate "$archive"
+  sqlite_restore "$archive"
+  if SQLITE_NO_SPACE=1 sqlite_backup no-space >space.log 2>&1; then exit 1; fi
+  grep -q 'SQLite data filesystem has insufficient free space' space.log
+  if SQLITE_NO_SPACE=1 sqlite_validate "$archive" >space.log 2>&1; then exit 1; fi
+  grep -q 'SQLite data filesystem has insufficient free space' space.log
+  if SQLITE_FAIL_READ=1 sqlite_backup failed-read; then exit 1; fi
+  if SQLITE_FAIL_WRITE=1 sqlite_validate "$archive"; then exit 1; fi
+  gzip -c </dev/null >empty.gz
+  if sqlite_validate empty.gz; then exit 1; fi
+  [ -f "$SQLITE_DATA/unrelated.restore" ]
+  rm "$SQLITE_DATA/unrelated.restore"
+  [ -z "$(find "$SQLITE_DATA" -name '.gachipad-*' -o -name '*.restore')" ]
+) >"$F/sqlite-files.log" 2>&1 || { cat "$F/sqlite-files.log" >&2; fail "SQLite data-volume temporary file checks"; }
+ok "SQLite sibling snapshots, streamed output, validation/error cleanup and WAL removal before rename"
 
 printf '\nupdate.test.sh: all checks passed\n'

@@ -21,11 +21,15 @@ import {
   Binary,
   type Collection,
   type Db,
+  type Document,
+  type Filter,
   GridFSBucket,
   MongoBulkWriteError,
   MongoClient,
   ObjectId,
 } from "mongodb";
+import { createMongoTransferBackend } from "./transfer/mongo.js";
+import { registerTransferBackend } from "./transfer/registry.js";
 import {
   type AuditQuery,
   type AuditStore,
@@ -64,6 +68,7 @@ export const COLLECTIONS = {
 export const UPLOADS_BUCKET = "uploads";
 
 const DUPLICATE_KEY = 11000;
+const MAINTENANCE_BATCH = 256;
 
 type ShareDoc = Omit<ShareRecord, "id"> & { _id: string };
 type LabDoc = Omit<LabRecord, "id"> & { _id: string };
@@ -326,7 +331,7 @@ class MongoUpdateLog implements UpdateLog {
 
   async read(shareId: string, afterSeq: number) {
     const docs = await this.updates
-      .find({ shareId, seq: { $gt: afterSeq } })
+      .find({ shareId, seq: { $gt: afterSeq } }, { projection: { _id: 0, seq: 1, data: 1 } })
       .sort({ seq: 1 })
       .toArray();
     return docs.map((d) => ({ seq: d.seq, data: toBytes(d.data) }));
@@ -477,7 +482,7 @@ class MongoFileStore implements FileStore {
     const ledger = this.ledger;
     async function* charged() {
       for await (const chunk of stream) {
-        const accepted = await ledger.findOneAndUpdate(
+        const accepted = await ledger.updateOne(
           {
             _id: "uploads",
             ...(maxTotalBytes === undefined
@@ -486,7 +491,7 @@ class MongoFileStore implements FileStore {
           },
           { $inc: { bytes: chunk.byteLength } },
         );
-        if (!accepted) throw new StorageCapacityError();
+        if (accepted.matchedCount === 0) throw new StorageCapacityError();
         reserved += chunk.byteLength;
         yield chunk;
       }
@@ -557,31 +562,85 @@ class MongoFileStore implements FileStore {
   async delete(id: string) {
     const _id = this.parseId(id);
     if (!_id) return false;
-    await this.readyLedger();
-    const file = await this.bucket.find({ _id }).next();
-    if (!file) return false;
-    await this.bucket.delete(_id);
-    await this.ledger.updateOne({ _id: "uploads" }, { $inc: { bytes: -file.length } });
-    return true;
+    return (await this.deleteBatch([_id])) === 1;
   }
 
   async deleteForShare(shareId: string) {
-    return this.deleteWhere({ "metadata.shareId": shareId });
+    return this.deleteForShares([shareId]);
   }
 
-  async deleteExpired(now: Date) {
-    return this.deleteWhere({ "metadata.expiresAt": { $lt: now } });
+  async deleteForShares(shareIds: string[], renew?: () => Promise<void>) {
+    return this.deleteWhere({ "metadata.shareId": { $in: shareIds } }, renew);
+  }
+
+  async deleteExpired(now: Date, renew?: () => Promise<void>) {
+    return this.deleteWhere({ "metadata.expiresAt": { $lt: now } }, renew);
   }
 
   async shareIds() {
-    const ids = await this.bucket.find({ "metadata.shareId": { $exists: true } }).toArray();
-    return [...new Set(ids.map((f) => (f.metadata as UploadMetadata).shareId as string))];
+    return this.db
+      .collection(`${UPLOADS_BUCKET}.files`)
+      .distinct<string>("metadata.shareId", { "metadata.shareId": { $exists: true } });
   }
 
-  private async deleteWhere(filter: Record<string, unknown>) {
-    const files = await this.bucket.find(filter, { projection: { _id: 1 } }).toArray();
-    for (const file of files) await this.delete(file._id.toHexString());
-    return files.length;
+  private async deleteBatch(ids: ObjectId[]) {
+    if (ids.length === 0) return 0;
+    await this.readyLedger();
+    const files = this.db.collection(`${UPLOADS_BUCKET}.files`);
+    const claimed: Array<{ _id: ObjectId; length: number }> = [];
+    let failure: unknown;
+    let failed = false;
+    for (let offset = 0; offset < ids.length; offset += 8) {
+      // Claim each file atomically, so competing cleanup/download-delete requests cannot debit it twice.
+      const results = await Promise.allSettled(
+        ids
+          .slice(offset, offset + 8)
+          .map((_id) => files.findOneAndDelete({ _id }, { projection: { _id: 1, length: 1 } })),
+      );
+      for (const result of results) {
+        if (result.status === "rejected") {
+          failed = true;
+          failure = result.reason;
+        } else if (result.value) claimed.push(result.value as { _id: ObjectId; length: number });
+      }
+      if (failed) break;
+    }
+    if (claimed.length > 0) {
+      await this.db
+        .collection(`${UPLOADS_BUCKET}.chunks`)
+        .deleteMany({ files_id: { $in: claimed.map((file) => file._id) } });
+      await this.ledger.updateOne(
+        { _id: "uploads" },
+        { $inc: { bytes: -claimed.reduce((sum, file) => sum + file.length, 0) } },
+      );
+    }
+    if (failed) throw failure;
+    return claimed.length;
+  }
+
+  private async deleteWhere(filter: Record<string, unknown>, renew?: () => Promise<void>) {
+    const cursor = this.bucket.find(filter, {
+      projection: { _id: 1 },
+      batchSize: MAINTENANCE_BATCH,
+    });
+    let count = 0;
+    try {
+      let batch: ObjectId[] = [];
+      for await (const file of cursor) {
+        batch.push(file._id);
+        if (batch.length === MAINTENANCE_BATCH) {
+          await this.deleteBatch(batch);
+          await renew?.();
+          count += batch.length;
+          batch = [];
+        }
+      }
+      await this.deleteBatch(batch);
+      await renew?.();
+      return count + batch.length;
+    } finally {
+      await cursor.close();
+    }
   }
 
   private parseId(id: string): ObjectId | null {
@@ -757,18 +816,161 @@ class MongoDiagnosticsStore {
       .toArray();
   }
 }
+async function deleteBatches(
+  collection: Collection,
+  filter: Filter<Document>,
+  renew: () => Promise<void>,
+) {
+  const cursor = collection.find(filter, { projection: { _id: 1 }, batchSize: MAINTENANCE_BATCH });
+  const remove = async (ids: unknown[]) => {
+    if (ids.length === 0) return;
+    await collection.deleteMany({ ...filter, _id: { $in: ids } } as Filter<Document>);
+    await renew();
+  };
+  try {
+    let ids: unknown[] = [];
+    for await (const doc of cursor) {
+      ids.push(doc._id);
+      if (ids.length === MAINTENANCE_BATCH) {
+        await remove(ids);
+        ids = [];
+      }
+    }
+    await remove(ids);
+  } finally {
+    await cursor.close();
+  }
+}
+
+class MongoMaintenance {
+  constructor(
+    private readonly db: Db,
+    private readonly stores: Stores,
+    private readonly files: MongoFileStore,
+  ) {}
+
+  async sweep(now: Date, renew: () => Promise<void>) {
+    const settings = await this.stores.settings.get();
+    await deleteBatches(
+      this.db.collection(COLLECTIONS.shares),
+      { expiresAt: { $ne: null, $lt: now } },
+      renew,
+    );
+    await deleteBatches(this.db.collection(COLLECTIONS.labs), { expiresAt: { $lt: now } }, renew);
+    let orphans = 0;
+    for (const [collection, field] of [
+      [COLLECTIONS.updates, "shareId"],
+      [COLLECTIONS.snapshots, "shareId"],
+      [`${UPLOADS_BUCKET}.files`, "metadata.shareId"],
+      [COLLECTIONS.labels, "shareId"],
+    ] as const) {
+      const cursor = this.db
+        .collection(collection)
+        .aggregate<{ _id: string }>(
+          [
+            ...(field === "metadata.shareId" ? [{ $match: { [field]: { $exists: true } } }] : []),
+            { $sort: { [field]: 1 } },
+            { $group: { _id: `$${field}` } },
+          ],
+          { batchSize: MAINTENANCE_BATCH, allowDiskUse: true },
+        );
+      const clean = async (ids: string[]) => {
+        if (ids.length === 0) return;
+        const alive = await this.stores.shares.existing(ids);
+        const missing = ids.filter((id) => !alive.has(id));
+        if (missing.length > 0) {
+          const filter = { shareId: { $in: missing } };
+          await deleteBatches(this.db.collection(COLLECTIONS.updates), filter, renew);
+          await deleteBatches(this.db.collection(COLLECTIONS.snapshots), filter, renew);
+          await this.files.deleteForShares(missing, renew);
+          await deleteBatches(this.db.collection(COLLECTIONS.labels), filter, renew);
+          // Removing every reference means later sources cannot count this orphan twice.
+          orphans += missing.length;
+        }
+        await renew();
+      };
+      try {
+        let ids: string[] = [];
+        for await (const row of cursor) {
+          ids.push(row._id);
+          if (ids.length === MAINTENANCE_BATCH) {
+            await clean(ids);
+            ids = [];
+          }
+        }
+        await clean(ids);
+      } finally {
+        await cursor.close();
+      }
+    }
+    await this.deleteInaccessible(renew);
+    await deleteBatches(
+      this.db.collection(COLLECTIONS.snapshots),
+      {
+        kind: "history",
+        at: { $lt: new Date(now.getTime() - settings.historyRetentionDays * 86400000) },
+      },
+      renew,
+    );
+    await this.files.deleteExpired(now, renew);
+    await deleteBatches(
+      this.db.collection(COLLECTIONS.audit),
+      {
+        at: { $lt: new Date(now.getTime() - settings.audit.retentionDays * 86400000) },
+      },
+      renew,
+    );
+    return { orphans };
+  }
+
+  private async deleteInaccessible(renew: () => Promise<void>) {
+    const labels = this.db.collection<LabelDoc>(COLLECTIONS.labels);
+    let after: string | undefined;
+    for (;;) {
+      // Read labels before shares, matching the SQL and per-client fallback ordering.
+      const entries = await labels
+        .find(after === undefined ? {} : { _id: { $gt: after } })
+        .sort({ _id: 1 })
+        .limit(MAINTENANCE_BATCH)
+        .toArray();
+      if (entries.length === 0) break;
+      after = entries.at(-1)?._id;
+      const shares = await this.db
+        .collection<ShareDoc>(COLLECTIONS.shares)
+        .find(
+          { _id: { $in: entries.map((entry) => entry.shareId) } },
+          { projection: { _id: 1, ownerId: 1, savedBy: 1 } },
+        )
+        .toArray();
+      const byId = new Map(shares.map((share) => [share._id, share]));
+      const stale = entries.filter((entry) => {
+        const share = byId.get(entry.shareId);
+        return (
+          !share || (share.ownerId !== entry.clientId && !share.savedBy.includes(entry.clientId))
+        );
+      });
+      // Match the entire observed record so a concurrent replacement keeps its newer labels.
+      if (stale.length > 0) await labels.deleteMany({ $or: stale });
+      await renew();
+    }
+  }
+}
+
 export function createMongoStores(db: Db): Stores {
-  return {
+  const files = new MongoFileStore(db);
+  const stores: Stores = {
     diagnostics: new MongoDiagnosticsStore(db),
     shares: new MongoShareStore(db.collection<ShareDoc>(COLLECTIONS.shares)),
     updates: new MongoUpdateLog(db.collection<UpdateDoc>(COLLECTIONS.updates)),
     snapshots: new MongoSnapshotStore(db.collection<SnapshotDoc>(COLLECTIONS.snapshots)),
-    files: new MongoFileStore(db),
+    files,
     labs: new MongoLabStore(db.collection<LabDoc>(COLLECTIONS.labs)),
     labels: new MongoLabelStore(db.collection<LabelDoc>(COLLECTIONS.labels)),
     settings: new MongoSettingsStore(db.collection<SettingsDoc>(COLLECTIONS.settings)),
     audit: new MongoAuditStore(db.collection<AuditDoc>(COLLECTIONS.audit)),
   };
+  stores.maintenance = new MongoMaintenance(db, stores, files);
+  return registerTransferBackend(stores, createMongoTransferBackend(db));
 }
 
 /**
@@ -780,6 +982,7 @@ export async function ensureIndexes(db: Db): Promise<void> {
     db.collection(COLLECTIONS.shares).createIndexes([
       { key: { expiresAt: 1 }, name: "expiresAt_ttl", expireAfterSeconds: 0 },
       { key: { ownerId: 1 }, name: "ownerId" },
+      { key: { createdAt: -1, _id: -1 }, name: "createdAt_id_desc" },
       { key: { savedBy: 1 }, name: "savedBy" },
       { key: { labId: 1 }, name: "labId", sparse: true },
     ]),

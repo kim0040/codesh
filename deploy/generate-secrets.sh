@@ -26,6 +26,26 @@ random_hex() {
 TMP="$(mktemp "$FILE.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 cp "$FILE" "$TMP"
+# Check the operator's settings before filling the compatibility Mongo secrets.
+had_mongo=0
+if grep -Eq '^MONGO_[A-Z0-9_]+=' "$TMP"; then had_mongo=1; fi
+set_tmp() {
+  local name="$1" value="$2" next="$TMP.next" line found=0
+  case "$name" in DATABASE_URL | GACHIPAD_DATABASE_URL)
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || {
+      echo "generate-secrets: $name must be a single line" >&2; exit 1;
+    }
+    [ -z "$value" ] || value="'${value//\'/\\\'}'"
+    ;;
+  esac
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" == "$name="* ]]; then
+      if [ "$found" = 0 ]; then printf '%s=%s\n' "$name" "$value" >>"$next"; found=1; fi
+    else printf '%s\n' "$line" >>"$next"; fi
+  done <"$TMP"
+  [ "$found" = 1 ] || printf '%s=%s\n' "$name" "$value" >>"$next"
+  mv "$next" "$TMP"
+}
 filled=()
 for name in "${SECRETS[@]}"; do
   if grep -Eq "^${name}=[[:space:]]*$" "$TMP"; then
@@ -55,10 +75,7 @@ tls_internal() {
 # Pin the old installation's project and Mongo names; no live data is copied or renamed.
 if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' "$TMP"; then
   legacy_get() { sed -n "s/^$1=//p" "$TMP" | tail -n 1; }
-  migrate_set() {
-    sed "/^$1=/d" "$TMP" >"$TMP.next" && mv "$TMP.next" "$TMP"
-    printf '%s=%s\n' "$1" "$2" >>"$TMP"
-  }
+  migrate_set() { set_tmp "$1" "$2"; }
   while IFS='=' read -r name value; do
     [[ "$name" == CODESH_* ]] || continue
     migrate_set "GACHIPAD_${name#CODESH_}" "$value"
@@ -72,6 +89,7 @@ if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' 
   migrate_set MONGO_ROOT_USER codesh
   migrate_set MONGO_APP_USER codesh_app
   migrate_set MONGO_DATABASE codesh
+  migrate_set GACHIPAD_DB mongodb
   if [ "$(legacy_get UPDATE_REPO)" = kim0040/codesh ]; then
     migrate_set UPDATE_REPO kim0040/gachipad
   fi
@@ -94,6 +112,120 @@ if grep -q '^CODESH_VERSION=' "$TMP" && ! grep -q '^GACHIPAD_LEGACY_INSTALL=1$' 
   migrate_set GACHIPAD_LEGACY_INSTALL 1
   echo "warning: migrated legacy installation settings; existing data locations retained" >&2
 fi
+
+tmp_get() {
+  local value
+  value="$(sed -n "s/^$1=//p" "$TMP" | tail -n 1)"
+  if [[ "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\\\'/\'}"
+  elif [[ "$value" == \"*\" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+# Pre-selection renamed updaters append every new template key, including the SQLite
+# default, before calling this staged helper. Read their unchanged live env to pin MongoDB.
+pin_mongo=0
+live_lock="${GACHIPAD_LOCK_PATH:-${CODESH_LOCK_PATH:-}}"
+if [ -n "$live_lock" ]; then
+  live_env="$(dirname "$(dirname "$live_lock")")/.env"
+  if [ -f "$live_env" ] && ! grep -q '^GACHIPAD_DB=' "$live_env" &&
+    grep -Eq '^MONGO_[A-Z0-9_]+=' "$live_env"; then pin_mongo=1; fi
+fi
+migration_directory=.
+[ -z "$live_lock" ] || migration_directory="$(dirname "$(dirname "$live_lock")")"
+if [ -f "$migration_directory/migrate-db.sh" ]; then
+  migration_hint='use ./migrate-db.sh to copy data and switch backends.'
+else
+  migration_hint='extract migrate-db.sh from the verified deployment bundle into this installation before migrating.'
+fi
+if [ "$(tmp_get GACHIPAD_LEGACY_INSTALL)" = 1 ]; then pin_mongo=1; fi
+database_url="${DATABASE_URL:-$(tmp_get DATABASE_URL)}"
+if [ "$pin_mongo" = 1 ] && { [ -n "$database_url" ] || { [ -n "${GACHIPAD_DB:-}" ] && [ "$GACHIPAD_DB" != mongodb ]; }; }; then
+  echo "generate-secrets: database backend change refused (mongodb -> requested backend); $migration_hint" >&2
+  exit 1
+fi
+if [ -n "$database_url" ]; then
+  [[ "$database_url" != *$'\n'* && "$database_url" != *$'\r'* ]] || {
+    echo "generate-secrets: DATABASE_URL must be a single line" >&2; exit 1;
+  }
+  scheme="${database_url%%:*}"
+  case "$scheme" in sqlite | postgres | postgresql | mysql | mariadb | mongodb | mongodb+srv) ;;
+    *) echo "generate-secrets: DATABASE_URL has an unsupported scheme" >&2; exit 1 ;;
+  esac
+  [ -z "${DATABASE_URL:-}" ] || set_tmp DATABASE_URL "$DATABASE_URL"
+  if [ "$scheme" = sqlite ]; then db=sqlite; else db=external; fi
+else
+  if [ "$pin_mongo" = 1 ]; then
+    if [ -n "$(tmp_get GACHIPAD_DB)" ] && [ "$(tmp_get GACHIPAD_DB)" != mongodb ]; then
+      echo "generate-secrets: GACHIPAD_DB=$(tmp_get GACHIPAD_DB) in this env file is ignored; keeping the existing MongoDB backend; $migration_hint"
+    fi
+    db=mongodb
+  else db="${GACHIPAD_DB:-$(tmp_get GACHIPAD_DB)}"; fi
+  if [ -z "$db" ]; then
+    if [ "$had_mongo" = 1 ]; then db=mongodb; else db=sqlite; fi
+  fi
+fi
+marker="$(cat state/database-kind 2>/dev/null || true)"
+if [ -n "$marker" ] && [ "$marker" != "$db" ]; then
+  echo "generate-secrets: database backend change refused ($marker -> $db); $migration_hint" >&2
+  exit 1
+fi
+case "$db" in
+  sqlite)
+    compose_database_url="${database_url:-sqlite:///data/gachipad.db}"
+    ;;
+  postgres)
+    if grep -Eq '^POSTGRES_PASSWORD=[[:space:]]*$' "$TMP" || ! grep -Eq '^POSTGRES_PASSWORD=' "$TMP"; then
+      set_tmp POSTGRES_PASSWORD "$(random_hex)"
+      filled+=(POSTGRES_PASSWORD)
+    fi
+    pg_user="${POSTGRES_USER:-$(tmp_get POSTGRES_USER)}"; pg_user="${pg_user:-gachipad_app}"
+    pg_db="${POSTGRES_DATABASE:-$(tmp_get POSTGRES_DATABASE)}"; pg_db="${pg_db:-gachipad}"
+    pg_password="$(tmp_get POSTGRES_PASSWORD)"
+    compose_database_url="postgresql://$pg_user:$pg_password@postgres:5432/$pg_db"
+    ;;
+  mongodb)
+    mongo_user="$(tmp_get MONGO_APP_USER)"; mongo_user="${mongo_user:-gachipad_app}"
+    mongo_db="$(tmp_get MONGO_DATABASE)"; mongo_db="${mongo_db:-gachipad}"
+    mongo_password="$(tmp_get MONGO_APP_PASSWORD)"
+    compose_database_url="mongodb://$mongo_user:$mongo_password@mongo:27017/$mongo_db?authSource=$mongo_db"
+    ;;
+  external)
+    [ -n "$database_url" ] || { echo "generate-secrets: DATABASE_URL is required when GACHIPAD_DB=external" >&2; exit 1; }
+    compose_database_url=
+    ;;
+  *) echo "generate-secrets: GACHIPAD_DB must be sqlite, postgres, mongodb or external" >&2; exit 1 ;;
+esac
+
+set_tmp GACHIPAD_DB "$db"
+set_tmp GACHIPAD_DATABASE_URL "$compose_database_url"
+
+profiles="${COMPOSE_PROFILES:-$(tmp_get COMPOSE_PROFILES)}"
+profile_list=()
+IFS=',' read -r -a existing_profiles <<<"$profiles"
+for profile in ${existing_profiles[@]+"${existing_profiles[@]}"}; do
+  profile="${profile#"${profile%%[![:space:]]*}"}"
+  profile="${profile%"${profile##*[![:space:]]}"}"
+  [ -n "$profile" ] || continue
+  case "$profile" in mongodb | postgres) continue ;; esac
+  found=0
+  for existing in ${profile_list[@]+"${profile_list[@]}"}; do [ "$existing" = "$profile" ] && found=1; done
+  [ "$found" = 1 ] || profile_list+=("$profile")
+done
+case "$db" in mongodb | postgres)
+  found=0
+  for existing in ${profile_list[@]+"${profile_list[@]}"}; do [ "$existing" = "$db" ] && found=1; done
+  [ "$found" = 1 ] || profile_list+=("$db")
+  ;;
+esac
+profiles=""
+for profile in ${profile_list[@]+"${profile_list[@]}"}; do
+  [ -z "$profiles" ] || profiles+=,
+  profiles+="$profile"
+done
+set_tmp COMPOSE_PROFILES "$profiles"
 
 # Replace atomically (same directory) so an interrupted run never leaves a truncated .env.
 chmod 600 "$TMP" && mv "$TMP" "$FILE"

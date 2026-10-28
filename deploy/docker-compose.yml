@@ -6,7 +6,7 @@
 #   docker compose up -d --scale collab=3             # more collab instances (or COLLAB_REPLICAS in .env)
 #
 # Offline bundles carry the same images (docker load) and this file without the build sections.
-# Only Caddy publishes ports. MongoDB, Valkey, api and collab are reachable on the internal network.
+# Only Caddy publishes ports. The selected database, Valkey, api and collab are internal.
 name: ${GACHIPAD_PROJECT:-gachipad}
 
 x-logging: &logging
@@ -24,7 +24,10 @@ x-hardening: &hardening
 
 x-app-env: &app-env
   NODE_ENV: production
-  # readWrite on database gachipad only (mongo-users); the root user stays inside the mongo containers.
+  # A pre-selection .env has no derived URL: retain its MongoDB connection even before the
+  # operator runs generate-secrets.sh. Fresh templates explicitly select the SQLite file.
+  DATABASE_URL: ${DATABASE_URL:-${GACHIPAD_DATABASE_URL:-mongodb://${MONGO_APP_USER:-gachipad_app}:${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}@mongo:27017/${MONGO_DATABASE:-gachipad}?authSource=${MONGO_DATABASE:-gachipad}}}
+  # Used as the MongoDB fallback for older app configurations and MongoDB deployments.
   MONGO_URL: mongodb://${MONGO_APP_USER:-gachipad_app}:${MONGO_APP_PASSWORD:?run ./generate-secrets.sh}@mongo:27017/${MONGO_DATABASE:-gachipad}?authSource=${MONGO_DATABASE:-gachipad}
   VALKEY_URL: redis://:${VALKEY_PASSWORD:?run ./generate-secrets.sh}@valkey:6379
   COLLAB_SECRET: ${COLLAB_SECRET:?run ./generate-secrets.sh}
@@ -100,11 +103,16 @@ services:
     volumes:
       # Status of deploy/update.sh (last run, auto-update), shown in the admin console.
       - ./state:/gachipad-state:ro
+      - gachipad-data:/data
     expose: ["3001"]
     stop_grace_period: 20s
     depends_on:
       mongo-users:
         condition: service_completed_successfully
+        required: false
+      postgres:
+        condition: service_healthy
+        required: false
       valkey:
         condition: service_healthy
 
@@ -129,15 +137,22 @@ services:
         hard: 65536
     # SIGTERM flushes every open document before the process exits (§6.6).
     stop_grace_period: 40s
+    volumes:
+      - gachipad-data:/data
     deploy:
       replicas: ${COLLAB_REPLICAS:-1}
     depends_on:
       mongo-users:
         condition: service_completed_successfully
+        required: false
+      postgres:
+        condition: service_healthy
+        required: false
       valkey:
         condition: service_healthy
 
   mongo:
+    profiles: [mongodb]
     <<: *hardening
     cap_drop: []
     image: mongo:8.0.34
@@ -167,6 +182,7 @@ services:
   # One-shot on every start: creates the application user, or resets its password and role, so new
   # and existing volumes (installed before this user existed) both run without the root user.
   mongo-users:
+    profiles: [mongodb]
     <<: *hardening
     restart: "no"
     image: mongo:8.0.34
@@ -194,6 +210,24 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+
+  postgres:
+    profiles: [postgres]
+    <<: *hardening
+    cap_drop: []
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-gachipad}
+      POSTGRES_USER: ${POSTGRES_USER:-gachipad_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -h localhost -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   valkey:
     <<: *hardening
@@ -247,7 +281,9 @@ networks:
         - subnet: ${NETWORK_SUBNET:-172.29.88.0/24}
 
 volumes:
+  gachipad-data:
   mongo-data:
+  postgres-data:
   valkey-data:
   caddy-data:
   caddy-config:

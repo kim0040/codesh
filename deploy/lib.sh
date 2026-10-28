@@ -11,21 +11,155 @@ need_docker() {
 # env_get NAME [default]: value of NAME in .env (last assignment wins)
 env_get() {
   local value
-  value="$(sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1)"
+  value="$(sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1 || true)"
   # legacy codesh name (1.0.x); remove in 2.0
   if [ -z "$value" ] && [[ "$1" == GACHIPAD_* ]]; then
-    value="$(sed -n "s/^CODESH_${1#GACHIPAD_}=//p" .env 2>/dev/null | tail -n 1)"
+    value="$(sed -n "s/^CODESH_${1#GACHIPAD_}=//p" .env 2>/dev/null | tail -n 1 || true)"
+  fi
+  # Compose single quotes keep passwords containing $, # or spaces literal.
+  if [[ "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\\\'/\'}"
+  elif [[ "$value" == \"*\" ]]; then
+    value="${value:1:${#value}-2}"
   fi
   printf '%s' "${value:-${2:-}}"
 }
 
 # env_set NAME VALUE: replaces or appends NAME in .env
 env_set() {
-  if grep -q "^$1=" .env; then
-    sed "s|^$1=.*|$1=$2|" .env >.env.tmp && cat .env.tmp >.env && rm -f .env.tmp
-  else
-    printf '%s=%s\n' "$1" "$2" >>.env
+  local name="$1" value="$2" tmp line found=0
+  case "$name" in DATABASE_URL | GACHIPAD_DATABASE_URL)
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || die "$name must be a single line"
+    [ -z "$value" ] || value="'${value//\'/\\\'}'"
+    ;;
+  esac
+  tmp="$(mktemp .env.XXXXXX)" || return 1
+  if [ -f .env ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [[ "$line" == "$name="* ]]; then
+        if [ "$found" = 0 ]; then printf '%s=%s\n' "$name" "$value" >>"$tmp"; found=1; fi
+      else printf '%s\n' "$line" >>"$tmp"; fi
+    done <.env
   fi
+  [ "$found" = 1 ] || printf '%s=%s\n' "$name" "$value" >>"$tmp"
+  chmod 600 "$tmp" && mv "$tmp" .env
+}
+
+# database_kind reads the effective deployment choice without ever printing a database URL.
+database_kind() {
+  local url kind
+  url="${DATABASE_URL:-$(env_get DATABASE_URL)}"
+  if [ -n "$url" ]; then
+    validate_database_url "$url" || die "DATABASE_URL has an unsupported scheme"
+    if [[ "$url" == sqlite:* ]]; then printf sqlite; else printf external; fi
+    return
+  fi
+  kind="${GACHIPAD_DB:-$(env_get GACHIPAD_DB)}"
+  if [ -z "$kind" ]; then
+    if grep -Eq '^MONGO_[A-Z0-9_]+=' .env 2>/dev/null; then kind=mongodb; else kind=sqlite; fi
+  fi
+  case "$kind" in sqlite | postgres | mongodb | external) printf '%s' "$kind" ;;
+    *) die "GACHIPAD_DB must be sqlite, postgres, mongodb or external" ;;
+  esac
+}
+
+validate_database_url() {
+  [[ "$1" != *$'\n'* && "$1" != *$'\r'* && "$1" == *:* ]] || return 1
+  local scheme="${1%%:*}"
+  case "$scheme" in
+    sqlite | postgres | postgresql | mysql | mariadb | mongodb | mongodb+srv) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+database_project() {
+  local fallback=gachipad
+  [ -z "$(env_get CODESH_VERSION)" ] || fallback=codesh
+  printf '%s' "${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME "${GACHIPAD_PROJECT:-$(env_get GACHIPAD_PROJECT "$fallback")}")}"
+}
+
+database_volume_suffix() {
+  case "$1" in sqlite) printf gachipad-data ;; postgres) printf postgres-data ;;
+    mongodb) printf mongo-data ;; esac
+}
+
+database_volume_nonempty() {
+  local volume="$1" kind="${2:-}" result url image registry version
+  docker volume inspect "$volume" >/dev/null 2>&1 || return 1
+  url="$(env_get GACHIPAD_DATABASE_URL)"
+  [[ "$url" == sqlite:* ]] || url=""
+  registry="$(sed -n 's/^GACHIPAD_REGISTRY=//p' .env.example 2>/dev/null | tail -n 1)"
+  registry="${registry:-$(env_get GACHIPAD_REGISTRY ghcr.io/kim0040)}"
+  version="$(cat VERSION 2>/dev/null || env_get GACHIPAD_VERSION)"
+  image="$registry/gachipad-api:$version"
+  result="$(GACHIPAD_PROBE_SQLITE_URL="$url" docker run --rm --pull never --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 0 --cap-add DAC_OVERRIDE -v "$volume:/probe:ro" -e GACHIPAD_PROBE_SQLITE_URL \
+    --entrypoint node "$image" -e '
+      const { readdirSync, existsSync } = require("node:fs");
+      const url = process.env.GACHIPAD_PROBE_SQLITE_URL ?? "";
+      const path = url.startsWith("sqlite:") ? (url.startsWith("sqlite://")
+        ? decodeURIComponent(new URL(url).pathname) : url.slice(7)) : "/data/gachipad.db";
+      const relative = path.startsWith("/data/") ? path.slice(6) : "gachipad.db";
+      const nonempty = process.argv[1] === "sqlite"
+        ? existsSync("/probe/gachipad.db") || existsSync(`/probe/${relative}`)
+        : readdirSync("/probe").length > 0;
+      process.stdout.write(nonempty ? "nonempty" : "empty");
+    ' "$kind" 2>/dev/null)" || die "cannot inspect existing database volume $volume; refusing to change the database backend"
+  [ "$result" = nonempty ]
+}
+
+# A migration snapshot is different from update.sh's rollback directory. Never delete the
+# transaction until the saved backend is healthy; a hard crash can interrupt the env/marker pair.
+migration_recovery_hint() {
+  local stage="${1:-$(sed -n 's/^snapshot=//p' state/transaction 2>/dev/null | head -n1)}"
+  echo 'migrate-db: first clear shell overrides: unset DATABASE_URL GACHIPAD_DB COMPOSE_PROFILES GACHIPAD_DATABASE_URL'
+  echo 'migrate-db: keep writers stopped: docker compose stop caddy api collab'
+  if [[ "$stage" =~ ^\.env\.migrate-db\.[A-Za-z0-9]+$ ]] && [ -f "$stage/original.env" ]; then
+    printf 'migrate-db: restore configuration: cp -p %q/original.env .env\n' "$stage"
+    if [ -f "$stage/original.kind" ]; then
+      printf 'migrate-db: restore marker: cp -p %q/original.kind state/database-kind\n' "$stage"
+    else echo 'migrate-db: original had no marker: rm -f state/database-kind'; fi
+    echo 'migrate-db: restart the saved backend and check shares/uploads: docker compose up -d --pull never --wait'
+    printf 'migrate-db: only after recovery succeeds: rm -rf -- %q state/transaction\n' "$stage"
+  else
+    echo 'migrate-db: locate the private .env.migrate-db.*/original.env snapshot; restore it and its original.kind (or remove the marker if originally absent), restart the saved backend and check shares/uploads before removing the snapshot and state/transaction.'
+  fi
+  echo 'migrate-db: inspect any destination separately; retained data may include writes accepted before rollback. Verify stale lock ownership before removing state/install.lock.d.'
+}
+
+database_migration_hint() {
+  if [ -f migrate-db.sh ]; then
+    printf 'use ./migrate-db.sh to copy data and switch backends.'
+  else
+    printf 'extract migrate-db.sh from the verified deployment bundle into this installation before migrating.'
+  fi
+}
+
+# Refuse a backend switch before Compose can start a new database beside old data.
+assert_database_backend() {
+  local selected marker project kind volume
+  selected="$(database_kind)"
+  marker="$(cat state/database-kind 2>/dev/null || true)"
+  if [ -n "$marker" ] && [ "$marker" != "$selected" ]; then
+    die "database backend change refused ($marker -> $selected); $(database_migration_hint)"
+  fi
+  # A successful migration deliberately retains the previous backend volumes.
+  [ "$marker" != "$selected" ] || return 0
+  project="$(database_project)"
+  for kind in sqlite postgres mongodb; do
+    [ "$kind" = "$selected" ] && continue
+    volume="${project}_$(database_volume_suffix "$kind")"
+    if database_volume_nonempty "$volume" "$kind"; then
+      die "database backend change refused: non-empty $kind volume $volume exists while $selected is selected. $(database_migration_hint)"
+    fi
+  done
+}
+
+record_database_backend() {
+  mkdir -p state
+  printf '%s\n' "$(database_kind)" >state/database-kind.tmp
+  chmod 600 state/database-kind.tmp
+  mv state/database-kind.tmp state/database-kind
 }
 
 # One installation-wide lock, inherited only by children of its holder. The mkdir fallback
@@ -44,7 +178,7 @@ install_lock() {
   fi
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$path"
-    flock -n 9 || die "another update, upgrade, backup or restore is running"
+    flock -n 9 || die "another update, upgrade, backup, restore or migration is running"
     GACHIPAD_LOCK_KIND=flock
   else
     GACHIPAD_LOCK_KIND="mkdir"
@@ -207,6 +341,233 @@ mongo_backup() (
   chmod 600 "$part" && mv "$part" "$file" || return 1
   echo "backup: $file ($(wc -c <"$file" | tr -d ' ') bytes)"
 )
+
+database_start() {
+  local timeout="${1:-120}"
+  case "$(database_kind)" in
+    mongodb)
+      docker compose up -d --pull never --wait --wait-timeout "$timeout" mongo valkey &&
+        docker compose run --rm --no-deps --pull never -T mongo-users
+      ;;
+    postgres) docker compose up -d --pull never --wait --wait-timeout "$timeout" postgres valkey ;;
+    sqlite | external) docker compose up -d --pull never --wait --wait-timeout "$timeout" valkey ;;
+  esac
+}
+
+sqlite_backup() (
+  set -euo pipefail
+  umask 077
+  local dir="$1" part file
+  mkdir -p "$dir" || return 1
+  part="$(mktemp "$dir/.backup.XXXXXX")" || return 1
+  file="$dir/gachipad-$(date +%Y%m%d-%H%M%S)-${part##*.}.archive.gz"
+  trap 'rm -f "$part"' EXIT
+  docker compose run --rm --no-deps -T --entrypoint node api --input-type=module -e '
+    import { DatabaseSync } from "node:sqlite";
+    import { createReadStream, mkdtempSync, rmSync, readdirSync, statSync, statfsSync } from "node:fs";
+    import { basename, dirname, join } from "node:path";
+    import { pipeline } from "node:stream/promises";
+    const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
+    const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
+      ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
+    const dataDirectory = dirname(source);
+    for (const name of readdirSync(dataDirectory)) {
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name === `${basename(source)}.restore`)
+        rmSync(join(dataDirectory, name), { recursive: true, force: true });
+    }
+    const bytes = BigInt(statSync(source).size);
+    const space = statfsSync(dataDirectory, { bigint: true });
+    const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
+    if (space.bavail * space.bsize < required)
+      throw new Error("SQLite data filesystem has insufficient free space for a snapshot or restore (database size plus 20%, at least 64 MiB extra required)");
+    const directory = mkdtempSync(join(dataDirectory, ".gachipad-backup-"));
+    const path = join(directory, "snapshot.db");
+    const cleanup = () => rmSync(directory, { recursive: true, force: true });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.once(signal, () => { cleanup(); process.exit(1); });
+    try {
+      const db = new DatabaseSync(source);
+      try { db.exec("PRAGMA busy_timeout=5000"); db.prepare("VACUUM INTO ?").run(path); }
+      finally { db.close(); }
+      await pipeline(createReadStream(path), process.stdout);
+    } finally { cleanup(); }
+  ' | gzip -c >"$part" || return 1
+  [ -s "$part" ] || { echo "SQLite backup is empty; backup not published" >&2; return 1; }
+  gzip -t -- "$part" || { echo "SQLite backup is corrupt; backup not published" >&2; return 1; }
+  chmod 600 "$part" && mv "$part" "$file" || return 1
+  echo "backup: $file ($(wc -c <"$file" | tr -d ' ') bytes)"
+)
+
+postgres_backup() (
+  set -euo pipefail
+  umask 077
+  local dir="$1" part file
+  mkdir -p "$dir" || return 1
+  part="$(mktemp "$dir/.backup.XXXXXX")" || return 1
+  file="$dir/gachipad-$(date +%Y%m%d-%H%M%S)-${part##*.}.archive.gz"
+  trap 'rm -f "$part"' EXIT
+  docker compose exec -T postgres sh -c \
+    'pg_dump --format=custom --no-owner --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' |
+    gzip -c >"$part" || return 1
+  [ -s "$part" ] || { echo "PostgreSQL backup is empty; backup not published" >&2; return 1; }
+  gzip -t -- "$part" || { echo "PostgreSQL backup is corrupt; backup not published" >&2; return 1; }
+  chmod 600 "$part" && mv "$part" "$file" || return 1
+  echo "backup: $file ($(wc -c <"$file" | tr -d ' ') bytes)"
+)
+
+sqlite_validate() {
+  local bytes
+  bytes="$(gzip -dc -- "$1" | wc -c)" || return 1
+  gzip -dc -- "$1" | docker compose run --rm --no-deps -T -e GACHIPAD_SQLITE_BYTES="$bytes" --entrypoint node api --input-type=module -e '
+    import { DatabaseSync } from "node:sqlite";
+    import { createWriteStream, mkdtempSync, openSync, readSync, closeSync, rmSync, readdirSync, statfsSync } from "node:fs";
+    import { pipeline } from "node:stream/promises";
+    import { basename, dirname, join } from "node:path";
+    const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
+    const source = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
+      ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
+    const dataDirectory = dirname(source);
+    for (const name of readdirSync(dataDirectory)) {
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name === `${basename(source)}.restore`)
+        rmSync(join(dataDirectory, name), { recursive: true, force: true });
+    }
+    const bytes = BigInt(process.env.GACHIPAD_SQLITE_BYTES);
+    const space = statfsSync(dataDirectory, { bigint: true });
+    const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
+    if (space.bavail * space.bsize < required)
+      throw new Error("SQLite data filesystem has insufficient free space for a snapshot or restore (database size plus 20%, at least 64 MiB extra required)");
+    const directory = mkdtempSync(join(dataDirectory, ".gachipad-validate-"));
+    const path = join(directory, "snapshot.db");
+    const cleanup = () => rmSync(directory, { recursive: true, force: true });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.once(signal, () => { cleanup(); process.exit(1); });
+    try {
+      await pipeline(process.stdin, createWriteStream(path, { mode: 0o600 }));
+      const header = Buffer.alloc(16), fd = openSync(path, "r");
+      try { readSync(fd, header, 0, 16, 0); } finally { closeSync(fd); }
+      if (header.toString() !== "SQLite format 3\0")
+        throw new Error("Not a SQLite backup");
+      const db = new DatabaseSync(path);
+      const result = db.prepare("PRAGMA integrity_check").get();
+      db.close();
+      if (Object.values(result ?? {})[0] !== "ok") throw new Error("SQLite integrity check failed");
+    } finally { cleanup(); }
+  '
+}
+
+sqlite_restore() {
+  local bytes
+  sqlite_validate "$1" || { echo "SQLite backup validation failed; database unchanged" >&2; return 1; }
+  sqlite_backup ./backups >&2 || return 1
+  bytes="$(gzip -dc -- "$1" | wc -c)" || return 1
+  gzip -dc -- "$1" | docker compose run --rm --no-deps -T -e GACHIPAD_SQLITE_BYTES="$bytes" --entrypoint node api --input-type=module -e '
+    import { DatabaseSync } from "node:sqlite";
+    import { createWriteStream, renameSync, rmSync, readdirSync, statfsSync } from "node:fs";
+    import { pipeline } from "node:stream/promises";
+    const url = process.env.DATABASE_URL ?? "sqlite:///data/gachipad.db";
+    const destination = url.startsWith("sqlite:") && !url.startsWith("sqlite://")
+      ? url.slice("sqlite:".length) : decodeURIComponent(new URL(url).pathname);
+    import { basename, dirname, join } from "node:path";
+    const dataDirectory = dirname(destination);
+    for (const name of readdirSync(dataDirectory)) {
+      if (name.startsWith(".gachipad-backup-") || name.startsWith(".gachipad-validate-") || name === `${basename(destination)}.restore`)
+        rmSync(join(dataDirectory, name), { recursive: true, force: true });
+    }
+    const bytes = BigInt(process.env.GACHIPAD_SQLITE_BYTES);
+    const space = statfsSync(dataDirectory, { bigint: true });
+    const required = bytes + (bytes / 5n > 67108864n ? bytes / 5n : 67108864n);
+    if (space.bavail * space.bsize < required)
+      throw new Error("SQLite data filesystem has insufficient free space for a snapshot or restore (database size plus 20%, at least 64 MiB extra required)");
+    const path = `${destination}.restore`;
+    const cleanup = () => rmSync(path, { force: true });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.once(signal, () => { cleanup(); process.exit(1); });
+    try {
+      await pipeline(process.stdin, createWriteStream(path, { mode: 0o600 }));
+      const db = new DatabaseSync(path);
+      const result = db.prepare("PRAGMA integrity_check").get();
+      db.close();
+      if (Object.values(result ?? {})[0] !== "ok") throw new Error("SQLite integrity check failed");
+      rmSync(`${destination}-wal`, { force: true });
+      rmSync(`${destination}-shm`, { force: true });
+      renameSync(path, destination);
+    } finally { cleanup(); }
+  '
+}
+
+postgres_validate() {
+  # Consume the full stream before listing the TOC, which may otherwise close stdin early.
+  # shellcheck disable=SC2016 # expanded only inside the database container
+  gzip -dc -- "$1" | docker compose exec -T postgres sh -c '
+    set -eu
+    umask 077
+    archive="$(mktemp)"
+    trap '\''rm -f "$archive"'\'' EXIT
+    cat >"$archive"
+    pg_restore --list "$archive" >/dev/null
+  '
+}
+
+postgres_restore() {
+  local safety
+  postgres_validate "$1" || { echo "PostgreSQL backup validation failed; database unchanged" >&2; return 1; }
+  safety="$(postgres_backup ./backups)" || return 1
+  printf '%s\n' "$safety" >&2
+  # Restore away from the live DB, then rename both databases in one transaction.
+  # Writers are stopped; a failed restore or swap leaves the live database intact.
+  # shellcheck disable=SC2016 # expanded only inside the database container
+  if ! gzip -dc -- "$1" | docker compose exec -T postgres sh -c '
+    set -eu
+    stage="gp_restore_$(date +%s)_$$"
+    old="gp_previous_$(date +%s)_$$"
+    trap '\''dropdb --if-exists --force --maintenance-db=template1 --username="$POSTGRES_USER" -- "$stage" >/dev/null 2>&1 || true'\'' EXIT
+    createdb --maintenance-db=template1 --username="$POSTGRES_USER" --owner="$POSTGRES_USER" -- "$stage"
+    pg_restore --exit-on-error --no-owner --username="$POSTGRES_USER" --dbname="$stage" --single-transaction
+    psql --no-psqlrc --set=ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname=template1 \
+      --set=live="$POSTGRES_DB" --set=stage="$stage" --set=old="$old" <<'\''SQL'\''
+BEGIN;
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'\''live'\'' AND pid <> pg_backend_pid();
+ALTER DATABASE :"live" RENAME TO :"old";
+ALTER DATABASE :"stage" RENAME TO :"live";
+COMMIT;
+SQL
+    dropdb --force --maintenance-db=template1 --username="$POSTGRES_USER" -- "$old" ||
+      echo "PostgreSQL restored; could not remove previous database $old" >&2
+  '; then
+    echo "PostgreSQL restore failed; live database unchanged; safety $safety" >&2
+    return 1
+  fi
+}
+
+database_backup() {
+  case "$(database_kind)" in
+    mongodb) mongo_backup "$1" ;;
+    postgres) postgres_backup "$1" ;;
+    sqlite) sqlite_backup "$1" ;;
+    external)
+      echo "backup: DATABASE_URL uses an external database; no local backup was made. Back up the external server with its own tools before updates or restores." >&2
+      [ "${GACHIPAD_EXTERNAL_BACKUP_CONFIRMED:-$(env_get GACHIPAD_EXTERNAL_BACKUP_CONFIRMED)}" = 1 ]
+      ;;
+  esac
+}
+
+database_validate() {
+  case "$(database_kind)" in
+    mongodb) mongo_transfer validate <"$1" ;;
+    postgres) postgres_validate "$1" ;;
+    sqlite) sqlite_validate "$1" ;;
+    external) die "external databases cannot be restored from a local gachipad backup; use the external server's restore tools" ;;
+  esac
+}
+
+database_restore() {
+  case "$(database_kind)" in
+    mongodb) mongo_restore "$1" ;;
+    postgres) postgres_restore "$1" ;;
+    sqlite) sqlite_restore "$1" ;;
+    external) die "external databases cannot be restored from a local gachipad backup; use the external server's restore tools" ;;
+  esac
+}
 
 # legacy codesh name (1.0.x); remove in 2.0
 # Reserve space for both the pre-update dump and the safety dump used during recovery.
