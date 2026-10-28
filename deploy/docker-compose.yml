@@ -215,7 +215,7 @@ services:
     profiles: [postgres]
     <<: *hardening
     cap_drop: []
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DATABASE:-gachipad}
       POSTGRES_USER: ${POSTGRES_USER:-gachipad_app}
