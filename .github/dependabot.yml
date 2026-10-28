@@ -35,6 +35,13 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    ignore:
+      # A PostgreSQL major cannot open the previous major's data directory; it needs a dump and restore.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+      # A MongoDB major needs its featureCompatibilityVersion raised step by step first.
+      - dependency-name: "mongo"
+        update-types: ["version-update:semver-major"]
     groups:
       compose-images:
         patterns: ["*"]
