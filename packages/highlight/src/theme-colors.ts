@@ -10,7 +10,7 @@
  * with colour-vision deficiencies; the theme additionally sets comments italic and keywords to
  * weight 500 so meaning never rests on colour alone.
  */
-import { mix } from "./color.js";
+import { mix, withAlpha } from "./color.js";
 
 export const TOKEN_NAMES = [
   "keyword",
@@ -42,8 +42,14 @@ export interface ThemePalette {
 export interface ThemeSurfaces {
   /** Selected text. */
   readonly selection: string;
-  /** Highlight of the line holding the cursor. */
+  /** Highlight of the line holding the cursor, as an opaque colour (gutter, contrast checks). */
   readonly activeLine: string;
+  /**
+   * The same highlight as a translucent colour for the line itself. CodeMirror draws the local and
+   * remote selections in layers behind the text, so an opaque line background hid every selection
+   * on the caret's line.
+   */
+  readonly activeLineOverlay: string;
   /** Other occurrences of the selected word. */
   readonly selectionMatch: string;
   readonly searchMatch: string;
@@ -149,9 +155,11 @@ export const THEME_PALETTES: readonly ThemePalette[] = [
 export function themeSurfaces(palette: ThemePalette): ThemeSurfaces {
   const { background: bg, foreground: fg, tokens } = palette;
   const dark = palette.appearance === "dark";
+  const activeLineAlpha = dark ? 0.06 : 0.05;
   return {
     selection: mix(tokens.function, bg, dark ? 0.26 : 0.2),
-    activeLine: mix(fg, bg, dark ? 0.06 : 0.05),
+    activeLine: mix(fg, bg, activeLineAlpha),
+    activeLineOverlay: withAlpha(fg, activeLineAlpha),
     selectionMatch: mix(tokens.number, bg, dark ? 0.2 : 0.16),
     searchMatch: mix(tokens.type, bg, dark ? 0.26 : 0.22),
     searchMatchSelected: mix(tokens.number, bg, dark ? 0.4 : 0.32),

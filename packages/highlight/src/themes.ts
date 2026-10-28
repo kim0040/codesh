@@ -145,7 +145,7 @@ export function createChromeTheme(palette: ThemePalette, surfaces: ThemeSurfaces
       "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
         { backgroundColor: surfaces.selection },
       ".cm-selectionMatch": { backgroundColor: surfaces.selectionMatch },
-      ".cm-activeLine": { backgroundColor: surfaces.activeLine },
+      ".cm-activeLine": { backgroundColor: surfaces.activeLineOverlay },
       "&.cm-focused .cm-matchingBracket": {
         backgroundColor: surfaces.matchingBracket,
         outline: `1px solid ${surfaces.gutter}`,

@@ -52,6 +52,15 @@ export function mix(fg: string, bg: string, alpha: number): string {
   ]);
 }
 
+/** `#rrggbb` at `alpha` as `#rrggbbaa`; drawn over `bg` it looks like `mix(hex, bg, alpha)`. */
+export function withAlpha(hex: string, alpha: number): string {
+  hexToRgb(hex);
+  const part = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `${hex}${part}`;
+}
+
 export function hexToOklab(hex: string): Oklab {
   const [r8, g8, b8] = hexToRgb(hex);
   const r = toLinear(r8);

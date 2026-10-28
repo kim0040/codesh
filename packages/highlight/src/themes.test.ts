@@ -1,6 +1,6 @@
 import { tags as t } from "@lezer/highlight";
 import { describe, expect, it } from "vitest";
-import { type ColorVision, contrastRatio, deltaE, simulateColorVision } from "./color.js";
+import { type ColorVision, contrastRatio, deltaE, mix, simulateColorVision } from "./color.js";
 import { TOKEN_NAMES } from "./theme-colors.js";
 import { EDITOR_THEMES, getEditorTheme, isThemeId } from "./themes.js";
 
@@ -40,7 +40,9 @@ describe("editor themes", () => {
       expect(theme.selection).toMatch(HEX);
       for (const name of TOKEN_NAMES)
         expect(theme.tokens[name], `${theme.id}.${name}`).toMatch(HEX);
-      for (const value of Object.values(theme.surfaces)) expect(value).toMatch(HEX);
+      // The caret-line overlay is the one translucent colour (#rrggbbaa).
+      const { activeLineOverlay: _overlay, ...opaque } = theme.surfaces;
+      for (const value of Object.values(opaque)) expect(value).toMatch(HEX);
     }
   });
 
@@ -98,6 +100,16 @@ describe("editor themes", () => {
         }
       }
       expect(contrastRatio(surfaces.gutter, surfaces.activeLine)).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it("lets selections show through the caret's line", () => {
+      const { surfaces, background } = theme;
+      // Remote selections sit in a layer behind the text: an opaque line background covers them.
+      expect(surfaces.activeLineOverlay).toMatch(/^#[0-9a-f]{8}$/i);
+      const alpha = Number.parseInt(surfaces.activeLineOverlay.slice(-2), 16) / 255;
+      expect(alpha).toBeLessThan(0.2);
+      const overlay = surfaces.activeLineOverlay.slice(0, 7);
+      expect(deltaE(mix(overlay, background, alpha), surfaces.activeLine)).toBeLessThan(0.01);
     });
 
     it("keeps every colour of the theme visibly different from the others", () => {

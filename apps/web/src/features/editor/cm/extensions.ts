@@ -13,7 +13,6 @@ import {
   drawSelection,
   dropCursor,
   EditorView,
-  highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
   lineNumbers,
@@ -21,6 +20,7 @@ import {
 } from "@codemirror/view";
 import { getEditorTheme, type ThemeId } from "@gachipad/highlight";
 import type { EditorPrefs, Keymap } from "../../../lib/prefs";
+import { caretLineHighlight } from "./caret-line";
 import { baseKeymap, editorCompletionKeymap, sublimeKeymap, undoKeymap } from "./keymaps";
 import { smoothCaret } from "./smooth-caret";
 
@@ -136,7 +136,7 @@ export function baseExtensions(ariaLabel: string): Extension {
     indentOnInput(),
     bracketMatching(),
     closeBrackets(),
-    highlightActiveLine(),
+    caretLineHighlight(),
     highlightSelectionMatches(),
     rectangularSelection(),
     crosshairCursor(),
