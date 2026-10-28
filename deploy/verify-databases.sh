@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Real database-choice checks, invoked by verify-update.sh --rename with two built bundles.
-# Resources, including the external PostgreSQL fixture, belong to the caller's gp-dbdeploy-* project.
+# All external database fixtures belong to the caller's gp-dbdeploy-* project.
 set -euo pipefail
 # shellcheck source=verify-lib.sh
 . "$(dirname "$0")/verify-lib.sh"
@@ -16,6 +16,10 @@ RELAY="$PROJECT-pg-relay"
 RELAY_STARTED=0
 PG="$PROJECT-external-pg"
 PG_STARTED=0
+SQL_STARTED=0
+SQL=""
+SQL_IMAGE=""
+SQL_DATA=""
 case "$PROJECT" in gp-dbdeploy-*) ;; *) echo 'verification requires a gp-dbdeploy- project' >&2; exit 1 ;; esac
 in_install() { (cd "$INSTALL" && COMPOSE_PROJECT_NAME="$PROJECT" "$@"); }
 cleanup_stack() {
@@ -40,6 +44,7 @@ cleanup() {
   trap - EXIT
   if [ "$RELAY_STARTED" = 1 ]; then docker rm -f "$RELAY" >/dev/null 2>&1 || true; fi
   cleanup_stack
+  cleanup_sql || status=1
   if [ "$PG_STARTED" = 1 ]; then docker rm -fv "$PG" >/dev/null 2>&1 || true; fi
   exit "$status"
 }
@@ -65,6 +70,31 @@ prepare() {
 seed() {
   ID="$(call /api/shares -H 'Content-Type: application/json' -d '{"title":"Database fixture","files":[{"path":"main.txt","content":"database selection fixture"}]}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
   check_share
+}
+# Remove only this verifier's fixture and its unused test image, including partial starts.
+cleanup_sql() {
+  local used
+  if [ "$SQL_STARTED" = 1 ]; then
+    docker rm -fv "$SQL" >/dev/null 2>&1 || return 1
+    SQL_STARTED=0
+    if [ -d "$SQL_DATA" ]; then
+      docker run --rm --pull never -v "$SQL_DATA:/w" --entrypoint sh registry:2.8.3 -c 'find /w -mindepth 1 -delete' >/dev/null 2>&1 || return 1
+      rmdir "$SQL_DATA" || return 1
+    fi
+  fi
+  if [ -n "$SQL_IMAGE" ]; then
+    used="$(docker ps -aq --filter "ancestor=$SQL_IMAGE")" || return 1
+    if [ -z "$used" ]; then docker image rm "$SQL_IMAGE" >/dev/null 2>&1 || return 1; fi
+  fi
+}
+seed_upload() {
+  UPLOAD="$(call /api/uploads -F "file=@$INSTALL/VERSION;filename=migration-fixture.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["uploadId"])')"
+  call "/api/uploads/$UPLOAD" >"$WORK/migration-upload-before"
+}
+check_migration_data() {
+  check_share
+  call "/api/uploads/$UPLOAD" >"$WORK/migration-upload-after"
+  cmp "$WORK/migration-upload-before" "$WORK/migration-upload-after" || fail 'migration lost upload bytes'
 }
 # Use real release images, but make only the candidate API fail its health check.
 BAD="$WORK/selection-unhealthy.tar.gz"
@@ -241,13 +271,7 @@ docker exec "$PG" createdb -U gp "$DB"
 prepare
 in_install ./install.sh --db mongodb
 seed
-UPLOAD="$(call /api/uploads -F "file=@$INSTALL/VERSION;filename=migration-fixture.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["uploadId"])')"
-call "/api/uploads/$UPLOAD" >"$WORK/migration-upload-before"
-check_migration_data() {
-  check_share
-  call "/api/uploads/$UPLOAD" >"$WORK/migration-upload-after"
-  cmp "$WORK/migration-upload-before" "$WORK/migration-upload-after" || fail 'migration lost upload bytes'
-}
+seed_upload
 in_install ./migrate-db.sh --to sqlite --window-minutes 20 --yes
 [ "$(cat "$INSTALL/state/database-kind")" = sqlite ] || fail 'MongoDB to SQLite marker missing'
 check_migration_data
@@ -349,4 +373,121 @@ docker rm -f "$RELAY" >/dev/null
 RELAY_STARTED=0
 cleanup_stack
 docker exec "$PG" dropdb -U gp --if-exists --force "$DB"
+# Both real SQL legs run by default. Opt-outs must be deliberate and visible.
+for engine in mysql mariadb; do
+  if { [ "$engine" = mysql ] && [ "${VERIFY_SKIP_EXTERNAL_MYSQL:-0}" = 1 ]; } ||
+     { [ "$engine" = mariadb ] && [ "${VERIFY_SKIP_EXTERNAL_MARIADB:-0}" = 1 ]; }; then
+    echo "SKIP: external $engine explicitly disabled"
+    continue
+  fi
+  cleanup_stack
+  SQL="$PROJECT-external-$engine"
+  if [ "$engine" = mysql ]; then SQL_IMAGE=mysql:8.4; SQL_CLIENT=mysql; else SQL_IMAGE=mariadb:11.4; SQL_CLIENT=mariadb; fi
+  ! docker container inspect "$SQL" >/dev/null 2>&1 || fail "external $engine fixture already exists"
+  docker_root="$(docker info --format '{{.DockerRootDir}}')"
+  [ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 1 ] || fail 'need 1 GiB free before SQL fixture pull'
+  docker pull "$SQL_IMAGE" >/dev/null
+  [ "$(df -Pk "$docker_root" | awk 'NR==2 {print int($4/1048576)}')" -ge 1 ] || fail 'need 1 GiB free after SQL fixture pull'
+  MYSQL_ROOT_PASSWORD="$(openssl rand -hex 24)"
+  MARIADB_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
+  export MYSQL_ROOT_PASSWORD MARIADB_ROOT_PASSWORD
+  SQL_DATA="$WORK/$engine-data"
+  mkdir -p "$SQL_DATA"
+  SQL_STARTED=1
+  docker run -d --pull never --name "$SQL" -v "$SQL_DATA:/var/lib/mysql" \
+    -e MYSQL_ROOT_PASSWORD -e MARIADB_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% -e MARIADB_ROOT_HOST=% \
+    "$SQL_IMAGE" --innodb-buffer-pool-size=67108864 >/dev/null
+  sql_ready=0
+  for _ in $(seq 90); do
+    # shellcheck disable=SC2016 # credentials expand only inside the fixture
+    if docker exec "$SQL" sh -c 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}" "$1" -h 127.0.0.1 -uroot -e "SELECT 1"' _ "$SQL_CLIENT" >/dev/null 2>&1; then sql_ready=1; break; fi
+    sleep 1
+  done
+  [ "$sql_ready" = 1 ] || fail "external $engine fixture did not become ready"
+  sql_database() {
+    # Only the owned fixture's database name and fixed SQL enter argv; never credentials.
+    # shellcheck disable=SC2016 # credentials expand only inside the fixture
+    docker exec "$SQL" sh -c 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}" "$1" -uroot -e "$2"' _ "$SQL_CLIENT" "$1" >/dev/null
+  }
+  sql_fixture_digest() {
+    # Hash the seeded share, snapshot and upload rows without writing their bytes to logs.
+    # shellcheck disable=SC2016 # credentials expand only inside the fixture
+    docker exec "$SQL" sh -c 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}" "$1" -uroot -N -B "$2" -e "SELECT id FROM shares ORDER BY id; SELECT share_id,HEX(state) FROM share_snapshots ORDER BY share_id,kind,seq; SELECT id,size,complete FROM uploads ORDER BY id; SELECT upload_id,chunk_no,HEX(data) FROM upload_chunks ORDER BY upload_id,chunk_no"' _ "$SQL_CLIENT" "$DB" | sha256sum
+  }
+  sql_database "CREATE DATABASE \`$DB\`"
+  prepare
+  sql_ip="$(docker inspect "$SQL" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')"
+  docker network create --subnet 172.29.98.0/24 --label "com.docker.compose.project=$PROJECT" --label com.docker.compose.network=default "${PROJECT}_default" >/dev/null
+  RELAY_STARTED=1
+  docker run -d --pull never --name "$RELAY" --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node node:22.23.3-slim -e '
+    const net = require("node:net");
+    net.createServer(c => { const s = net.connect(3306, process.argv[1]); c.pipe(s); s.pipe(c); c.on("error", () => s.destroy()); s.on("error", () => c.destroy()); }).listen(3306, "0.0.0.0");
+  ' "$sql_ip" >/dev/null
+  docker network connect "${PROJECT}_default" "$RELAY"
+  external_url="$engine://root:$MYSQL_ROOT_PASSWORD@$RELAY:3306/$DB"
+  unset MYSQL_ROOT_PASSWORD MARIADB_ROOT_PASSWORD
+  DATABASE_URL="$external_url" in_install ./install.sh --db external
+  [ "$(cat "$INSTALL/state/database-kind")" = external ] || fail "$engine external marker missing"
+  services="$(in_install docker compose ps --services)"
+  ! grep -Eq '^(mongo|postgres)$' <<<"$services" || fail "$engine started a bundled database"
+  seed
+  seed_upload
+  if in_install ./backup.sh "$WORK/$engine-backups" >"$WORK/$engine-backup-refusal.log" 2>&1; then fail "$engine local backup succeeded"; fi
+  grep -q 'no local backup was made' "$WORK/$engine-backup-refusal.log" || fail "$engine backup guidance missing"
+  [ ! -e "$WORK/$engine-backups" ] || fail "$engine backup created an archive directory"
+  if in_install ./upgrade.sh "$NEXT" >"$WORK/$engine-update-refusal.log" 2>&1; then fail "$engine unacknowledged update succeeded"; fi
+  grep -q 'GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1' "$WORK/$engine-update-refusal.log" || fail "$engine update guidance missing"
+  check_migration_data
+  GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 in_install ./upgrade.sh "$NEXT"
+  check_migration_data
+  echo "PASS: external $engine install, backup refusal and acknowledged update preserve share/upload"
+  sql_fixture_digest >"$WORK/$engine-target-before.sha256"
+  if [ "$engine" = mysql ]; then
+    # Keep the populated external target to prove refusal before a fresh real copy.
+    docker rm -f "$RELAY" >/dev/null
+    RELAY_STARTED=0
+    cleanup_stack
+    prepare
+    in_install ./install.sh --db sqlite
+    seed
+    seed_upload
+    docker network connect "${PROJECT}_default" "$SQL" --alias "$SQL"
+    # The fixture joins the new isolated network directly for both refusal and copy.
+    external_url="${external_url/@$RELAY:/@$SQL:}"
+    cp -p "$INSTALL/.env" "$WORK/$engine-source.env"
+    if DATABASE_URL="$external_url" in_install ./migrate-db.sh --to external --yes >"$WORK/$engine-nonempty.log" 2>&1; then fail "$engine nonempty target accepted"; else status=$?; fi
+    [ "$status" = 2 ] || fail "$engine nonempty refusal lost exit 2"
+    grep -q 'Result: refused' "$WORK/$engine-nonempty.log" || fail "$engine preflight refusal missing"
+    cmp "$INSTALL/.env" "$WORK/$engine-source.env" || fail "$engine refusal changed source configuration"
+    [ "$(cat "$INSTALL/state/database-kind")" = sqlite ] || fail "$engine refusal changed source marker"
+    check_migration_data
+    sql_fixture_digest >"$WORK/$engine-target-after.sha256"
+    cmp "$WORK/$engine-target-before.sha256" "$WORK/$engine-target-after.sha256" || fail "$engine refusal changed target data"
+    sql_database "DROP DATABASE \`$DB\`; CREATE DATABASE \`$DB\`"
+    DATABASE_URL="$external_url" in_install ./migrate-db.sh --to external --yes
+    [ "$(cat "$INSTALL/state/database-kind")" = external ] || fail 'SQLite to external MySQL marker missing'
+    check_migration_data
+    docker volume inspect "${PROJECT}_gachipad-data" >/dev/null
+    echo 'PASS: SQLite -> external MySQL retains share/upload and source volume; populated target refuses with exit 2'
+    docker network disconnect "${PROJECT}_default" "$SQL"
+  else
+    GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1 in_install ./migrate-db.sh --to postgres --yes
+    [ "$(cat "$INSTALL/state/database-kind")" = postgres ] || fail 'external MariaDB to PostgreSQL marker missing'
+    check_migration_data
+    cp -p "$INSTALL/.env" "$WORK/$engine-source.env"
+    if DATABASE_URL="$external_url" in_install ./migrate-db.sh --to external --yes >"$WORK/$engine-nonempty.log" 2>&1; then fail "$engine nonempty target accepted"; else status=$?; fi
+    [ "$status" = 2 ] || fail "$engine nonempty refusal lost exit 2"
+    grep -q 'Result: refused' "$WORK/$engine-nonempty.log" || fail "$engine preflight refusal missing"
+    cmp "$INSTALL/.env" "$WORK/$engine-source.env" || fail "$engine refusal changed source configuration"
+    [ "$(cat "$INSTALL/state/database-kind")" = postgres ] || fail "$engine refusal changed source marker"
+    check_migration_data
+    sql_fixture_digest >"$WORK/$engine-target-after.sha256"
+    cmp "$WORK/$engine-target-before.sha256" "$WORK/$engine-target-after.sha256" || fail "$engine refusal changed target data"
+    echo 'PASS: external MariaDB -> bundled PostgreSQL retains share/upload; populated MariaDB target refuses with exit 2'
+  fi
+  if [ "$RELAY_STARTED" = 1 ]; then docker rm -f "$RELAY" >/dev/null; RELAY_STARTED=0; fi
+  cleanup_stack
+  cleanup_sql
+  SQL_IMAGE=""
+done
 echo 'verify-databases: all checks passed'
