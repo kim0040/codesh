@@ -115,8 +115,11 @@ jobs:
           -color
 
   windows-deploy:
-    name: Windows installer scripts
-    runs-on: windows-latest
+    name: Windows installer scripts (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -130,7 +133,15 @@ jobs:
           Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
       - name: Pester
         shell: pwsh
-        run: Invoke-Pester -Path ./deploy/windows-tests -Output Detailed
+        run: Invoke-Pester -Path ./deploy/windows-tests -Output Detailed -CI
+      - name: Pester (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          Invoke-Pester -Path ./deploy/windows-tests -Output Detailed -CI
       - name: PSScriptAnalyzer
         shell: pwsh
         run: |

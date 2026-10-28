@@ -2,7 +2,7 @@
 param(
     [Parameter(Position = 0)][string]$ScriptName,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$ScriptArgs = @(),
-    [switch]$NoRun
+    [switch]$WrapperNoRun
 )
 
 Set-StrictMode -Version Latest
@@ -22,13 +22,21 @@ function Invoke-GachipadCommand {
     if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
         throw "No saved installation was found at $statePath. Run install.cmd or install.ps1 first."
     }
-    $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace([string]$state.Distro) -or [string]::IsNullOrWhiteSpace([string]$state.InstallDir)) {
+    try {
+        $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -eq $state -or $null -eq $state.PSObject.Properties['Distro'] -or
+            $null -eq $state.PSObject.Properties['InstallDir'] -or
+            $state.Distro -isnot [string] -or $state.InstallDir -isnot [string] -or
+            [string]::IsNullOrWhiteSpace($state.Distro) -or [string]::IsNullOrWhiteSpace($state.InstallDir) -or
+            ($null -ne $state.PSObject.Properties['Version'] -and $state.Version -ne 1)) {
+            throw 'Invalid installation state.'
+        }
+    } catch {
         throw "The saved installation file is invalid: $statePath. Run install.ps1 again to save the WSL location."
     }
 
     if ($Name -eq 'logs') {
-        $wslArguments = @('-d', [string]$state.Distro, '--cd', [string]$state.InstallDir, '--', 'docker', 'compose', 'logs', '-f') + $Arguments
+        $wslArguments = @('-d', [string]$state.Distro, '--cd', [string]$state.InstallDir, '--exec', 'docker', 'compose', 'logs', '-f') + $Arguments
         $result = Invoke-Wsl -Arguments $wslArguments -PassThruConsole
         if ($result.ExitCode -ne 0) { throw "docker compose logs exited with code $($result.ExitCode)." }
         return
@@ -44,17 +52,17 @@ set -eu
 cd "$1"
 find . -maxdepth 1 -type f -name '*.sh' -printf '%f\n'
 '@
-    $list = Invoke-Wsl -Arguments @('-d', [string]$state.Distro, '--', 'sh', '-lc', $listScript, '_', [string]$state.InstallDir)
+    $list = Invoke-WslScript -SelectedDistro ([string]$state.Distro) -ScriptText $listScript -Arguments @([string]$state.InstallDir)
     if ($list.ExitCode -ne 0) { throw 'Could not read the installed deploy scripts. Check that the saved WSL distro and folder still exist.' }
     $available = @($list.Output -split "`r?`n" | ForEach-Object { $_ -replace '\.sh$', '' })
     if ($available -notcontains $normalizedName) {
         throw "Unknown script '$Name'. Available scripts: $($available -join ', '); special command: logs."
     }
-    $result = Invoke-Wsl -Arguments (@('-d', [string]$state.Distro, '--cd', [string]$state.InstallDir, '--', "./$normalizedName.sh") + $Arguments) -PassThruConsole
+    $result = Invoke-Wsl -Arguments (@('-d', [string]$state.Distro, '--cd', [string]$state.InstallDir, '--exec', "./$normalizedName.sh") + $Arguments) -PassThruConsole
     if ($result.ExitCode -ne 0) { throw "$normalizedName.sh exited with code $($result.ExitCode)." }
 }
 
-if (-not $NoRun) {
+if (-not $WrapperNoRun) {
     try {
         Invoke-GachipadCommand -Name $ScriptName -Arguments $ScriptArgs
     } catch {

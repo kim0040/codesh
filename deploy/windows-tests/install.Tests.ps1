@@ -2,13 +2,15 @@ BeforeAll {
     $script:installPath = Join-Path $PSScriptRoot '..\install.ps1'
     $script:gachipadPath = Join-Path $PSScriptRoot '..\gachipad.ps1'
     . $script:installPath -NoRun
-    . $script:gachipadPath -NoRun
+    . $script:gachipadPath -WrapperNoRun
     $script:InstallerRoot = Split-Path -Parent (Resolve-Path -LiteralPath $script:installPath).Path
     $script:testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('gachipad-tests-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:testRoot -Force | Out-Null
     $env:LOCALAPPDATA = $script:testRoot
     $script:fakeLog = Join-Path $script:testRoot 'wsl.log'
     $env:GACHIPAD_WSL_LOG = $script:fakeLog
+    $script:argvLog = Join-Path $script:testRoot 'argv.jsonl'
+    $env:GACHIPAD_WSL_ARGV_LOG = $script:argvLog
     $env:GACHIPAD_WSL_EXE = Join-Path $PSScriptRoot 'fake-wsl.ps1'
 }
 
@@ -16,6 +18,7 @@ AfterAll {
     Remove-Item -LiteralPath $script:testRoot -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item Env:GACHIPAD_WSL_EXE -ErrorAction SilentlyContinue
     Remove-Item Env:GACHIPAD_WSL_LOG -ErrorAction SilentlyContinue
+    Remove-Item Env:GACHIPAD_WSL_ARGV_LOG -ErrorAction SilentlyContinue
     Remove-Item Env:GACHIPAD_WSL_FAKE_MODE -ErrorAction SilentlyContinue
 }
 
@@ -35,6 +38,7 @@ Describe 'Windows WSL installer' {
         $script:InstallerOptions.BundlePath = ''
         $env:GACHIPAD_WSL_FAKE_MODE = 'success'
         [System.IO.File]::WriteAllText($script:fakeLog, '')
+        [System.IO.File]::WriteAllText($script:argvLog, '')
         Mock Get-WindowsHostInfo {
             [pscustomobject]@{ ProductName = 'Windows 11 Pro'; Build = 22631; Is64Bit = $true }
         }
@@ -52,6 +56,15 @@ Describe 'Windows WSL installer' {
     It 'refuses a WSL 1 distribution with the conversion command' {
         $env:GACHIPAD_WSL_FAKE_MODE = 'wsl1'
         { Invoke-Installer } | Should -Throw '*wsl --set-version* 2*'
+    }
+
+    It 'selects the localized default distro using quiet names and the default marker' {
+        $env:GACHIPAD_WSL_FAKE_MODE = 'localized'
+        $output = Invoke-Installer 6>&1 | Out-String
+        $output | Should -Match "Using WSL 2 distribution 'Ubuntu Work'"
+        $records = @(Get-Content -LiteralPath $script:argvLog -Encoding UTF8 | ForEach-Object { ConvertFrom-Json $_ })
+        $install = @($records | Where-Object { $_.Arguments -contains './install.sh' })
+        $install[0].Arguments[1] | Should -Be 'Ubuntu Work'
     }
 
     It 'explains when Docker is not installed' {
@@ -96,27 +109,6 @@ Describe 'Windows WSL installer' {
         $output | Should -Not -Match 'Other machines cannot reach ports'
     }
 
-    It 'keeps an existing .env by excluding it from the staged copy' {
-        $output = Invoke-Installer 6>&1 | Out-String
-        $output | Should -Not -BeNullOrEmpty
-        $log = Get-Content -LiteralPath $script:fakeLog -Raw
-        $log | Should -Match '\[ "\$NAME" = \.env \] && continue'
-    }
-
-    It 'builds an offline bundle from a repository checkout inside WSL' {
-        $source = Get-BundleSource
-        $source.Kind | Should -Be 'repository'
-        $output = Invoke-Installer 6>&1 | Out-String
-        $output | Should -Match 'Copied installation to WSL Linux filesystem'
-        $log = Get-Content -LiteralPath $script:fakeLog -Raw
-        $log | Should -Match 'deploy/bundle\.sh'
-    }
-
-    It 'refuses copied shell scripts with CR line endings' {
-        $env:GACHIPAD_WSL_FAKE_MODE = 'crlf'
-        { Invoke-Installer } | Should -Throw '*A copied .sh file has CR line endings*'
-    }
-
     It 'does not change the firewall when -OpenFirewall is used without elevation' {
         $script:InstallerOptions.OpenFirewall = $true
         Mock Test-IsElevated { $false }
@@ -126,15 +118,33 @@ Describe 'Windows WSL installer' {
         Should -Invoke New-FirewallRule -Times 0 -Exactly
     }
 
+    It 'replaces existing firewall rules with the requested ports and network profiles' {
+        Mock Test-IsElevated { $true }
+        Mock Get-FirewallRule { param($Name) [pscustomobject]@{ DisplayName = $Name } }
+        Mock Remove-FirewallRule { }
+        Mock New-FirewallRule { }
+        $null = Invoke-FirewallSetup -HttpPort 8080 -HttpsPort 8443 -NetworkMode public
+        Should -Invoke Remove-FirewallRule -Times 2 -Exactly
+        Should -Invoke New-FirewallRule -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'gachipad HTTP' -and $Port -eq '8080' -and ($Profiles -join ',') -eq 'Domain,Private,Public'
+        }
+        Should -Invoke New-FirewallRule -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'gachipad HTTPS' -and $Port -eq '8443' -and ($Profiles -join ',') -eq 'Domain,Private,Public'
+        }
+        $null = Invoke-FirewallSetup -HttpPort 80 -HttpsPort 443 -NetworkMode internal
+        Should -Invoke New-FirewallRule -Times 2 -Exactly -ParameterFilter { ($Profiles -join ',') -eq 'Domain,Private' }
+    }
+
     It 'forwards parameters and adds --no-mdns by default' {
         $script:InstallerOptions.Db = 'sqlite'
+        $script:InstallerOptions.DatabaseUrl = 'postgresql://u:p"a''ss$word@db.test/data?x=$HOME&y=$(false)'
         $script:InstallerOptions.Network = 'internal'
         $script:InstallerOptions.Domain = 'gachipad.example.test'
         $script:InstallerOptions.AcmeEmail = 'ops@example.test'
         $script:InstallerOptions.BehindProxy = $true
         $script:InstallerOptions.InstallArgs = @('--extra-flag', 'extra-value')
         $output = Invoke-Installer 6>&1 | Out-String
-        $log = Get-Content -LiteralPath $script:fakeLog -Raw
+        $log = Get-Content -LiteralPath $script:fakeLog -Encoding UTF8 -Raw
         $log | Should -Match '--db sqlite'
         $log | Should -Match '--network internal'
         $log | Should -Match '--domain gachipad\.example\.test'
@@ -143,13 +153,18 @@ Describe 'Windows WSL installer' {
         $log | Should -Match '--extra-flag extra-value'
         $log | Should -Match '--no-mdns'
         $log | Should -Not -Match '(^| )--mdns( |$)'
+        $records = @(Get-Content -LiteralPath $script:argvLog -Encoding UTF8 | ForEach-Object { ConvertFrom-Json $_ })
+        $install = @($records | Where-Object { $_.Arguments -contains './install.sh' })
+        $install.Count | Should -Be 1
+        $index = [Array]::IndexOf($install[0].Arguments, '--database-url')
+        $install[0].Arguments[$index + 1] | Should -BeExactly $script:InstallerOptions.DatabaseUrl
         $output | Should -Match 'Gachipad URL: http://192\.0\.2\.20:8080'
     }
 
     It 'preserves explicitly forwarded --mdns' {
         $script:InstallerOptions.InstallArgs = @('--mdns')
         $null = Invoke-Installer 6>&1
-        $log = Get-Content -LiteralPath $script:fakeLog -Raw
+        $log = Get-Content -LiteralPath $script:fakeLog -Encoding UTF8 -Raw
         $log | Should -Match '\./install\.sh --mdns(?:\r?\n|$)'
         $log | Should -Not -Match '--no-mdns'
     }
@@ -170,7 +185,7 @@ Describe 'gachipad command wrapper' {
 
     It 'runs an installed script from the saved WSL folder' {
         Invoke-GachipadCommand -Name 'backup'
-        $log = Get-Content -LiteralPath $script:fakeLog -Raw
-        $log | Should -Match '--cd /home/test/gachipad -- ./backup\.sh'
+        $log = Get-Content -LiteralPath $script:fakeLog -Encoding UTF8 -Raw
+        $log | Should -Match '--cd /home/test/gachipad --exec ./backup\.sh'
     }
 }

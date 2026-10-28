@@ -40,46 +40,89 @@ function Write-InstallError {
     throw [System.InvalidOperationException]::new($Message)
 }
 
+# ProcessStartInfo.Arguments uses Windows CRT quoting, independently of PowerShell's
+# Legacy/Standard native argument mode. WSL --exec keeps these values out of a shell.
+function ConvertTo-NativeArgument {
+    param([AllowEmptyString()][string]$Value)
+    $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
+    $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+    return '"' + $escaped + '"'
+}
+
+function ConvertFrom-WslOutput {
+    param([byte[]]$Bytes)
+    if ($Bytes.Length -ge 2 -and (($Bytes[0] -eq 255 -and $Bytes[1] -eq 254) -or
+        [Array]::IndexOf($Bytes, [byte]0) -ge 0)) {
+        return [System.Text.Encoding]::Unicode.GetString($Bytes).Trim([char]0xFEFF).Replace([string][char]0, '')
+    }
+    return [System.Text.Encoding]::UTF8.GetString($Bytes).Trim([char]0xFEFF)
+}
+
 function Invoke-Wsl {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [switch]$PassThruConsole
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$Arguments,
+        [switch]$PassThruConsole,
+        [string]$InputText
     )
 
     $executable = $env:GACHIPAD_WSL_EXE
     if ([string]::IsNullOrWhiteSpace($executable)) {
         $command = Get-Command 'wsl.exe' -ErrorAction SilentlyContinue
-        if ($null -ne $command) {
-            $executable = $command.Source
-        }
+        if ($null -ne $command) { $executable = $command.Source }
     }
     if ([string]::IsNullOrWhiteSpace($executable)) {
         return [pscustomobject]@{ ExitCode = 127; Output = 'wsl.exe was not found' }
     }
 
-    $env:WSL_UTF8 = '1'
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    if ([System.IO.Path]::GetExtension($executable) -ieq '.ps1') {
+        # Test overrides still cross a native process boundary.
+        $Arguments = @('-NoLogo', '-NoProfile', '-File', $executable) + $Arguments
+        $executable = (Get-Process -Id $PID).Path
+    }
+    $start.FileName = $executable
+    $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument -Value $_ }) -join ' '
+    $start.UseShellExecute = $false
+    $start.EnvironmentVariables['WSL_UTF8'] = '1'
+    $start.RedirectStandardOutput = -not $PassThruConsole
+    $start.RedirectStandardError = -not $PassThruConsole
+    $start.RedirectStandardInput = $PSBoundParameters.ContainsKey('InputText')
+    if ($PassThruConsole -and $start.RedirectStandardInput) { throw 'Console calls cannot redirect stdin.' }
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $start
+    $stdout = New-Object System.IO.MemoryStream
+    $stderr = New-Object System.IO.MemoryStream
     try {
-        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-    } catch {
-        Write-Verbose 'Console encoding could not be changed; WSL_UTF8 remains enabled.'
+        [void]$process.Start()
+        if (-not $PassThruConsole) {
+            $readOutput = $process.StandardOutput.BaseStream.CopyToAsync($stdout)
+            $readError = $process.StandardError.BaseStream.CopyToAsync($stderr)
+        }
+        if ($start.RedirectStandardInput) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($InputText.Replace("`r`n", "`n").Replace("`r", "`n"))
+            $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+            $process.StandardInput.Close()
+        }
+        $process.WaitForExit()
+        $output = ''
+        if (-not $PassThruConsole) {
+            [void]$readOutput.GetAwaiter().GetResult()
+            [void]$readError.GetAwaiter().GetResult()
+            $output = (ConvertFrom-WslOutput -Bytes $stdout.ToArray()) + (ConvertFrom-WslOutput -Bytes $stderr.ToArray())
+            $output = $output.TrimEnd("`r", "`n")
+        }
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output }
+    } finally {
+        $process.Dispose()
+        $stdout.Dispose()
+        $stderr.Dispose()
     }
+}
 
-    if ($PassThruConsole) {
-        if ([System.IO.Path]::GetExtension($executable) -ieq '.ps1') { $global:LASTEXITCODE = 0 }
-        & $executable @Arguments
-        $exitCode = $LASTEXITCODE
-        if ($null -eq $exitCode) { $exitCode = 0 }
-        return [pscustomobject]@{ ExitCode = [int]$exitCode; Output = '' }
-    }
-
-    if ([System.IO.Path]::GetExtension($executable) -ieq '.ps1') { $global:LASTEXITCODE = 0 }
-    $lines = @(& $executable @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
-    if ($null -eq $exitCode) { $exitCode = 0 }
-    $output = ($lines | ForEach-Object { [string]$_ }) -join "`n"
-    $output = $output.Replace([string][char]0, '').Trim([char]0xFEFF)
-    return [pscustomobject]@{ ExitCode = [int]$exitCode; Output = $output }
+function Invoke-WslScript {
+    param([string]$SelectedDistro, [string]$ScriptText, [string[]]$Arguments = @())
+    return Invoke-Wsl -Arguments (@('-d', $SelectedDistro, '--exec', 'bash', '-s', '--') + $Arguments) -InputText ($ScriptText + "`n")
 }
 
 function Get-WindowsHostInfo {
@@ -114,10 +157,9 @@ function Test-IsElevated {
 }
 
 function Get-DockerDesktopStatus {
-    $paths = @(
-        (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Docker\Docker\Docker Desktop.exe')
-    )
+    $paths = @(@($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+    } | ForEach-Object { Join-Path $_ 'Docker\Docker\Docker Desktop.exe' })
     $installed = $false
     foreach ($path in $paths) {
         if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path)) {
@@ -173,27 +215,25 @@ function Get-HostIPv4 {
 }
 
 function Get-WslDistributionList {
-    param([string]$Output)
-    $distros = @()
+    param([string]$Output, [string[]]$Names)
+    $found = @{}
+    $orderedNames = @($Names | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object Length -Descending)
     foreach ($line in ($Output -split "`r?`n")) {
-        $match = [regex]::Match($line, '^\s*(?<default>\*)?\s*(?<name>.+?)\s+(?<state>Running|Stopped|Installing|Uninstalling)\s+(?<version>[12])\s*$')
-        if ($match.Success) {
-            $distros += [pscustomobject]@{
-                Name = $match.Groups['name'].Value.Trim()
-                State = $match.Groups['state'].Value
-                Version = [int]$match.Groups['version'].Value
-                IsDefault = $match.Groups['default'].Success
+        foreach ($name in $orderedNames) {
+            $pattern = '^\s*(?<default>\*)?\s*' + [regex]::Escape($name) + '\s+.+?\s+(?<version>[12])\s*$'
+            $match = [regex]::Match($line, $pattern)
+            if ($match.Success) {
+                $found[$name] = [pscustomobject]@{
+                    Name = $name
+                    Version = [int]$match.Groups['version'].Value
+                    IsDefault = $match.Groups['default'].Success
+                }
+                break
             }
         }
     }
-    return @($distros)
-}
-
-function Get-DefaultDistroName {
-    param([string]$StatusOutput)
-    $match = [regex]::Match($StatusOutput, '(?im)^\s*Default Distribution:\s*(?<name>.+?)\s*$')
-    if ($match.Success) { return $match.Groups['name'].Value.Trim() }
-    return ''
+    $distros = @($Names | ForEach-Object { if ($found.ContainsKey($_.Trim())) { $found[$_.Trim()] } })
+    return ,$distros
 }
 
 function Get-InstallStatePath {
@@ -253,7 +293,7 @@ function Get-WslPath {
         [string]$SelectedDistro,
         [string]$WindowsPath
     )
-    $result = Invoke-Wsl -Arguments @('-d', $SelectedDistro, '--', 'wslpath', '-u', $WindowsPath)
+    $result = Invoke-Wsl -Arguments @('-d', $SelectedDistro, '--exec', 'wslpath', '-u', $WindowsPath)
     if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Output)) {
         Write-InstallError "Could not convert the source path into WSL. Check that the Windows drive is mounted in distro '$SelectedDistro'."
     }
@@ -277,9 +317,16 @@ case "$DEST" in
   /*) ;;
   *) DEST="$HOME/$DEST" ;;
 esac
-case "$DEST" in /mnt/*) echo "InstallDir resolves to $DEST on /mnt; choose a Linux path such as ~/gachipad." >&2; exit 42 ;; esac
-mkdir -p "$(dirname "$DEST")"
-DEST="$(mkdir -p "$DEST" && cd "$DEST" && pwd -P)"
+DEST="$(realpath -m -- "$DEST")"
+PARENT="$DEST"
+while [ ! -e "$PARENT" ]; do PARENT="$(dirname "$PARENT")"; done
+FSTYPE="$(stat -f -c %T -- "$PARENT")"
+case "$DEST:$FSTYPE" in /mnt:*|/mnt/*:*|*:9p|*:drvfs|*:v9fs)
+  echo "InstallDir resolves to a Windows filesystem; choose a Linux path such as ~/gachipad." >&2
+  exit 42 ;;
+esac
+mkdir -p -- "$DEST"
+DEST="$(realpath -e -- "$DEST")"
 STAGE="$(mktemp -d "${DEST}.stage.XXXXXX")"
 BUILD_SOURCE=""
 cleanup() { rm -rf "$STAGE"; [ -z "$BUILD_SOURCE" ] || rm -rf "$BUILD_SOURCE"; }
@@ -335,10 +382,7 @@ if [ -n "$BAD" ]; then
 fi
 printf '%s\n' "$DEST"
 '@
-    $result = Invoke-Wsl -Arguments @(
-        '-d', $SelectedDistro, '--', 'sh', '-lc', $copyScript,
-        '_', $Destination, $SourceKind, $sourceUnix
-    )
+    $result = Invoke-WslScript -SelectedDistro $SelectedDistro -ScriptText $copyScript -Arguments @($Destination, $SourceKind, $sourceUnix)
     if ($result.ExitCode -eq 42) {
         Write-InstallError "InstallDir must be inside the WSL Linux filesystem, not /mnt/c or another drvfs path. Choose ~/gachipad or another path under the Linux home directory."
     }
@@ -369,7 +413,7 @@ env_get HTTP_PORT 80; printf '\n'
 env_get HTTPS_PORT 443; printf '\n'
 env_get GACHIPAD_NETWORK internal; printf '\n'
 '@
-    $result = Invoke-Wsl -Arguments @('-d', $SelectedDistro, '--', 'sh', '-lc', $scriptText, '_', $Directory)
+    $result = Invoke-WslScript -SelectedDistro $SelectedDistro -ScriptText $scriptText -Arguments @($Directory)
     if ($result.ExitCode -ne 0) { Write-InstallError 'The installation completed, but .env settings could not be read.' }
     $values = @($result.Output -split "`r?`n")
     while ($values.Count -lt 4) { $values += '' }
@@ -392,17 +436,14 @@ cd "$1"
 . ./lib.sh
 env_get DATABASE_URL
 '@
-    $result = Invoke-Wsl -Arguments @('-d', $SelectedDistro, '--', 'sh', '-lc', $scriptText, '_', $Directory)
+    $result = Invoke-WslScript -SelectedDistro $SelectedDistro -ScriptText $scriptText -Arguments @($Directory)
     if ($result.ExitCode -ne 0) { Write-InstallError 'Could not read the existing database setting from .env.' }
     return $result.Output.Trim()
 }
 
 function Get-NetworkingMode {
     param([string]$SelectedDistro)
-    $result = Invoke-Wsl -Arguments @(
-        '-d', $SelectedDistro, '--', 'sh', '-lc',
-        'if command -v wslinfo >/dev/null 2>&1; then wslinfo --networking-mode 2>/dev/null || true; fi'
-    )
+    $result = Invoke-WslScript -SelectedDistro $SelectedDistro -ScriptText 'if command -v wslinfo >/dev/null 2>&1; then wslinfo --networking-mode 2>/dev/null || true; fi'
     $mode = $result.Output.Trim().ToLowerInvariant()
     if ($mode -eq 'mirrored') { return 'mirrored' }
     if ($mode -eq 'nat') { return 'nat' }
@@ -502,8 +543,15 @@ function Write-InstallState {
     $path = Get-InstallStatePath
     $parent = Split-Path -Parent $path
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    $json = [pscustomobject]@{ Distro = $SelectedDistro; InstallDir = $Directory } | ConvertTo-Json
-    [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))
+    $json = [pscustomobject]@{ Version = 1; Distro = $SelectedDistro; InstallDir = $Directory } | ConvertTo-Json
+    $temporary = Join-Path $parent ([guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [System.IO.File]::WriteAllText($temporary, $json, (New-Object System.Text.UTF8Encoding($false)))
+        if ([System.IO.File]::Exists($path)) { [System.IO.File]::Replace($temporary, $path, [NullString]::Value) }
+        else { [System.IO.File]::Move($temporary, $path) }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
 }
 
 function Invoke-Installer {
@@ -530,7 +578,11 @@ function Invoke-Installer {
     }
     $list = Invoke-Wsl -Arguments @('-l', '-v')
     if ($list.ExitCode -ne 0) { Write-InstallError 'Could not list WSL distributions. Run wsl --update, then wsl --list --verbose and retry.' }
-    $distros = Get-WslDistributionList -Output $list.Output
+    $quiet = Invoke-Wsl -Arguments @('-l', '-q')
+    if ($quiet.ExitCode -ne 0) { Write-InstallError 'Could not list WSL distribution names. Run wsl --update and retry.' }
+    $names = @($quiet.Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $distros = Get-WslDistributionList -Output $list.Output -Names $names
+    if ($names.Count -gt 0 -and $distros.Count -ne $names.Count) { Write-InstallError 'Could not read WSL distribution versions. Run wsl --update, then wsl --list --verbose and retry.' }
     if ($distros.Count -eq 0) {
         if ($options.InstallWsl -and (Test-IsElevated)) {
             $installResult = Invoke-Wsl -Arguments @('--install', '-d', 'Ubuntu') -PassThruConsole
@@ -543,11 +595,8 @@ function Invoke-Installer {
 
     $selectedDistro = $options.Distro
     if ([string]::IsNullOrWhiteSpace($selectedDistro)) {
-        $selectedDistro = Get-DefaultDistroName -StatusOutput $status.Output
-        if ([string]::IsNullOrWhiteSpace($selectedDistro)) {
-            $defaultEntry = $distros | Where-Object { $_.IsDefault } | Select-Object -First 1
-            if ($null -ne $defaultEntry) { $selectedDistro = $defaultEntry.Name }
-        }
+        $defaultEntry = $distros | Where-Object { $_.IsDefault } | Select-Object -First 1
+        if ($null -ne $defaultEntry) { $selectedDistro = $defaultEntry.Name }
         if ([string]::IsNullOrWhiteSpace($selectedDistro)) { $selectedDistro = $distros[0].Name }
     }
     $selectedEntry = $distros | Where-Object { $_.Name -eq $selectedDistro } | Select-Object -First 1
@@ -560,7 +609,7 @@ function Invoke-Installer {
     }
     Write-Output "Using WSL 2 distribution '$selectedDistro'."
 
-    $dockerInfo = Invoke-Wsl -Arguments @('-d', $selectedDistro, '--', 'docker', 'info')
+    $dockerInfo = Invoke-Wsl -Arguments @('-d', $selectedDistro, '--exec', 'docker', 'info')
     if ($dockerInfo.ExitCode -ne 0) {
         $desktop = Get-DockerDesktopStatus
         if ($dockerInfo.Output -match '(?i)permission denied.*docker\.sock|docker\.sock.*permission denied') {
@@ -572,10 +621,7 @@ function Invoke-Installer {
         if ($desktop.Installed -and $desktop.Running -and $dockerInfo.Output -match '(?i)not found|command not found|executable file not found') {
             Write-InstallError "Docker Desktop is running, but WSL integration is off for '$selectedDistro'. In Docker Desktop open Settings > Resources > WSL Integration, enable this distro, then Apply & Restart."
         }
-        $diagnostic = Invoke-Wsl -Arguments @(
-            '-d', $selectedDistro, '--', 'sh', '-lc',
-            'if command -v docker >/dev/null 2>&1; then echo docker-command; fi; if command -v dockerd >/dev/null 2>&1; then echo docker-engine; fi; if [ -d /run/systemd/system ]; then echo systemd; else echo no-systemd; fi'
-        )
+        $diagnostic = Invoke-WslScript -SelectedDistro $selectedDistro -ScriptText 'if command -v docker >/dev/null 2>&1; then echo docker-command; fi; if command -v dockerd >/dev/null 2>&1; then echo docker-engine; fi; if [ -d /run/systemd/system ]; then echo systemd; else echo no-systemd; fi'
         if ($diagnostic.Output -match 'docker-engine' -and $diagnostic.Output -match 'no-systemd') {
             Write-InstallError "Docker Engine is installed inside '$selectedDistro' without systemd. Add [boot]`nsystemd=true`n to /etc/wsl.conf, then run wsl --shutdown and reopen the distro."
         }
@@ -588,11 +634,11 @@ function Invoke-Installer {
         Write-InstallError "Docker is not available inside '$selectedDistro'. Install Docker Desktop and enable WSL integration for this distro, or install Docker Engine inside WSL."
     }
 
-    $compose = Invoke-Wsl -Arguments @('-d', $selectedDistro, '--', 'docker', 'compose', 'version')
+    $compose = Invoke-Wsl -Arguments @('-d', $selectedDistro, '--exec', 'docker', 'compose', 'version')
     if ($compose.ExitCode -ne 0) {
         Write-InstallError "Docker works in '$selectedDistro', but Docker Compose is missing. Install the Docker Compose plugin for this engine and retry."
     }
-    $dockerOs = Invoke-Wsl -Arguments @('-d', $selectedDistro, '--', 'docker', 'info', '--format', '{{.OperatingSystem}}')
+    $dockerOs = Invoke-Wsl -Arguments @('-d', $selectedDistro, '--exec', 'docker', 'info', '--format', '{{.OperatingSystem}}')
     $script:DockerOperatingSystem = $dockerOs.Output.Trim()
     Write-Output "Docker and Docker Compose are reachable in '$selectedDistro'."
 
@@ -612,7 +658,7 @@ function Invoke-Installer {
     }
 
     Write-Output 'Starting the Linux installer. Answer its prompts in this terminal.'
-    $installResult = Invoke-Wsl -Arguments (@('-d', $selectedDistro, '--cd', $installedPath, '--', './install.sh') + $arguments) -PassThruConsole
+    $installResult = Invoke-Wsl -Arguments (@('-d', $selectedDistro, '--cd', $installedPath, '--exec', './install.sh') + $arguments) -PassThruConsole
     if ($installResult.ExitCode -ne 0) { Write-InstallError "The Linux installer exited with code $($installResult.ExitCode). Review its message above, fix the issue, and rerun this command." }
 
     $settings = Get-InstallConfig -SelectedDistro $selectedDistro -Directory $installedPath

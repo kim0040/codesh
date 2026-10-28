@@ -1,76 +1,93 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$joined = ($args | ForEach-Object { [string]$_ }) -join ' '
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$inputText = ''
+if ($args -contains '-s') { $inputText = [Console]::In.ReadToEnd() }
+if (-not [string]::IsNullOrWhiteSpace($env:GACHIPAD_WSL_ARGV_LOG)) {
+    $record = [pscustomobject]@{ Arguments = @($args); InputText = $inputText } | ConvertTo-Json -Compress
+    [System.IO.File]::AppendAllText($env:GACHIPAD_WSL_ARGV_LOG, $record + "`n")
+}
+$joined = (($args | ForEach-Object { [string]$_ }) -join ' ') + $inputText
 if (-not [string]::IsNullOrWhiteSpace($env:GACHIPAD_WSL_LOG)) {
     [System.IO.File]::AppendAllText($env:GACHIPAD_WSL_LOG, $joined + [Environment]::NewLine)
 }
 $mode = $env:GACHIPAD_WSL_FAKE_MODE
+if ($mode -eq 'record') { Write-Output 'native-output'; exit 23 }
+if ($args -contains '-l' -and $args -contains '-q') {
+    if ($mode -eq 'localized') { Write-Output 'Ubuntu Work' }
+    Write-Output 'Ubuntu'; exit 0
+}
 
 if ($args -contains '--status') {
-    if ($mode -eq 'no-wsl') { Write-Output 'WSL is not installed'; $global:LASTEXITCODE = 1; return }
+    if ($mode -eq 'no-wsl') { Write-Output 'WSL is not installed'; exit 1 }
     Write-Output 'Default Distribution: Ubuntu'
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($args -contains '-l' -and $args -contains '-v') {
-    if ($mode -eq 'wsl1') {
+    if ($mode -eq 'localized') {
+        $running = -join ([char[]]@(0xC2E4, 0xD589, 0x20, 0xC911))
+        $stopped = -join ([char[]]@(0xC911, 0xC9C0, 0xB428))
+        Write-Output 'NAME STATUS VERSION'
+        Write-Output "* Ubuntu Work $running 2"
+        Write-Output "  Ubuntu $stopped 1"
+    } elseif ($mode -eq 'wsl1') {
         Write-Output '  NAME      STATE           VERSION'
         Write-Output '* Ubuntu    Stopped         1'
     } else {
         Write-Output '  NAME      STATE           VERSION'
         Write-Output '* Ubuntu    Running         2'
     }
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'wslpath -u') {
     Write-Output '/mnt/c/fake-source'
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'docker info --format') {
     if ($mode -eq 'docker-desktop') { Write-Output 'Docker Desktop' }
     else { Write-Output 'Ubuntu' }
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'docker info') {
     switch ($mode) {
-        'no-docker' { Write-Output 'docker: command not found'; $global:LASTEXITCODE = 127; return }
-        'desktop-off' { Write-Output 'docker: command not found'; $global:LASTEXITCODE = 127; return }
-        'permission' { Write-Output 'permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock'; $global:LASTEXITCODE = 1; return }
-        'engine-no-systemd' { Write-Output 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock'; $global:LASTEXITCODE = 1; return }
-        'desktop-stopped' { Write-Output 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock'; $global:LASTEXITCODE = 1; return }
+        'no-docker' { Write-Output 'docker: command not found'; exit 127 }
+        'desktop-off' { Write-Output 'docker: command not found'; exit 127 }
+        'permission' { Write-Output 'permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock'; exit 1 }
+        'engine-no-systemd' { Write-Output 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock'; exit 1 }
+        'desktop-stopped' { Write-Output 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock'; exit 1 }
     }
     Write-Output 'Client: Docker Engine'
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'docker compose version') {
     Write-Output 'Docker Compose version v2.30.0'
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'command -v docker' -and $joined -match 'command -v dockerd') {
     if ($mode -eq 'engine-no-systemd') { Write-Output "docker-command`ndocker-engine`nno-systemd" }
     else { Write-Output 'no-systemd' }
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'wslinfo --networking-mode') {
     if ($mode -eq 'mirrored') { Write-Output 'mirrored' }
     elseif ($mode -eq 'nat') { Write-Output 'nat' }
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'grep -q' -and $joined -match 'images\.tar') {
-    if ($mode -eq 'crlf') { Write-Output '/home/test/gachipad/install.sh'; $global:LASTEXITCODE = 45; return }
     Write-Output '/home/test/gachipad'
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'env_get PUBLIC_URL') {
     Write-Output ''
     Write-Output '8080'
     Write-Output '8443'
     Write-Output 'internal'
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
 if ($joined -match 'find \.' -and $joined -match "-name '\*\.sh'") {
     Write-Output 'backup.sh'
     Write-Output 'update.sh'
-    $global:LASTEXITCODE = 0; return
+    exit 0
 }
-$global:LASTEXITCODE = 0; return
+exit 0
