@@ -46,6 +46,113 @@ env_set() {
   chmod 600 "$tmp" && mv "$tmp" .env
 }
 
+# Linux host networking is required; Docker Desktop's Linux VM cannot advertise the host.
+mdns_supported() {
+  [ "$(uname -s)" = Linux ] && [ "$(docker info --format '{{.OSType}}' 2>/dev/null)" = linux ]
+}
+
+mdns_image() {
+  printf '%s/gachipad-mdns:%s' "$(env_get GACHIPAD_REGISTRY ghcr.io/kim0040)" "$(env_get GACHIPAD_VERSION "$(cat VERSION 2>/dev/null)")"
+}
+
+mdns_run() {
+  # A Node deadline bounds the query; timeout also bounds Docker startup. Never pull at install time.
+  command -v timeout >/dev/null 2>&1 || return 2
+  local name="gachipad-mdns-probe-$$" status=0
+  timeout -k 1 6 docker run --rm --pull never --name "$name" --network host --read-only \
+    --cap-drop ALL --security-opt no-new-privileges -e "MDNS_IP=${MDNS_IP:-$(env_get MDNS_IP)}" \
+    "$(mdns_image)" node index.mjs "$@" 2>/dev/null || status=$?
+  if [ "$status" = 124 ] || [ "$status" = 137 ]; then
+    docker rm -f "$name" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+
+mdns_profile() {
+  local enabled="$1" profiles profile result=""
+  profiles="$(env_get COMPOSE_PROFILES)"
+  local -a entries=()
+  IFS=',' read -r -a entries <<<"$profiles"
+  for profile in ${entries[@]+"${entries[@]}"}; do
+    profile="${profile#"${profile%%[![:space:]]*}"}"
+    profile="${profile%"${profile##*[![:space:]]}"}"
+    if [ -z "$profile" ] || [ "$profile" = mdns ]; then continue; fi
+    [ -z "$result" ] || result+=,
+    result+="$profile"
+  done
+  if [ "$enabled" = 1 ]; then [ -z "$result" ] || result+=,; result+=mdns; fi
+  env_set COMPOSE_PROFILES "$result"
+  COMPOSE_PROFILES="$result"; export COMPOSE_PROFILES
+}
+
+mdns_choose_name() {
+  local original="${MDNS_HOSTNAME:-$(env_get MDNS_HOSTNAME gachipad.local)}" candidate status number
+  if [[ ! "$original" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.local$ ]] ||
+    [ "${#original}" -gt 66 ]; then die "MDNS_HOSTNAME must be a single-label .local host name (at most 60 characters before .local)"; fi
+  candidate="$original"
+  for number in {1..10}; do
+    status=0
+    mdns_run --probe "$candidate" >/dev/null || status=$?
+    case "$status" in
+      0)
+        if [ "$candidate" != "$original" ]; then echo "mdns: $original is in use; using $candidate."; fi
+        env_set MDNS_HOSTNAME "$candidate"
+        MDNS_HOSTNAME="$candidate"; export MDNS_HOSTNAME
+        return ;;
+      10) candidate="${original%.local}-$((number + 1)).local" ;;
+      *) echo "mdns: name check failed or timed out; keeping $original (check for conflicts on your network)." >&2; break ;;
+    esac
+  done
+  if [ "$status" = 10 ]; then echo "mdns: no free name found in 10 attempts; keeping $original (check for conflicts on your network)." >&2; fi
+  env_set MDNS_HOSTNAME "$original"
+  MDNS_HOSTNAME="$original"; export MDNS_HOSTNAME
+}
+
+select_mdns() {
+  local choice="$1" answer
+  case "$choice" in auto | 0 | 1) ;; *) die "GACHIPAD_MDNS must be 0 or 1" ;; esac
+  if ! mdns_supported; then
+    echo "mdns: disabled; a native Linux Docker host is required for multicast host networking."
+    mdns_profile 0
+    return
+  fi
+  if [ "$choice" = auto ]; then
+    choice=1
+    if [ -t 0 ]; then
+      read -r -p "Enable short name ${MDNS_HOSTNAME:-$(env_get MDNS_HOSTNAME gachipad.local)} on this network? [Y/n]: " answer || answer=""
+      case "$answer" in n | N | no | NO) choice=0 ;; esac
+    fi
+  fi
+  if [ "$choice" = 1 ]; then mdns_choose_name; fi
+  mdns_profile "$choice"
+}
+
+mdns_enabled() {
+  case ",${COMPOSE_PROFILES-$(env_get COMPOSE_PROFILES)}," in *,mdns,*) return 0 ;; *) return 1 ;; esac
+}
+
+mdns_host_addresses() {
+  if [ "$(uname -s)" = Linux ] && command -v hostname >/dev/null 2>&1; then
+    hostname -I 2>/dev/null | tr ' ' '\n'
+  elif command -v ifconfig >/dev/null 2>&1; then
+    ifconfig 2>/dev/null | awk '$1 == "inet" && $2 != "127.0.0.1" {print $2}'
+  fi
+}
+
+mdns_addresses() {
+  local port suffix="" address
+  port="$(env_get HTTP_PORT 80)"
+  [ "$port" = 80 ] || suffix=":$port"
+  if mdns_enabled; then
+    echo "mdns: open http://$(env_get MDNS_HOSTNAME gachipad.local)$suffix"
+    echo 'mdns: some networks and Android devices do not resolve .local; use a server IP address then.'
+  fi
+  while IFS= read -r address; do
+    [[ "$address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    echo "install: server address http://$address$suffix"
+  done < <(mdns_host_addresses || true)
+}
+
 # database_kind reads the effective deployment choice without ever printing a database URL.
 database_kind() {
   local url kind
