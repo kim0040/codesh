@@ -125,8 +125,10 @@ curl http://localhost/healthz
 ```sh
 sha256sum -c gachipad-<버전>-linux-amd64.tar.gz.sha256
 tar xzf gachipad-<버전>-linux-amd64.tar.gz && cd gachipad-<버전>-linux-amd64
-PUBLIC_URL=http://gachipad.local ./install.sh       # 이미지 로드, 새 비밀키로 .env 작성, 시작, /healthz 대기
+PUBLIC_URL=http://gachipad.local ./install.sh       # 이미지 로드, 새 비밀키로 .env 작성, Linux에서 gachipad.local 제안, 시작
 ```
+
+네이티브 Linux 환경에서 `install.sh`는 `gachipad.local` mDNS 단축 도메인을 기본 제공하며 이름 충돌을 자동 검사합니다. 이를 건너뛰려면 `--no-mdns`(또는 `GACHIPAD_MDNS=0`)를 지정하고, 옵션 없이 재실행하면 기존 선택이 유지됩니다. 세부 제어 명령과 주의사항은 [운영자 안내서(mDNS)](docs/OPERATIONS.md#5-mdns-gachipadlocal-옵션)를 참고하십시오.
 
 `install.sh`는 이미지를 올리기 전에 번들 안의 `SHA256SUMS`로 모든 파일을 검사합니다. 체크섬은 서명이 아닙니다. `.sha256` 값은 번들과 다른, 신뢰할 수 있는 경로로 받은 값과 대조하십시오. 릴리스 파일에는 빌드 출처 증명도 포함되어 있습니다(`gh attestation verify`, [RELEASING.md](RELEASING.md)). 번들에는 gachipad 이미지와 함께 변경하지 않은 공식 MongoDB, PostgreSQL, Valkey, Caddy, Node 이미지와 `backup.sh`, `restore.sh`, `upgrade.sh`, `update.sh`, `migrate-db.sh`가 들어 있습니다.
 

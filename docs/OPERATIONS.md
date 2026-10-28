@@ -59,17 +59,26 @@ deploy/bundle.sh [버전]
 sha256sum -c gachipad-<버전>.tar.gz.sha256
 tar xzf gachipad-<버전>.tar.gz
 cd gachipad-<버전>        # 릴리스 파일은 이름이 gachipad-<버전>-linux-amd64(또는 -arm64)입니다
-PUBLIC_URL=http://gachipad.local ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL]
+PUBLIC_URL=http://gachipad.local ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL] [--mdns|--no-mdns]
 ```
 `install.sh` 스크립트는 다음 작업을 순차적으로 수행합니다.
 1. 번들 안의 `SHA256SUMS`로 모든 파일을 검사하고, 맞지 않으면 아무것도 하지 않고 중단.
-2. 데이터베이스 백엔드 확인: TTY 환경에서는 로컬 데이터베이스 포트(5432, 3306, 27017), 실행 중인 DB 컨테이너, 설치된 클라이언트 도구(`psql`, `mysql`/`mariadb`, `mongosh` 등), 가용 메모리를 검사하여 표시하고 대화형 선택 프롬프트(기본값: sqlite)를 제공합니다. 비대화형 환경에서는 `--db` 인자가 없으면 SQLite가 기본 선택됩니다. `DATABASE_URL` 플래그나 환경 변수가 있으면 해당 외부 데이터베이스 또는 SQLite 파일이 우선 적용됩니다.
-3. `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`).
-4. 백엔드 가드 검사: 기존에 다른 백엔드로 생성된 비어있지 않은 데이터 볼륨이나 마커가 존재하면 데이터 복사 도구 없는 임의의 백엔드 전환을 즉시 거부하고 중단.
-5. `.env` 파일이 없으면 `.env.example`을 복사하고 선택한 백엔드(`GACHIPAD_DB`, `DATABASE_URL`) 및 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
-6. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성 및 선택한 DB에 맞는 `COMPOSE_PROFILES` 구성.
-7. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 번들 MongoDB를 사용할 경우 일회성 서비스 `mongo-users`가 앱 전용 사용자 `gachipad_app`을 준비합니다.
-8. `state/database-kind`에 선택된 백엔드 마커 기록.
+2. 명령줄 인자 검사: `--db`, `--database-url`, `--mdns`, `--no-mdns` 옵션과 `GACHIPAD_MDNS`(0 또는 1) 환경 변수를 검증합니다. 유효하지 않은 `GACHIPAD_MDNS` 값은 즉시 거부됩니다.
+3. 데이터베이스 백엔드 확인: TTY 환경에서는 로컬 데이터베이스 포트(5432, 3306, 27017), 실행 중인 DB 컨테이너, 설치된 클라이언트 도구(`psql`, `mysql`/`mariadb`, `mongosh` 등), 가용 메모리를 검사하여 표시하고 대화형 선택 프롬프트(기본값: sqlite)를 제공합니다. 비대화형 환경에서는 `--db` 인자가 없으면 SQLite가 기본 선택됩니다. `DATABASE_URL` 플래그나 환경 변수가 있으면 해당 외부 데이터베이스 또는 SQLite 파일이 우선 적용됩니다.
+4. `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`).
+5. 백엔드 가드 검사: 기존에 다른 백엔드로 생성된 비어있지 않은 데이터 볼륨이나 마커가 존재하면 데이터 복사 도구 없는 임의의 백엔드 전환을 즉시 거부하고 중단.
+6. `.env` 파일이 없으면 `.env.example`을 복사하고 선택한 백엔드(`GACHIPAD_DB`, `DATABASE_URL`) 및 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
+7. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성 및 선택한 DB에 맞는 `COMPOSE_PROFILES` 구성.
+8. mDNS 설정 및 로컬 네트워크 단축 도메인 확인(5장):
+   - 지원 환경: 네이티브 Linux Docker 호스트 환경에서만 호스트 네트워크 모드(`network_mode: host`)를 통해 로컬 네트워크 mDNS 멀티캐스트가 지원됩니다. macOS, Windows, Docker Desktop(가상머신 격리로 인해 호스트 멀티캐스트 전달 불가), WSL, 원격 Docker 데몬 엔드포인트 환경에서는 mDNS가 자동으로 비활성화됩니다.
+   - 신규 설치: 네이티브 Linux TTY 환경에서는 단축 이름 활성화 여부를 묻는 대화형 프롬프트(`Enable short name gachipad.local on this network? [Y/n]: `)를 제공하며 기본값은 활성화(Y)입니다. 비대화형 환경에서도 기본값으로 활성화됩니다. 명령줄 옵션(`--mdns`, `--no-mdns`)이나 환경 변수(`GACHIPAD_MDNS=1`, `GACHIPAD_MDNS=0`)로 선택을 강제할 수 있으며 옵션 플래그가 우선합니다.
+   - 재실행 시 설정 유지: 강제 옵션 없이 `install.sh`를 다시 실행하면 기존 `.env`의 mDNS 선택과 호스트 이름을 그대로 유지합니다(`mdns: keeping the existing choice and hostname.`). 재실행 시 mDNS를 비활성화하면 실행 중인 `mdns` 컨테이너를 안전하게 중지합니다.
+   - 이름 충돌 탐색: 활성화 시 내부 네트워크에 동일한 호스트 이름이 존재하는지 격리된 프로브 컨테이너로 검사합니다. 이미 사용 중이면 `-2`부터 최대 10회까지 `-N` 접미사(예: `gachipad-2.local`)를 붙여 빈 이름을 탐색하며, 탐색 실패나 시간 초과 시에는 경고 후 원래 이름을 유지합니다.
+9. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 번들 MongoDB를 사용할 경우 일회성 서비스 `mongo-users`가 앱 전용 사용자 `gachipad_app`을 준비합니다.
+10. `state/database-kind`에 선택된 백엔드 마커 기록 및 최종 접속 주소 출력:
+    - 기본 HTTP 설정 시 `http://gachipad.local`(또는 지정 포트) 및 가상 브리지(`docker*`, `br-*`, `veth*`, `virbr*`)를 제외한 서버의 실제 호스트 IPv4 접속 주소를 안내합니다.
+    - 도메인 기반 사이트나 HTTPS 구성 시에는 mDNS 공지만으로 가상 호스트나 TLS 인증서가 생성되지 않으므로, `SITE_ALIASES` 추가 및 TLS 인증서 구성이 필요하다는 안내를 출력합니다.
+    - 일부 Android 기기나 멀티캐스트 트래픽을 필터링·차단하는 네트워크 환경에서는 `.local` 주소를 해석하지 못할 수 있으므로, 이러한 경우 서버 IP 주소로 접속해야 한다는 주의사항을 함께 안내합니다.
 
 ---
 
@@ -114,7 +123,7 @@ PUBLIC_URL=http://gachipad.local ./install.sh [--db sqlite|postgres|mongodb|exte
 | `RATE_LIMIT_CODE_PER_MIN` | `30` | 클라이언트 IP당 분당 허용되는 참여 코드 확인 요청 횟수입니다. |
 | `RATE_LIMIT_CREATE_PER_MIN` | `60` | 클라이언트 IP당 분당 허용되는 공유 생성 요청 횟수입니다. |
 | `RATE_LIMIT_LOGIN_PER_MIN` | `10` | 클라이언트 IP당 분당 허용되는 인증/로그인 시도 횟수입니다. |
-| `COMPOSE_PROFILES` | 주석 처리됨 | `mdns`로 지정하면 로컬 네트워크용 mDNS 사이드카 컨테이너가 함께 실행됩니다. |
+| `COMPOSE_PROFILES` | 비어 있음 | 실행할 Compose 프로필 목록(쉼표 구분)입니다. mDNS 활성화 시 `install.sh`나 `mdns.sh`가 `mdns` 프로필을 추가하며, `generate-secrets.sh`가 데이터베이스 프로필을 설정할 때도 이를 보존합니다. 수동 편집 대신 `./mdns.sh`를 사용하십시오(5장). |
 | `MDNS_HOSTNAME` | `gachipad.local` | mDNS를 통해 로컬 네트워크에 알릴 도메인 이름입니다. |
 | `MDNS_IP` | 비어 있음 | 호스트에 여러 네트워크 카드가 있을 때 mDNS로 응답할 특정 IP 주소입니다. 비워두면 비루프백 IPv4 전체를 공지합니다. |
 
@@ -145,10 +154,74 @@ PUBLIC_URL=http://gachipad.local ./install.sh [--db sqlite|postgres|mongodb|exte
 
 ## 5. mDNS (gachipad.local) 옵션
 
-DNS 서버가 없는 독립 네트워크 환경에서 `http://gachipad.local`로 접속할 수 있도록 mDNS 브로드캐스트 사이드카를 지원합니다.
-- `.env`에서 `COMPOSE_PROFILES=mdns` 주석을 해제합니다.
-- 사이드카 컨테이너는 호스트 네트워크 모드(`network_mode: host`)로 동작하므로 Linux 호스트 환경에서만 지원됩니다.
-- 여러 IP가 할당된 서버에서는 `MDNS_IP`에 광고할 IP를 직접 지정할 수 있습니다.
+DNS 서버가 없는 독립 네트워크나 내부 네트워크 환경에서 `http://gachipad.local`로 접속할 수 있도록 mDNS(Multicast DNS) 브로드캐스트 사이드카 컨테이너를 지원합니다.
+
+### 5.1 지원 환경 및 요구사항
+mDNS 사이드카(`ghcr.io/kim0040/gachipad-mdns`)는 호스트 네트워크 모드(`network_mode: host`)로 동작하여 로컬 네트워크의 멀티캐스트 패킷(UDP 5353)을 직접 수신하고 응답합니다.
+- **지원 환경**: 로컬 유닉스 소켓(`unix://*`)으로 연결된 네이티브 Linux Docker 호스트 환경에서만 지원됩니다.
+- **미지원 환경**: Docker Desktop(Linux 가상머신 내부에서 구동되므로 실제 호스트의 물리 네트워크 인터페이스로 멀티캐스트를 공지할 수 없음), WSL(Windows Subsystem for Linux), macOS, Windows, 그리고 원격 Docker 데몬 엔드포인트(TCP 소켓 또는 Docker Context)에서는 mDNS가 지원되지 않으며 설치 및 활성화 시 자동으로 비활성화됩니다.
+
+### 5.2 설치 시 동작과 옵션
+- **기본 활성화**: 네이티브 Linux 환경에서 `install.sh`를 신규 실행하면 기본적으로 mDNS가 제안됩니다.
+- **대화형 확인**: TTY 환경에서는 다음 단일 프롬프트를 표시하며, Enter를 누르면 기본값(Y)으로 활성화됩니다.
+  ```text
+  Enable short name gachipad.local on this network? [Y/n]:
+  ```
+  비대화형(non-TTY) 환경에서도 기본값으로 활성화됩니다.
+- **명령줄 옵션 및 환경 변수**:
+  - `--mdns`: TTY 프롬프트 없이 mDNS를 즉시 활성화합니다.
+  - `--no-mdns`: mDNS를 건너뛰고 비활성화합니다.
+  - `GACHIPAD_MDNS=1` 또는 `GACHIPAD_MDNS=0`: 환경 변수로 동작을 지정할 수 있습니다.
+  - 옵션 우선순위: 명령줄 플래그(`--mdns`, `--no-mdns`)가 환경 변수(`GACHIPAD_MDNS`)보다 우선합니다. 유효하지 않은 `GACHIPAD_MDNS` 값은 이미지 로딩이나 설정 생성 전에 즉시 거부됩니다.
+- **재실행 시 설정 보존**: 이미 설치된 환경에서 별도의 mDNS 옵션 없이 `install.sh`를 다시 실행하면 기존 `.env`에 저장된 활성화 여부와 호스트 이름을 그대로 유지합니다(`mdns: keeping the existing choice and hostname.`). 만약 `--no-mdns`로 재실행하여 비활성화하는 경우, 실행 중이던 기존 `mdns` 컨테이너를 자동으로 중지합니다.
+
+### 5.3 호스트 이름 충돌 검사 및 접미사(-N) 자동 선택
+- **호스트 이름 형식**: `MDNS_HOSTNAME`은 `.local` 앞부분이 최대 60자의 단일 DNS 레이블(`[a-zA-Z0-9-]`)이어야 합니다(기본값: `gachipad.local`).
+- **충돌 감지 및 후보 탐색**: mDNS 활성화 시 오프라인 네트워크 프로브 컨테이너를 실행하여 네트워크상에 동일한 이름이 응답하는지 검사합니다.
+  - 해당 이름이 이미 사용 중이면(`status 10`), `-2`부터 최대 10회까지 번호 접미사(`-N`)를 붙인 후보(예: `gachipad-2.local`, `gachipad-3.local` 등)를 순차적으로 프로브하여 사용 가능한 이름을 자동으로 찾고, 선택된 이름을 안내(`mdns: gachipad.local is in use; using gachipad-2.local.`)한 후 `.env`의 `MDNS_HOSTNAME`에 반영합니다.
+  - 프로브 이미지 부재, 타임아웃(Node 쿼리 1.4초, Docker 타임아웃 6초), 소켓 오류, 10회 시도 소진 시에는 설치를 실패 처리하지 않고 경고 메시지를 출력한 뒤 원래 이름을 유지합니다(`keeping gachipad.local (check for conflicts on your network).`).
+- **별칭 검사**: `MDNS_ALIASES`에 지정된 추가 도메인들도 충돌 여부를 검사하며, 충돌 시 경고를 출력합니다(별칭은 자동 이름 변경을 수행하지 않습니다).
+- **DNS-SD 서비스 이름**: 선택된 호스트 이름을 반영하여 고유한 DNS-SD 인스턴스 이름으로 등록됩니다.
+- **인터페이스 필터링 및 IP 지정**:
+  - 가상 브리지 인터페이스(`docker*`, `br-*`, `veth*`, `virbr*`)는 mDNS A 레코드 응답 및 IP 안내에서 자동으로 제외됩니다.
+  - 서버에 여러 물리 네트워크 카드가 있어 특정 IP로만 응답하고자 하는 경우 `.env`의 `MDNS_IP`에 광고할 IPv4 주소를 지정할 수 있습니다(비워두면 루프백과 가상 브리지를 제외한 모든 전역 IPv4 주소를 공지).
+
+### 5.4 기존 설치 환경 제어 (deploy/mdns.sh)
+기존 설치 환경에서는 `.env`의 `COMPOSE_PROFILES`를 직접 편집하지 않고, 전용 헬퍼 스크립트 `./mdns.sh`를 사용합니다. 이 스크립트는 애플리케이션 서비스(`api`, `collab`, `caddy`, 데이터베이스)를 재시작하거나 변경하지 않고 `mdns` 사이드카만 안전하게 제어합니다. 기존의 `PUBLIC_URL`, `SITE_ADDRESS`, TLS 설정 및 데이터베이스 구성은 그대로 유지됩니다.
+
+```sh
+./mdns.sh enable|disable|status
+```
+
+- **`./mdns.sh enable`**:
+  - 네이티브 Linux 지원 환경 여부를 확인합니다.
+  - 로컬 mDNS 이미지(`ghcr.io/kim0040/gachipad-mdns:<버전>`) 존재 여부를 확인합니다. 로컬에 없으면 레지스트리에서 pull을 시도하며, 오프라인 환경에서 이미지가 없는 경우 명확한 오프라인 복구 명령을 안내하고 실패합니다.
+  - `.env` 스냅샷을 생성하여 컨테이너 구동 실패나 중단 신호(HUP, INT, TERM) 수신 시 변경 전 상태로 자동 롤백합니다.
+  - 호스트 이름 충돌 검사를 수행하고 `COMPOSE_PROFILES`에 `mdns` 프로필을 추가합니다.
+  - 15초 제한 시간(`--wait --wait-timeout 15`)으로 `mdns` 컨테이너를 구동하고 최종 접속 주소를 출력합니다.
+- **`./mdns.sh disable`**:
+  - `docker compose --profile mdns stop mdns`로 `mdns` 컨테이너를 중지하고, `COMPOSE_PROFILES`에서 `mdns` 프로필을 제거합니다.
+- **`./mdns.sh status`**:
+  - mDNS 활성화 여부, 현재 설정된 호스트 이름(`MDNS_HOSTNAME`), 그리고 컨테이너 상태(`docker compose --profile mdns ps mdns`)를 출력합니다.
+  - 상태 조회는 배포 잠금(lock)을 획득하지 않는 읽기 전용 작업이므로 업데이트나 유지보수 작업 중에도 지연 없이 안전하게 실행할 수 있습니다.
+
+### 5.5 1.1.0 이하 버전에서 첫 업데이트 후 일회성 도구 복구
+1.1.0 이하 버전에서 설치된 환경은 고정된 파일 목록을 사용하는 이전 업데이터로 인해 새 헬퍼 스크립트(`mdns.sh`)가 배포 디렉터리에 자동으로 복사되지 않을 수 있습니다.
+
+이러한 환경에서 첫 업데이트 후 오프라인 환경의 mDNS 도구와 이미지를 준비하려면 다음 복구 명령을 1회 실행합니다.
+```sh
+./update.sh --mdns-tools /path/to/matching-bundle.tar.gz
+```
+- **요구사항**: 현재 설치된 버전(`GACHIPAD_VERSION`)과 정확히 일치하는 검증된 오프라인 번들(이미지가 포함된 `gachipad-<버전>-linux-<아키텍처>.tar.gz` 및 신뢰할 수 있는 SHA256 체크섬 파일)을 지정해야 합니다. 이미지가 제외된 배포 전용 아카이브(`gachipad-deploy-<버전>.tar.gz`)는 사용할 수 없습니다.
+- **동작**: 아카이브 해시를 검증하고, `images.tar`로부터 이미지를 로드하여 로컬 mDNS 이미지를 확인한 뒤 `mdns.sh`를 원자적으로 설치합니다. `.env` 파일이나 애플리케이션 서비스를 변경하지 않으며 외부 인터넷 연결 없이 동작합니다.
+- 도구 설치가 완료된 후 `./mdns.sh enable`을 실행하여 mDNS를 활성화할 수 있습니다.
+
+### 5.6 네트워크 및 단말 제약 사항
+- **.local 도메인 해석 제약**: 일부 Android 단말(안드로이드 자체 DNS 리졸버의 mDNS 미지원 또는 단말별 구현 차이) 및 멀티캐스트 트래픽(UDP 5353)을 필터링하거나 차단(IGMP 스누핑 등)하도록 구성된 네트워크 환경에서는 클라이언트 기기가 `.local` 주소를 해석하지 못할 수 있습니다. 이러한 환경에서는 `install.sh`나 `mdns.sh`가 출력하는 호스트의 실제 서버 IP 주소로 접속하십시오.
+- **네임드 사이트 및 HTTPS 환경 연동**: mDNS는 네트워크 계층에서 도메인 이름을 IP로 매핑하는 기능만 수행하며, 웹 서버(Caddy)의 가상 호스트 라우팅이나 HTTPS 인증서를 자동으로 생성하지 않습니다.
+  - `SITE_ADDRESS`가 특정 도메인 이름으로 지정되어 있거나 HTTPS가 구성된 환경에서는 브라우저로 `http://gachipad.local`에 접속 시 인증서 불일치 경고나 접속 차단이 발생할 수 있습니다.
+  - 이러한 네임드 사이트 환경에서 mDNS 도메인을 정상적으로 사용하려면 `.env`의 `SITE_ALIASES`에 해당 mDNS 이름을 추가하고, HTTPS를 사용하는 경우 해당 이름에 대한 TLS 인증서를 함께 구성해야 합니다(자세한 내용은 [deploy/tls/README.md](../deploy/tls/README.md) 참고).
+  - 설치 스크립트가 출력하는 서버 원시 IP 주소로 접속할 때도 동일한 웹 서버 설정이 적용됩니다.
 
 ---
 
