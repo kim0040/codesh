@@ -269,7 +269,7 @@ gachipad는 SQLite, 번들 PostgreSQL, 번들 MongoDB 및 외부 데이터베이
 |---|---|---|---|---|---|
 | **SQLite** (신규 기본값) | 가장 낮음 (별도 서버 프로세스 및 자격 증명 없음, 파일 기반) | `backup.sh`: `VACUUM INTO` 온라인 스냅샷 (`gachipad-data` 볼륨 내부 임시 생성 후 압축), live WAL 잠금 없음 | 단일 호스트 (공유 볼륨 내 복제본 간 공유, 다중 호스트 불가) | 매우 낮음 (별도 DB 컨테이너 없음, 메모리 오버헤드 최소) | 신규 설치 기본값, 단일 서버 배포, 설정 간소화 및 최소 자원 소모 환경 |
 | **번들 PostgreSQL** | 낮음 (Compose `postgres` 프로필로 `postgres:17.11-alpine` 자동 구동) | `backup.sh`: `pg_dump --format=custom` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 중간 (수백 MB 수준의 메모리 점유) | 복수 협업 인스턴스 확장이 필요하고 표준 관계형 데이터베이스를 선호하는 단일 호스트 환경 |
-| **번들 MongoDB** | 중간 (Compose `mongodb` 프로필로 `mongo:8.0.34` 및 `mongo-users` 구동) | `backup.sh`: `mongodump` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 높음 (WiredTiger 캐시 기본 2GB + 컨테이너 메모리) | 1.0.x 기존 설치를 데이터 마이그레이션 없이 그대로 유지하며 업그레이드하는 환경 |
+| **번들 MongoDB** | 중간 (Compose `mongodb` 프로필로 `mongo:8.0.34` 및 `mongo-users` 구동) | `backup.sh`: `mongodump` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 높음 (WiredTiger 캐시 기본 2GB + 컨테이너 메모리) | 1.0.x 기존 설치를 데이터 마이그레이션 없이 그대로 유지하며 업그레이드하는 환경 (Linux 커널 6.19 이상 기동 거부 문제는 [13.2절](#132-주요-장애-유형과-대응-방법) 참고) |
 | **외부 PostgreSQL** | 운영자 관리 (별도 전용 DB 인프라 운영 및 모니터링) | 운영자 자체 백업 도구 (`pg_dump` 등). gachipad 로컬 백업 스크립트는 로컬 아카이브를 만들지 않음 | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 (외부 서버 리소스 활용) | 고가용성 PostgreSQL 클러스터 및 자체 백업 체계가 이미 갖춰진 엔터프라이즈 환경 |
 | **외부 MySQL/MariaDB** | 운영자 관리 (번들 서비스 없음, 외부 연결 전용) | 운영자 자체 백업 도구 (`mysqldump`, logical backup 등) | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 | 기존에 운영 중인 중앙 MySQL 또는 MariaDB 인프라를 연동하고자 하는 환경 |
 | **외부 MongoDB** | 운영자 관리 (외부 MongoDB Replica Set 인프라 관리) | 운영자 자체 백업 도구 (`mongodump` 등) | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 | 별도의 고가용성 MongoDB 클러스터(Replica Set)를 이미 운영 중인 환경 |
@@ -684,6 +684,15 @@ docker compose logs -f valkey    # 캐시/메시징 로그
 - **컨테이너 부팅 실패 (취약한 시크릿 거부)**:
   - `NODE_ENV=production` 환경에서는 `SESSION_SECRET`, `COLLAB_SECRET`이 32자 미만이거나 개발용 기본값이면 기동을 거부합니다. `MONGO_PASSWORD`, `VALKEY_PASSWORD` 등이 비어 있으면 `docker compose`가 시작 전에 멈춥니다.
   - `./generate-secrets.sh .env`를 실행하여 안전한 비밀키를 채워 넣으십시오.
+- **번들 MongoDB가 시작되지 않음 (Linux 커널 6.19 이상)**:
+  - `docker compose ps`에서 `mongo` 컨테이너가 `restarting` 또는 `exited` 상태이고, api 및 collab이 준비되지 않아 `/readyz`가 503을 반환하며, `docker compose logs mongo`에 다음 로그가 출력됩니다.
+    `MongoDB cannot start: Linux kernel versions 6.19 and newer has a known incompatibility with this version of MongoDB. See https://jira.mongodb.org/browse/SERVER-121912 for more information.`
+  - Linux 커널 6.19부터 7.0.13까지의 환경에서 번들 MongoDB 8.0.34(8.0.21~8.0.34)는 알려진 비호환성으로 인해 의도적으로 기동을 중단하고 종료합니다. 이 검사를 우회하면 약 1분 후 프로세스가 충돌(crash)하고 데이터 손상이 일어날 수 있으므로 절대로 강제로 우회해서는 안 됩니다.
+  - 호스트 커널 버전은 `uname -r`로 확인합니다. 리눅스 커널 7.0.14 이상 및 7.1 이상에서 원인이 해결되었으나, Ubuntu 등 일부 배포판은 이를 `7.0.0-NN`(`uname -r`) 형태로 보고하여 8.0.34가 여전히 기동을 거부합니다. 실제 업스트림 버전은 `cat /proc/version_signature`로 확인할 수 있습니다. Ubuntu 커널을 인식하는 MongoDB 8.0.35가 Docker Hub에 게시되면 gachipad 패치 릴리스에서 반영될 예정입니다(2026-10-28 기준 Docker Hub 미게시).
+  - 운영자 대응 방법:
+    1. **데이터 마이그레이션**: MongoDB가 기동 가능한 상태(커널 업데이트 전 또는 이전 커널로 부팅한 상태)에서 `deploy/migrate-db.sh`를 실행하여 SQLite 또는 번들 PostgreSQL로 데이터를 이전합니다(9.6절 참고). 소스 데이터베이스를 읽을 수 있어야 하므로 MongoDB가 시작될 수 있을 때만 동작합니다.
+    2. **이전 커널 부팅**: 수정된 이미지가 제공될 때까지 배포판의 이전 커널(6.19 미만 버전)로 부팅하여 운영합니다.
+    3. **신규 설치 백엔드 선택**: 신규 설치 환경의 경우 `--db sqlite`(기본값) 또는 `--db postgres`를 선택합니다. SQLite와 PostgreSQL은 이 문제의 영향을 받지 않습니다.
 - **429 `rate_limited` 또는 PIN 차단**:
   - 특정 IP의 분당 요청 수가 `.env` 임계치를 초과했거나 PIN을 5회 연속 잘못 입력한 경우 발생합니다.
   - 리버스 프록시 뒤에서 모든 클라이언트가 단일 IP로 인식되는 경우 `TRUST_PROXY` 설정이 올바른지 확인하십시오.

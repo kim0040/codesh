@@ -26,7 +26,7 @@ gachipad supports multiple database backends, selected during installation or co
 
 - **SQLite** (default for new installs): Stored in `/data/gachipad.db` on the shared `gachipad-data` volume in WAL mode. Requires no server setup, external credentials, or extra containers. Recommended for single-host deployments. Budget at least twice the uncompressed database size as free operational disk headroom for snapshots and restores.
 - **Bundled PostgreSQL**: Runs `postgres:17.11-alpine` under Compose profile `postgres`. Multi-replica collab scale-out ready. Password generated automatically.
-- **Bundled MongoDB**: Runs `mongo:8.0.34` under Compose profile `mongodb`. Upgraded 1.0.x installations retain MongoDB automatically without data migration.
+- **Bundled MongoDB**: Runs `mongo:8.0.34` under Compose profile `mongodb`. Upgraded 1.0.x installations retain MongoDB automatically without data migration. On Linux kernels 6.19 up to 7.0.13 (and Ubuntu kernels reported as `7.0.0-NN` by `uname -r`), MongoDB 8.0.34 deliberately refuses to start to avoid crashes and data corruption (`cat /proc/version_signature` shows the upstream version). Operators can boot a kernel older than 6.19, migrate data to SQLite or PostgreSQL with `migrate-db.sh` while MongoDB can start, or choose SQLite or PostgreSQL for new installs (docs/OPERATIONS.md §13.2). MongoDB 8.0.35 recognises Ubuntu kernels and will be adopted in a patch release once published.
 - **External database**: Connect to external PostgreSQL, MySQL, MariaDB, or MongoDB via `DATABASE_URL` (`GACHIPAD_DB=external`). MySQL and MariaDB are supported as external servers only; bundled images are not provided for them.
 - **Valkey**: Required for every database choice (document locks, presence, rate limits, join codes).
 

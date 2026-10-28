@@ -5,6 +5,16 @@ All notable changes to gachipad are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a version is the
 text of its GitHub release (RELEASING.md).
 
+## [Unreleased]
+
+### Changed
+
+- Clearer operator messages in the database copy tool and migrate-db.sh (for example the required disk space and the estimated copy window are now printed with units).
+
+### Known issues
+
+- Bundled MongoDB 8.0.34 refuses to start on Linux kernels 6.19 and newer below 7.0.14, and on Ubuntu kernels reported as 7.0.0-NN; see docs/OPERATIONS.md 13.2.
+
 ## [1.1.0] - 2026-10-28
 
 ### Added
@@ -124,6 +134,7 @@ The first release: real-time code sharing for one network, with no outside servi
   edit keys in every open tab. Shares with a PIN or approval load their copy only after the server
   accepts the connection. Lab previews never keep copies.
 
+[Unreleased]: https://github.com/kim0040/gachipad/compare/v1.1.0...HEAD
 [1.1.0]: https://github.com/kim0040/gachipad/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/kim0040/codesh/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kim0040/codesh/releases/tag/v1.0.0
