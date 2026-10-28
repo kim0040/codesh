@@ -24,7 +24,7 @@
 
 ## Why gachipad
 
-- **No accounts and zero outside requests**: Every font, icon, and script is served by your own server; runs without internet or in air-gapped environments.
+- **No accounts, no third-party assets or tracking**: Every font, icon and script comes from your server; works without internet; the only outside requests are the optional release check and, in public direct mode, ACME.
 - **Internal or public mode**: Deploy for an internal network (HTTP or internal CA HTTPS, mDNS) or the public internet (automated ACME TLS/HSTS, client discovery isolation, strict rate limits).
 - **One-command installation**: Install and run preflight checks in one command on Linux (`./install.sh`) and Windows (`install.cmd` via WSL 2 and Docker Desktop).
 - **Conflict-free collaborative editing**: Concurrent typing merges deterministically with Yjs CRDTs; deleted text is pruned (`gc: true`) and never transmitted to other participants.
@@ -55,10 +55,12 @@ For checksum verification, mDNS options, and offline upgrades, see the [Install]
 ### Windows (WSL 2)
 
 ```cmd
+git clone https://github.com/kim0040/gachipad.git
+cd gachipad\deploy
 install.cmd
 ```
 
-Runs inside WSL 2 with Docker Desktop; see the [Install](#install) section for PowerShell parameters and firewall settings.
+`install.cmd` is in `deploy\` of a git clone or in the extracted release bundle folder; `install.ps1 -BundlePath <archive.tar.gz>` also accepts a downloaded bundle archive. Runs inside WSL 2 with Docker Desktop; see the [Install](#install) section for PowerShell parameters and firewall settings.
 
 ## Screenshots
 
@@ -114,6 +116,31 @@ Runs inside WSL 2 with Docker Desktop; see the [Install](#install) section for P
 ### Admin
 - **Admin console** (`/admin`): Configure share lifespans, retention, upload limits, guest access, rooms, and templates, protected by `ADMIN_ALLOW_CIDR` and rate limits.
 - **Authentication & operations**: Connect optional OIDC or LDAP authentication alongside guest access, with system metrics, audit logs, and update tools.
+
+## How to use
+
+1. **Start**: Open the home page and click **New share**, or select **Start from a template**.
+2. **Invite**: Click **Share** (`⌃⌘S` on a Mac, `Ctrl+Alt+S` elsewhere) to copy the link, read out the 6-digit code or show the QR code.
+3. **Join**: Type the code on the home page, or open `/<code>` or `/<id>`.
+4. **Edit together**: Collaborate in real time with live cursors, highlighting and comments (`⌃⌘M` / `Ctrl+Alt+M`).
+5. **Manage files**: Add files and folders from the file panel, or drop files and `.zip` archives into the window.
+6. **Review history**: As the owner, open **History** (`⌃⌘H` / `Ctrl+Alt+H`) to inspect revisions and diffs.
+7. **Export**: Download a file, or the whole share as a `.zip`.
+
+Press `?` outside a text field for the shortcuts of your operating system. The full list is in the [User guide](docs/USER-GUIDE.md) (written in Korean, with an English quick reference at the end).
+
+| Action | Mac | Windows / Linux |
+|---|---|---|
+| Command palette | `⌘ K` or `F1` | `Ctrl + K` or `F1` |
+| Share dialog | `⌃ ⌘ S` | `Ctrl + Alt + S` |
+| Settings | `⌘ ,` | `Ctrl + ,` |
+| Comments | `⌃ ⌘ M` | `Ctrl + Alt + M` |
+| History (owner) | `⌃ ⌘ H` | `Ctrl + Alt + H` |
+| Copy all code | `⌃ ⌘ C` | `Ctrl + Alt + C` |
+| Format code | `⇧ ⌥ F` | `Shift + Alt + F` |
+| Find / replace | `⌘ F` / `⌘ ⌥ F` | `Ctrl + F` / `Ctrl + H` |
+| Add cursor above / below | `⌘ ⌥ ↑` / `⌘ ⌥ ↓` | `Ctrl + Alt + ↑` / `Ctrl + Alt + ↓` |
+| Select next occurrence | `⌘ D` | `Ctrl + D` |
 
 ## Install
 
@@ -199,14 +226,14 @@ Needs Node.js 22 or newer, pnpm 9.15 (`corepack enable`), and Docker with Compos
 
 ```sh
 pnpm install
-pnpm services:up      # start local database and Valkey 8
+pnpm services:up      # MongoDB 8 and Valkey 8 for development
 pnpm dev              # web on :5173, API on :3001, collab on :3002
 pnpm check            # Biome, TypeScript typecheck, Vitest, license check
 pnpm test:e2e         # Playwright; run pnpm --filter @gachipad/web exec playwright install chromium first
 pnpm services:down
 ```
 
-The repository is a pnpm and Turborepo monorepo (`apps/web`, `apps/api`, `apps/collab`, `packages/*`); [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes it. Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+The repository is a pnpm and Turborepo monorepo (`apps/web`, `apps/api`, `apps/collab`, `packages/*`); [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes it. The screenshots above are made by `apps/web/e2e/readme-shots.spec.ts`. Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
@@ -219,7 +246,7 @@ The repository is a pnpm and Turborepo monorepo (`apps/web`, `apps/api`, `apps/c
 
 ## License
 
-Distributed under the [MIT License](LICENSE). See [Third-party notices](THIRD_PARTY_NOTICES.md) for libraries, fonts, and base images. Unmodified official images (PostgreSQL, MongoDB, Valkey, Caddy, Node) are used for database and infrastructure components.
+Distributed under the [MIT License](LICENSE). See [Third-party notices](THIRD_PARTY_NOTICES.md) for libraries, fonts, and base images. MongoDB Community Server (SSPL) is used unmodified as an optional bundled database, not part of this repository; the offline bundle contains the unmodified official image. Unmodified official images (PostgreSQL, MongoDB, Valkey, Caddy, Node) are used for database and infrastructure components.
 
 ## Contributors
 

@@ -24,7 +24,7 @@
 
 ## 왜 gachipad인가요?
 
-- **회원가입과 외부 통신 없는 설계**: 모든 글꼴, 아이콘, 스크립트를 자체 서버에서 직접 제공하여 인터넷이 없는 환경이나 내부망에서도 완벽하게 동작합니다.
+- **회원가입 없음, 서드파티 에셋 및 추적 없음**: 모든 글꼴, 아이콘, 스크립트를 자체 서버에서 제공하며 인터넷 없이도 동작합니다. 외부 요청은 선택 사항인 릴리스 확인과 공개 직접 모드의 ACME뿐입니다.
 - **내부망 및 공개 인터넷 모드**: 내부망 모드(일반 HTTP 또는 내부 CA HTTPS, mDNS)와 공개 인터넷 모드(ACME 자동 TLS/HSTS, 클라이언트 격리, 엄격한 요청 한도)를 설치 시 선택할 수 있습니다.
 - **명령어 한 줄 설치**: 사전 점검과 함께 Linux에서는 `./install.sh`, Windows에서는 `install.cmd`(WSL 2 및 Docker Desktop)로 즉시 설치할 수 있습니다.
 - **충돌 없는 실시간 협업**: Yjs CRDT로 동시 입력을 결정론적으로 병합하며, 삭제된 텍스트는 가비지 컬렉션(`gc: true`)되어 다른 참여자에게 전송되지 않습니다.
@@ -55,10 +55,12 @@ tar xzf gachipad-<버전>-linux-amd64.tar.gz && cd gachipad-<버전>-linux-amd64
 ### Windows (WSL 2)
 
 ```cmd
+git clone https://github.com/kim0040/gachipad.git
+cd gachipad\deploy
 install.cmd
 ```
 
-WSL 2 및 Docker Desktop 환경에서 실행되며, PowerShell 스위치 및 방화벽 설정은 [설치](#설치) 섹션을 참고하십시오.
+`install.cmd`는 git clone 저장소의 `deploy\` 폴더 또는 압축을 푼 릴리스 번들 폴더에 있습니다. `install.ps1 -BundlePath <archive.tar.gz>`로 다운로드한 번들 아카이브를 직접 전달할 수도 있습니다. WSL 2 및 Docker Desktop 환경에서 실행되며, PowerShell 스위치 및 방화벽 설정은 [설치](#설치) 섹션을 참고하십시오.
 
 ## 스크린샷
 
@@ -114,6 +116,31 @@ WSL 2 및 Docker Desktop 환경에서 실행되며, PowerShell 스위치 및 방
 ### 관리자
 - **관리자 콘솔**(`/admin`): 공유 수명, 보관 주기, 업로드 용량, 게스트 접근, 방, 템플릿을 제어하며 `ADMIN_ALLOW_CIDR` 및 속도 제한으로 보호됩니다.
 - **인증 연동 및 운영 탭**: 게스트 접근과 병행 가능한 OIDC/LDAP 연동, 실시간 지표, 감사 로그, 백업 및 업데이트 패널을 제공합니다.
+
+## 사용 방법
+
+1. **시작하기**: 첫 화면에서 **새 공유**를 누르거나 **템플릿으로 시작**을 선택해요.
+2. **초대하기**: **공유** 버튼(Mac `⌃⌘S`, Windows·Linux `Ctrl+Alt+S`)을 눌러 링크를 복사하거나, 6자리 참여 코드 또는 QR 코드를 보여줘요.
+3. **참여하기**: 첫 화면에 코드를 입력하거나 `/<코드>` 또는 `/<id>` 주소를 열어요.
+4. **함께 편집하기**: 실시간 커서, 문법 강조, 인라인 코멘트(`⌃⌘M` / `Ctrl+Alt+M`)를 사용해 코드를 작성해요.
+5. **파일 관리하기**: 파일 탐색기 패널에서 파일과 폴더를 추가하거나, 파일 및 `.zip` 파일을 에디터 창에 끌어다 놓아요.
+6. **이력 확인하기**: 공유 소유자는 **이력** 메뉴(`⌃⌘H` / `Ctrl+Alt+H`)에서 스냅샷과 차이점을 확인하고 복원할 수 있어요.
+7. **내보내기**: 파일 하나를 내려받거나 전체 코드를 `.zip` 압축 파일로 저장해요.
+
+입력창 바깥에서 `?`를 누르면 현재 운영체제에 맞는 단축키 목록이 나와요. 전체 단축키 안내는 [사용자 안내서](docs/USER-GUIDE.md)에 있어요.
+
+| 동작 | Mac | Windows / Linux |
+|---|---|---|
+| 명령 팔레트 | `⌘ K` 또는 `F1` | `Ctrl + K` 또는 `F1` |
+| 공유 창 | `⌃ ⌘ S` | `Ctrl + Alt + S` |
+| 설정 | `⌘ ,` | `Ctrl + ,` |
+| 코멘트 | `⌃ ⌘ M` | `Ctrl + Alt + M` |
+| 이력 (소유자) | `⌃ ⌘ H` | `Ctrl + Alt + H` |
+| 전체 코드 복사 | `⌃ ⌘ C` | `Ctrl + Alt + C` |
+| 코드 정리 | `⇧ ⌥ F` | `Shift + Alt + F` |
+| 찾기 / 찾아 바꾸기 | `⌘ F` / `⌘ ⌥ F` | `Ctrl + F` / `Ctrl + H` |
+| 윗줄 / 아랫줄에 커서 추가 | `⌘ ⌥ ↑` / `⌘ ⌥ ↓` | `Ctrl + Alt + ↑` / `Ctrl + Alt + ↓` |
+| 같은 단어 다음 항목 선택 | `⌘ D` | `Ctrl + D` |
 
 ## 설치
 
@@ -199,14 +226,14 @@ Node.js 22 이상, pnpm 9.15(`corepack enable`), Docker와 Compose가 필요합�
 
 ```sh
 pnpm install
-pnpm services:up      # 개발용 로컬 데이터베이스 및 Valkey 8 실행
+pnpm services:up      # 개발용 MongoDB 8과 Valkey 8 실행
 pnpm dev              # 웹 :5173, API :3001, collab :3002
 pnpm check            # Biome, TypeScript 타입 검사, Vitest, 라이선스 검사
 pnpm test:e2e         # Playwright. 먼저 pnpm --filter @gachipad/web exec playwright install chromium 실행
 pnpm services:down
 ```
 
-저장소는 pnpm과 Turborepo 기반 모노레포(`apps/web`, `apps/api`, `apps/collab`, `packages/*`)이며 구조는 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)에 정리되어 있습니다. 프로젝트 기여는 언제나 환영합니다. [CONTRIBUTING.md](CONTRIBUTING.md)를 확인해 주세요.
+저장소는 pnpm과 Turborepo 기반 모노레포(`apps/web`, `apps/api`, `apps/collab`, `packages/*`)이며 구조는 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)에 정리되어 있습니다. 위 스크린샷은 `apps/web/e2e/readme-shots.spec.ts`로 생성합니다. 프로젝트 기여는 언제나 환영합니다. [CONTRIBUTING.md](CONTRIBUTING.md)를 확인해 주세요.
 
 ## 문서
 
@@ -219,7 +246,7 @@ pnpm services:down
 
 ## 라이선스
 
-[MIT 라이선스](LICENSE)로 배포합니다. 사용한 라이브러리, 글꼴, 베이스 이미지는 [서드파티 고지](THIRD_PARTY_NOTICES.md)를 보십시오. 공식 이미지(PostgreSQL, MongoDB, Valkey, Caddy, Node)는 데이터베이스 및 인프라 구성에 수정 없이 사용됩니다.
+[MIT 라이선스](LICENSE)로 배포합니다. 사용한 라이브러리, 글꼴, 베이스 이미지는 [서드파티 고지](THIRD_PARTY_NOTICES.md)를 보십시오. MongoDB Community Server(SSPL)는 수정 없이 선택적 번들 데이터베이스로 사용되며, 이 저장소의 일부가 아닙니다. 오프라인 번들에는 수정되지 않은 공식 이미지가 포함되어 있습니다. 공식 이미지(PostgreSQL, MongoDB, Valkey, Caddy, Node)는 데이터베이스 및 인프라 구성에 수정 없이 사용됩니다.
 
 ## 기여자
 
