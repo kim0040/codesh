@@ -19,7 +19,7 @@
     "@fastify/type-provider-zod": "1.0.1",
     "fastify": "5.12.7",
     "fflate": "0.8.3",
-    "ioredis": "6.0.0",
+    "ioredis": "5.11.1",
     "ldapts": "9.2.0",
     "mongodb": "7.7.0",
     "openid-client": "6.8.8",
