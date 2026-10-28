@@ -9,11 +9,14 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
 . ./lib.sh
+declare -F assert_no_database_migration >/dev/null || die 'lib.sh is older than this script'
+assert_no_database_migration
 need_docker
 install_lock
 trap install_unlock EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+assert_no_database_migration
 
 database_backup "${1:-./backups}"

@@ -25,6 +25,7 @@ trap '' PIPE
 umask 077
 cd "$(dirname "$0")"
 . ./lib.sh
+declare -F assert_no_database_migration >/dev/null || die 'lib.sh is older than this script'
 
 STATE=state
 LOG="$STATE/update.log"
@@ -670,6 +671,10 @@ main() {
     shift
   done
   MODE="$mode"
+  case "$mode:$DRY" in
+    check:* | disable-auto:* | enable-auto:1) ;;
+    *) assert_no_database_migration ;;
+  esac
 
   mkdir -p "$STATE" && chmod 755 "$STATE"
   install_lock
@@ -697,12 +702,8 @@ main() {
     disable-auto) disable_auto; return ;;
   esac
 
-  if [ -e "$MARKER" ]; then
+  if [ "$mode" != check ] && { [ -e "$MARKER" ] || [ -L "$MARKER" ]; }; then
     RECORDED=1
-    if grep -qx 'database migration' "$MARKER"; then
-      migration_recovery_hint ""
-      die "unfinished database migration in $MARKER; follow the snapshot recovery commands above"
-    fi
     die "unfinished transaction in $MARKER; keep rollback and backups, recover manually per OPERATIONS 15.7 before removing the marker"
   fi
 

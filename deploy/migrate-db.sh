@@ -6,6 +6,7 @@ umask 077
 trap '' PIPE
 cd "$(dirname "$0")"
 . ./lib.sh
+declare -F assert_no_database_migration >/dev/null || die 'lib.sh is older than this script'
 
 TO=""
 TARGET_URL="${DATABASE_URL:-}"
@@ -101,6 +102,15 @@ migration_logged_run() {
   return "$status"
 }
 
+# Publish the next phase before its first side effect. An interrupted write leaves the
+# previous (conservative) phase intact and a named temporary file for manual cleanup.
+migration_phase() {
+  printf 'database migration\nsnapshot=%s\nphase=%s\nsource=%s\ndestination=%s\nvolume=%s\nrun=%s\n' \
+    "$STAGE" "$1" "$SOURCE" "$TO" "$TARGET_VOLUME" "$RUN_ID" >state/transaction.tmp
+  sync state/transaction.tmp 2>/dev/null || sync
+  mv state/transaction.tmp state/transaction
+}
+
 migration_cleanup() {
   trap '' HUP INT TERM PIPE
   local status="$1" recovered=1 service identity remaining
@@ -191,7 +201,7 @@ migration_cleanup() {
   fi
   if [ -n "$STAGE" ] && [ "$recovered" = 1 ]; then
     rm -rf "$STAGE"
-    rm -f .env.migrate-next .env.migrate-recovery state/database-kind.tmp state/transaction
+    rm -f .env.migrate-next .env.migrate-recovery state/database-kind.tmp state/transaction.tmp state/transaction
   fi
   install_unlock || true
   exit "$status"
@@ -200,7 +210,7 @@ trap 'migration_cleanup "$?"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-for tool in curl tee gzip tar openssl df awk sed mktemp cp mv chmod rm cat grep head tail dirname timeout; do
+for tool in curl tee gzip tar openssl df awk sed mktemp cp mv chmod rm cat grep head tail dirname timeout sync; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool missing: $tool"
 done
 tee -p </dev/null >/dev/null 2>&1 || die 'tee with -p support is required for migration logging'
@@ -218,10 +228,12 @@ SOURCE="$(database_kind)"
 SOURCE_URL="$(env_get DATABASE_URL "$(env_get GACHIPAD_DATABASE_URL)")"
 [ -n "$SOURCE_URL" ] || die 'source database URL is missing; run ./generate-secrets.sh first'
 
-if [ -e state/transaction ]; then
-  migration_recovery_hint ""
+if [ -e state/transaction ] || [ -L state/transaction ]; then
+  if grep -qx 'database migration' state/transaction 2>/dev/null; then migration_recovery_hint ""
+  else echo 'migrate-db: inspect the unfinished transaction and recover manually per OPERATIONS 15.7; preserve rollback and backups.'; fi
   die 'unfinished transaction exists; recover it before migrating'
 fi
+assert_no_database_migration
 marker="$(cat state/database-kind 2>/dev/null || true)"
 [ -z "$marker" ] || [ "$marker" = "$SOURCE" ] || die 'saved backend disagrees with state/database-kind; recover the configuration first'
 if [ "$SOURCE" = external ] && [ "$TO" = external ]; then
@@ -239,10 +251,12 @@ fi
 
 # Generate the target profile and secrets in a private staging directory. Live .env stays intact.
 STAGE="$(mktemp -d .env.migrate-db.XXXXXX)"
+# Record the destination identity and phase before copying the private configuration.
+if [ "$TO" != external ]; then TARGET_VOLUME="$(database_project)_$(database_volume_suffix "$TO")"; fi
+migration_phase preflight
 cp -p .env "$STAGE/original.env"
 [ ! -f state/database-kind ] || cp -p state/database-kind "$STAGE/original.kind"
 CONFIG_SNAPSHOT_READY=1
-printf 'database migration\nsnapshot=%s\n' "$STAGE" >state/transaction
 cp generate-secrets.sh .env.example "$STAGE/"
 cp -p .env "$STAGE/.env"
 (
@@ -258,7 +272,6 @@ TARGET_CONNECTION="$(cd "$STAGE" && env_get DATABASE_URL "$(env_get GACHIPAD_DAT
 # A successful list distinguishes absence from an inspect/daemon error. A unique label
 # plus creation identity is required before cleanup may remove any volume.
 if [ "$TO" != external ]; then
-  TARGET_VOLUME="$(database_project)_$(database_volume_suffix "$TO")"
   volumes="$(docker volume ls -q)" || die 'cannot list destination volumes; refusing migration'
   if grep -qxF "$TARGET_VOLUME" <<<"$volumes"; then
     docker volume inspect "$TARGET_VOLUME" >/dev/null || die 'cannot inspect destination volume; refusing migration'
@@ -395,6 +408,7 @@ if [ -n "$TARGET_VOLUME" ]; then
       if (s.bavail * s.bsize < BigInt(process.env.GACHIPAD_REQUIRED_BYTES)) process.exit(1);
     ' || die 'destination filesystem needs source size plus 20 percent (at least 64 MiB extra)'
 fi
+migration_phase backup
 STOPPED=1
 stop_writes || die 'writers did not stop cleanly; migration cancelled'
 # A killed last writer can leave WAL sidecars; fold them into the stopped source first.
@@ -440,6 +454,7 @@ esac
 echo "migrate-db: backing up quiescent $SOURCE before copying to $TO."
 database_backup ./backups || die 'source backup failed; migration cancelled'
 
+migration_phase copy
 echo "migrate-db: copying offline; records expiring within $WINDOW minutes are skipped; deadline $((WINDOW - 5)) minutes."
 ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-copy"
 COPY_STARTED=1
@@ -461,6 +476,7 @@ if [ "$copy_status" != 0 ]; then
 fi
 
 ACTIVE_CONTAINER=""
+migration_phase switch
 # Publish the target env atomically and marker under the same install lock; EXIT restores both.
 cp -p "$STAGE/.env" .env.migrate-next
 mv .env.migrate-next .env
@@ -468,6 +484,7 @@ record_database_backend
 database_start 120
 docker compose up -d --pull never --wait --wait-timeout 120 api collab
 wait_api 120
+migration_phase live
 INGRESS_OPENED=1
 docker compose up -d --pull never
 wait_healthy 120

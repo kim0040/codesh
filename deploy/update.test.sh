@@ -239,8 +239,17 @@ ok "1.0.2 with a wrong checksum refused; no backup, no pull, .env unchanged"
 step "happy path 1.0.0 -> 1.0.1"
 # A fixed-file-list legacy updater can leave the new command absent until this update.
 rm -f "$I/migrate-db.sh"
+# Insert assertions after lib loading without replacing the real backup implementation.
+python3 - "$I/backup.sh" <<'BACKUP_PROBE'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text().replace('. ./lib.sh\n', '. ./lib.sh\n' + 'grep -qx "FROM=1.0.0" state/transaction || exit 91\ngrep -qx "PHASE=prepared" state/transaction || exit 92\n[ "$(cat state/install.lock.d/owner)" = "$GACHIPAD_LOCK_PID" ] || exit 93\n[ "$GACHIPAD_LOCK_PID" != "$$" ] || exit 94\necho inherited-update-backup >>"$DOCKER_CALLS"\n', 1)
+p.write_text(s)
+BACKUP_PROBE
 : >"$DOCKER_CALLS"
 run ./update.sh --version 1.0.1 --yes || fail "update failed"
+grep -qx inherited-update-backup "$DOCKER_CALLS" || fail "real update backup child path not exercised"
 [ "$(envv GACHIPAD_VERSION)" = 1.0.1 ] || fail "GACHIPAD_VERSION not 1.0.1"
 [ "$(envv NEW_IN_1_0_1)" = yes ] || fail "new setting not added"
 [ "$(cat "$I/VERSION")" = 1.0.1 ] || fail "files not installed"
@@ -654,7 +663,7 @@ done
 ok "setsid process-group INT/HUP/TERM preserve tee, DB recovery and lock cleanup; repeated signals ignored"
 
 step "an interrupted transaction refuses rerun without replacing snapshot or status"
-printf 'target=1.1.0 phase=installed\n' >"$I/state/transaction"
+printf 'FROM=1.0.0\nTARGET=1.1.0\nPHASE=installed\nBACKUP=backups/fixture.archive.gz\n' >"$I/state/transaction"
 cp "$I/state/update.json" "$F/status-before"
 sha256sum "$I/rollback/.env" >"$F/snapshot-before"
 : >"$DOCKER_CALLS"
@@ -665,6 +674,15 @@ sha256sum -c "$F/snapshot-before" >/dev/null || fail "unfinished snapshot overwr
 grep -q 'stop\|pull' "$DOCKER_CALLS" && fail "unfinished transaction mutated stack"
 rm "$I/state/transaction"
 ok "unfinished marker blocks rerun and preserves previous snapshot and status"
+
+step "migration marker keeps help/check/scheduler controls available"
+printf 'database migration\n' >"$I/state/transaction"
+run ./update.sh --help || fail "migration blocks help"
+run ./update.sh --check || fail "migration blocks check"
+GACHIPAD_INIT=systemd GACHIPAD_SYSTEMD_DIR="$F/systemd" run ./update.sh --disable-auto || fail "migration blocks disable-auto"
+GACHIPAD_INIT=systemd GACHIPAD_SYSTEMD_DIR="$F/systemd" run ./update.sh --enable-auto --dry-run || fail "migration blocks scheduler dry-run"
+rm "$I/state/transaction"
+ok "migration permits help/check/disable-auto/enable-auto dry-run"
 
 step "migration marker gives snapshot recovery rather than update rollback instructions"
 mkdir "$I/.env.migrate-db.recovery"

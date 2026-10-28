@@ -8,6 +8,8 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
 . ./lib.sh
+declare -F assert_no_database_migration >/dev/null || die 'lib.sh is older than this script'
+assert_no_database_migration
 
 DB_OPTION=""
 DB_URL_OPTION=""
@@ -164,6 +166,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 install_lock
+assert_no_database_migration
 
 # legacy codesh name (1.0.x); remove in 2.0
 # A 1.0.x installation keeps its data in codesh_* volumes. A folder without its .env would start an
