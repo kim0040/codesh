@@ -110,21 +110,78 @@ database_volume_nonempty() {
 
 # A migration snapshot is different from update.sh's rollback directory. Never delete the
 # transaction until the saved backend is healthy; a hard crash can interrupt the env/marker pair.
+assert_no_database_migration() {
+  if [ -e state/transaction ] && grep -qx 'database migration' state/transaction; then
+    echo "$(basename "$0"): unfinished database migration in state/transaction; follow the migration recovery recipe below" >&2
+    migration_recovery_hint "" >&2
+    exit 1
+  fi
+}
+
 migration_recovery_hint() {
   local stage="${1:-$(sed -n 's/^snapshot=//p' state/transaction 2>/dev/null | head -n1)}"
-  echo 'migrate-db: first clear shell overrides: unset DATABASE_URL GACHIPAD_DB COMPOSE_PROFILES GACHIPAD_DATABASE_URL'
-  echo 'migrate-db: keep writers stopped: docker compose stop caddy api collab'
+  local phase source target volume run
+  phase="$(sed -n 's/^phase=//p' state/transaction 2>/dev/null | head -n1)"
+  source="$(sed -n 's/^source=//p' state/transaction 2>/dev/null | head -n1)"
+  target="$(sed -n 's/^destination=//p' state/transaction 2>/dev/null | head -n1)"
+  volume="$(sed -n 's/^volume=//p' state/transaction 2>/dev/null | head -n1)"
+  run="$(sed -n 's/^run=//p' state/transaction 2>/dev/null | head -n1)"
+  echo 'migrate-db: first verify the migration process has exited; clear shell overrides: unset DATABASE_URL GACHIPAD_DB COMPOSE_PROFILES GACHIPAD_DATABASE_URL'
+  if [[ "$run" =~ ^[a-f0-9]{32}$ ]]; then
+    printf 'migrate-db: remove any surviving one-off containers before restarting writers: docker rm -f'
+    printf ' gachipad-migrate-%s-%s' "$run" image "$run" preflight "$run" checkpoint "$run" users "$run" copy
+    printf '\n'
+  fi
+  case "$phase" in
+    preflight) echo 'migrate-db: preflight did not stop writers or change the live configuration; no writer stop, configuration restore or backend restart is needed.' ;;
+    *) echo 'migrate-db: keep writers stopped: docker compose stop caddy api collab' ;;
+  esac
   if [[ "$stage" =~ ^\.env\.migrate-db\.[A-Za-z0-9]+$ ]] && [ -f "$stage/original.env" ]; then
-    printf 'migrate-db: restore configuration: cp -p %q/original.env .env\n' "$stage"
-    if [ -f "$stage/original.kind" ]; then
-      printf 'migrate-db: restore marker: cp -p %q/original.kind state/database-kind\n' "$stage"
-    else echo 'migrate-db: if there was no marker before: rm -f state/database-kind'; fi
-    echo 'migrate-db: restart the saved backend and check shares/uploads: docker compose up -d --pull never --wait'
-    printf 'migrate-db: only after recovery succeeds, remove the snapshot and the transaction marker: rm -rf -- %q state/transaction\n' "$stage"
+    if [ "$phase" != preflight ]; then
+      case "$target" in
+        postgres) printf 'migrate-db: stop and remove the destination containers: docker compose --env-file %q/.env rm -sf postgres\n' "$stage" ;;
+        mongodb) printf 'migrate-db: stop and remove the destination containers and anonymous volumes: docker compose --env-file %q/.env rm -sfv mongo-users mongo\n' "$stage" ;;
+      esac
+      echo 'migrate-db: inspect docker compose ps -a and stop any surviving backup one-off before restarting writers.'
+      case "$phase" in
+        backup | copy) echo 'migrate-db: live configuration and backend marker are unchanged; keep the saved source configuration.' ;;
+        *)
+          printf 'migrate-db: restore configuration: cp -p %q/original.env .env\n' "$stage"
+          if [ -f "$stage/original.kind" ]; then
+            printf 'migrate-db: restore marker: cp -p %q/original.kind state/database-kind\n' "$stage"
+          else echo 'migrate-db: if there was no marker before: rm -f state/database-kind'; fi
+          ;;
+      esac
+      echo 'migrate-db: restart the saved backend and check shares/uploads: docker compose up -d --pull never --wait'
+    fi
+    case "$phase" in
+      preflight) echo 'migrate-db: destination was only probed; inspect any newly created empty destination volume before removing it.' ;;
+      backup) echo 'migrate-db: destination startup may have initialized an empty volume; inspect it before retrying.' ;;
+      copy) echo 'migrate-db: destination may hold a partial copy; inspect and clear only destination data before retrying.' ;;
+      *) echo 'migrate-db: destination may have accepted writes; retain and reconcile those writes before retrying or removing data.' ;;
+    esac
+    if [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+      printf 'migrate-db: destination volume to inspect (never remove the source volume): %s\n' "$volume"
+    fi
+    if [ "$phase" != preflight ]; then
+      case "$target" in
+        sqlite) [ "$phase" = backup ] || echo 'migrate-db: SQLite destination files: /data/gachipad.db, /data/gachipad.db-wal and /data/gachipad.db-shm in the shared gachipad-data volume; inspect with writers stopped; preserve other files.' ;;
+        external) printf 'migrate-db: inspect the external destination selected in %q/.env with its server tools; keep credentials private.\n' "$stage" ;;
+      esac
+    fi
+    if [ "$phase" != preflight ]; then
+      echo 'migrate-db: after backup processes exit, inspect/remove only interrupted backups/.backup.* files; preserve completed archives.'
+      if [ "$source" = sqlite ]; then
+        echo 'migrate-db: inspect interrupted .gachipad-backup-* directories beside the source SQLite file; preserve the source database and its -wal/-shm files.'
+      fi
+    fi
+    printf 'migrate-db: only after recovery succeeds, remove the snapshot and temporary files, then the transaction marker: rm -rf -- %q && rm -f .env.migrate-next .env.migrate-recovery state/database-kind.tmp state/transaction.tmp state/transaction\n' "$stage"
+  elif [ "$phase" = preflight ]; then
+    echo 'migrate-db: snapshot unavailable; preflight left the live configuration untouched. Inspect retained staging files and any empty destination volume before clearing state/transaction.'
   else
     echo 'migrate-db: locate the private .env.migrate-db.*/original.env snapshot; restore it and its original.kind (or remove the marker if originally absent), restart the saved backend and check shares/uploads before removing the snapshot and state/transaction.'
   fi
-  echo 'migrate-db: inspect any destination separately; retained data may include writes accepted before rollback. Verify stale lock ownership before removing state/install.lock.d.'
+  echo 'migrate-db: verify stale lock ownership before removing state/install.lock.d.'
 }
 
 database_migration_hint() {

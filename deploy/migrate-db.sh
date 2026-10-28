@@ -101,6 +101,14 @@ migration_logged_run() {
   return "$status"
 }
 
+# Publish the next phase before its first side effect. An interrupted write leaves the
+# previous (conservative) phase intact and a named temporary file for manual cleanup.
+migration_phase() {
+  printf 'database migration\nsnapshot=%s\nphase=%s\nsource=%s\ndestination=%s\nvolume=%s\nrun=%s\n' \
+    "$STAGE" "$1" "$SOURCE" "$TO" "$TARGET_VOLUME" "$RUN_ID" >state/transaction.tmp
+  mv state/transaction.tmp state/transaction
+}
+
 migration_cleanup() {
   trap '' HUP INT TERM PIPE
   local status="$1" recovered=1 service identity remaining
@@ -191,7 +199,7 @@ migration_cleanup() {
   fi
   if [ -n "$STAGE" ] && [ "$recovered" = 1 ]; then
     rm -rf "$STAGE"
-    rm -f .env.migrate-next .env.migrate-recovery state/database-kind.tmp state/transaction
+    rm -f .env.migrate-next .env.migrate-recovery state/database-kind.tmp state/transaction.tmp state/transaction
   fi
   install_unlock || true
   exit "$status"
@@ -242,7 +250,8 @@ STAGE="$(mktemp -d .env.migrate-db.XXXXXX)"
 cp -p .env "$STAGE/original.env"
 [ ! -f state/database-kind ] || cp -p state/database-kind "$STAGE/original.kind"
 CONFIG_SNAPSHOT_READY=1
-printf 'database migration\nsnapshot=%s\n' "$STAGE" >state/transaction
+if [ "$TO" != external ]; then TARGET_VOLUME="$(database_project)_$(database_volume_suffix "$TO")"; fi
+migration_phase preflight
 cp generate-secrets.sh .env.example "$STAGE/"
 cp -p .env "$STAGE/.env"
 (
@@ -395,6 +404,7 @@ if [ -n "$TARGET_VOLUME" ]; then
       if (s.bavail * s.bsize < BigInt(process.env.GACHIPAD_REQUIRED_BYTES)) process.exit(1);
     ' || die 'destination filesystem needs source size plus 20 percent (at least 64 MiB extra)'
 fi
+migration_phase backup
 STOPPED=1
 stop_writes || die 'writers did not stop cleanly; migration cancelled'
 # A killed last writer can leave WAL sidecars; fold them into the stopped source first.
@@ -440,6 +450,7 @@ esac
 echo "migrate-db: backing up quiescent $SOURCE before copying to $TO."
 database_backup ./backups || die 'source backup failed; migration cancelled'
 
+migration_phase copy
 echo "migrate-db: copying offline; records expiring within $WINDOW minutes are skipped; deadline $((WINDOW - 5)) minutes."
 ACTIVE_CONTAINER="gachipad-migrate-$RUN_ID-copy"
 COPY_STARTED=1
@@ -461,6 +472,7 @@ if [ "$copy_status" != 0 ]; then
 fi
 
 ACTIVE_CONTAINER=""
+migration_phase switch
 # Publish the target env atomically and marker under the same install lock; EXIT restores both.
 cp -p "$STAGE/.env" .env.migrate-next
 mv .env.migrate-next .env
