@@ -1,6 +1,6 @@
 # Deploying gachipad
 
-One Docker host runs the whole stack (docs/ARCHITECTURE.md §1): **Caddy** (static web app, `/api`, `/collab`), **api**, **collab** (one or more), **MongoDB 8** and **Valkey 8**. Only Caddy publishes ports. Everything needed at runtime is in the images: no CDN, font service or other outside request.
+One Docker host runs the whole stack (docs/ARCHITECTURE.md §1): **Caddy** (static web app, `/api`, `/collab`), **api**, **collab** (one or more), the selected database (SQLite by default, bundled PostgreSQL 17, bundled MongoDB 8, or an external database), and **Valkey 8**. Only Caddy publishes ports. Everything needed at runtime is in the images: no CDN, font service or other outside request.
 
 ## Images
 
@@ -18,7 +18,82 @@ curl http://localhost/healthz
 
 `docker compose build` builds the images from the checkout and tags them with `GACHIPAD_VERSION`, which must equal the root `package.json` version (the Dockerfiles check); `docker compose pull` fetches the released images of that version instead. After `git pull`, build again.
 
-`.env.example` documents every variable. Secrets are random hex written by `generate-secrets.sh`; it never overwrites a value that is set. `MONGO_PASSWORD` only seeds a new volume: change it later with `mongosh`, not by editing `.env`.
+`.env.example` documents every variable. Secrets are random hex written by `generate-secrets.sh`; it never overwrites a value that is set. Always run `./generate-secrets.sh .env` after changing database passwords. `MONGO_PASSWORD` and `POSTGRES_PASSWORD` only seed a new volume: rotate the database role password inside the database server as well when changing existing credentials.
+
+## Database choices
+
+gachipad supports multiple database backends, selected during installation or configured via `.env`:
+
+- **SQLite** (default for new installs): Stored in `/data/gachipad.db` on the shared `gachipad-data` volume in WAL mode. Requires no server setup, external credentials, or extra containers. Recommended for single-host deployments. Budget at least twice the uncompressed database size as free operational disk headroom for snapshots and restores.
+- **Bundled PostgreSQL**: Runs `postgres:17-alpine` under Compose profile `postgres`. Multi-replica collab scale-out ready. Password generated automatically.
+- **Bundled MongoDB**: Runs `mongo:8.0.34` under Compose profile `mongodb`. Upgraded 1.0.x installations retain MongoDB automatically without data migration.
+- **External database**: Connect to external PostgreSQL, MySQL, MariaDB, or MongoDB via `DATABASE_URL` (`GACHIPAD_DB=external`). MySQL and MariaDB are supported as external servers only; bundled images are not provided for them.
+- **Valkey**: Required for every database choice (document locks, presence, rate limits, join codes).
+
+## Installation with --db
+
+```sh
+./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL]
+```
+
+- **Interactive detection**: On a TTY, the installer inventories local database ports (5432, 3306, 27017), running containers, installed client CLI tools, and available memory, prompting for the backend with SQLite as the recommended default.
+- **Non-interactive installs**: Default to SQLite unless `--db` or `DATABASE_URL` is passed.
+- **External database connection**: If `--db external` is selected without a URL on a TTY, a hidden input prompt asks for `DATABASE_URL`. Multiline values are rejected, and URLs are stored single-quoted in `.env` to preserve special characters (`$`, `#`, spaces).
+- **Backend guard**: Refuses switching if non-empty data volumes or a recorded marker from another backend exist (`database backend change refused; use ./migrate-db.sh to copy data and switch backends`).
+
+## Backups and restores
+
+- **Backup (`./backup.sh [dir]`)**: Default directory `./backups`. Backups are written with `0600` permissions into a `0700` directory.
+  - **SQLite**: Online `VACUUM INTO` snapshot inside the data volume, streamed directly to gzip. No live WAL lock is copied.
+  - **PostgreSQL**: `pg_dump --format=custom` wrapped in gzip.
+  - **MongoDB**: `mongodump` compressed archive.
+  - **External**: Creates no local archive. Operators must use the external database's native tools and set `GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1` before updates or maintenance.
+- **Restore (`./restore.sh <archive.gz> [--yes]`)**:
+  - Validates archive integrity and takes a safety backup of the existing database before stopping writers and replacing data.
+  - **SQLite**: Verifies SQLite 3 header and `PRAGMA integrity_check`, requires source size plus 20% (at least 64 MiB extra) disk headroom, writes to `<dest>.restore`, removes stale `-wal`/`-shm`, and atomically renames the restored file.
+  - **PostgreSQL**: Verifies archive TOC, restores into a unique temporary database (`gp_restore_*`) with `--single-transaction`, and atomically swaps live and staged databases in a single transaction on `template1`. Drops the old database only after commit. On failure, the live database is left unchanged and the safety backup path is displayed.
+  - **MongoDB**: Runs `mongorestore --drop` after dry-run validation.
+  - **External**: Local restore refuses external databases and directs operators to the external server's restore tools.
+
+## Database migration (migrate-db.sh)
+
+`migrate-db.sh` migrates data offline between any supported database backends.
+
+```sh
+./migrate-db.sh --to sqlite|postgres|mongodb|external [--window-minutes N] [--yes]
+```
+
+- **Execution flow**:
+  1. Acquires the installation lock (`state/install.lock`) and validates prerequisites.
+  2. Creates a private staging directory (`.env.migrate-db.*`) and records the transaction marker (`state/transaction`). Live `.env` stays untouched.
+  3. Preflight check (before downtime): Verifies bundle tools, destination volume emptiness, source schema, and disk space across local `/data`, `backups`, and target volume (source size plus 20%, at least 64 MiB extra).
+  4. Quiescence & downtime: Stops Caddy, API, and collab writers. Downtime begins here.
+  5. Checkpoint: If the source is SQLite, folds committed WAL pages into the main file via `PRAGMA wal_checkpoint(TRUNCATE)` and verifies absence of sidecars.
+  6. Target startup & quiescent backup: Starts the target backend and takes a quiescent backup of the source.
+  7. Offline copy: Runs the API image's `copy-db` CLI. Skips diagnostics and records expiring within `--window-minutes`. Verifies SHA-256 data digests.
+  8. Atomic activation: Swaps `.env`, updates `state/database-kind`, starts target services, verifies health, and reopens ingress.
+  9. Data retention: Previous database volumes and backups are retained for operator verification and never deleted automatically.
+- **Refusal and failure handling**:
+  - Non-empty destination: `migrate-db: destination was not modified: refused ... use an empty destination.` Clear or drop destination before retrying.
+  - Source refusal: `migrate-db: source refused ... Fix the source and retry; do not delete -wal/-shm files, which can hold committed data.`
+  - Unwritten failure: `migrate-db: destination was not modified; nothing was copied.`
+  - Partial copy: `migrate-db: destination may hold a partial copy; inspect and clear it before retrying.`
+  - Incomplete recovery: Retains staging snapshots and prints manual recovery commands.
+- **Tuning `--window-minutes`**:
+  - Window defaults to 15 minutes (or `GACHIPAD_COPY_WINDOW_MINUTES`). The copy deadline is `window - 5` minutes.
+  - Measured throughput: ~40 MB/s into PostgreSQL, 85–106 MB/s into SQLite for upload-heavy data (~4–7 MB/s for record-heavy data).
+  - Minimum window formula: `size in MB / throughput in MB/s / 60 * 2 + 5` minutes.
+- **Source stability requirement**:
+  - SQLite source paths and symlinks must remain completely unchanged and writers stopped during the copy. Renaming, moving, or relinking the source path or directories causes immediate failure (`exit 1`).
+- **One-time extraction for 1.0.1 upgrades**:
+  - Installations updated from 1.0.1 lack `migrate-db.sh` due to the older updater's whitelist. Extract it once from the verified 1.1.0 release bundle:
+    ```sh
+    sha256sum -c gachipad-deploy-1.1.0.tar.gz.sha256 && \
+    bundle_root="$(tar -tzf gachipad-deploy-1.1.0.tar.gz | cut -d / -f 1 | sort -u)" && \
+    tar -xOf gachipad-deploy-1.1.0.tar.gz "$bundle_root/migrate-db.sh" >migrate-db.sh.new && \
+    chmod 700 migrate-db.sh.new && mv migrate-db.sh.new migrate-db.sh && ./migrate-db.sh --help
+    ```
+- **Requirements**: Docker Compose 2.20 or newer is required.
 
 ## Admin configuration and access hardening
 
@@ -73,14 +148,15 @@ deploy/bundle.sh [version]        # -> deploy/dist/gachipad-<version>.tar.gz and
 BUNDLE_SOURCE=registry BUNDLE_SUFFIX=-linux-amd64 deploy/bundle.sh 1.2.3   # from the released images (release.yml)
 ```
 
-Releases attach these bundles as `gachipad-<version>-linux-amd64.tar.gz` and `-linux-arm64.tar.gz`, so building one is only needed for unreleased sources. `gachipad-deploy-<version>.tar.gz` is the same without images, for `update.sh`; with `BUNDLE_SOURCE=registry` both contain `IMAGES`, the digest of each released image. The archive includes a verified content checksum manifest and holds all images (`docker save`), `docker-compose.yml` without build sections, `.env.example`, the scripts, and `LICENSE` and `THIRD_PARTY_NOTICES.md`. `images.tar` contains the unmodified official `mongo` (SSPL), `valkey`, `caddy` and `node` base images next to the gachipad images; their licences and sources are listed in `THIRD_PARTY_NOTICES.md`. On the target host (docker + compose plugin, no internet):
+Releases attach these bundles as `gachipad-<version>-linux-amd64.tar.gz` and `-linux-arm64.tar.gz`, so building one is only needed for unreleased sources. `gachipad-deploy-<version>.tar.gz` is the same without images, for `update.sh`; with `BUNDLE_SOURCE=registry` both contain `IMAGES`, the digest of each released image. The archive includes a verified content checksum manifest and holds all images (`docker save`), `docker-compose.yml` without build sections, `.env.example`, the scripts, and `LICENSE` and `THIRD_PARTY_NOTICES.md`. `images.tar` contains the unmodified official `mongo` (SSPL), `postgres` (PostgreSQL Licence), `valkey`, `caddy` and `node` base images next to the gachipad images; their licences and sources are listed in `THIRD_PARTY_NOTICES.md`. On the target host (docker + compose plugin, no internet):
 
 ```sh
 sha256sum --ignore-missing -c SHA256SUMS       # download SHA256SUMS with the release bundle; a local .sha256 also works
 tar xzf gachipad-<version>.tar.gz && cd gachipad-<version>       # release files are named gachipad-<version>-linux-amd64 (or -arm64)
-PUBLIC_URL=http://gachipad.local ./install.sh      # loads images, writes .env with new secrets, starts, waits for /healthz
-./backup.sh                                     # mongodump -> ./backups/gachipad-<time>.archive.gz
+PUBLIC_URL=http://gachipad.local ./install.sh [--db sqlite|postgres|mongodb|external]      # loads images, writes .env with new secrets, starts, waits for /healthz
+./backup.sh                                     # database backup -> ./backups/gachipad-<time>.archive.gz
 ./restore.sh backups/gachipad-<time>.archive.gz   # stops ingress/writers, replaces DB, verifies apps, opens ingress
+./migrate-db.sh --to <backend>                   # offline migration between database backends
 ./upgrade.sh ../gachipad-<newer>.tar.gz           # checksums, load images, stop writers, backup, readiness, automatic rollback
 ```
 
@@ -101,7 +177,7 @@ sudo ./update.sh --enable-auto --at 04:00 --policy patch   # daily automatic upd
 
 It writes `state/update.json` (shown in the admin console: `./state` is mounted read-only into api) and `state/update.log`; no container gets the Docker socket. Settings: `UPDATE_REPO`, `UPDATE_CHANNEL` and `UPDATE_HEALTH_TIMEOUT` (180 s) from the environment or `.env`. The API's own release check is `UPDATE_CHECK` (on). Details, what is sent and the costs: `docs/OPERATIONS.md` §15. `deploy/update.test.sh` tests the script with fakes; `deploy/verify-update.sh` runs a real update and rollback on a docker host with a local registry.
 
-Valkey holds join codes, presence, grants, network bans and quota counters; it is not part of the Mongo backup. Keep its volume and do not flush it in production. See the operator security checklist in `docs/OPERATIONS.md`.
+Valkey holds join codes, presence, grants, network bans and quota counters; it is not part of the database backup. Keep its volume and do not flush it in production. See the operator security checklist in `docs/OPERATIONS.md`.
 
 ## Load test
 

@@ -128,13 +128,24 @@ tar xzf gachipad-<version>-linux-amd64.tar.gz && cd gachipad-<version>-linux-amd
 PUBLIC_URL=http://gachipad.local ./install.sh       # loads the images, writes .env with new secrets, starts, waits for /healthz
 ```
 
-`install.sh` checks every file of the bundle against the `SHA256SUMS` inside it before loading anything. A checksum is not a signature: compare the `.sha256` value with one you received over a trusted channel. Release files also carry build attestations (`gh attestation verify`, see [RELEASING.md](RELEASING.md)). The bundle contains the unmodified official MongoDB, Valkey, Caddy and Node images next to the gachipad images, plus `backup.sh`, `restore.sh`, `upgrade.sh` and `update.sh`.
+`install.sh` checks every file of the bundle against the `SHA256SUMS` inside it before loading anything. A checksum is not a signature: compare the `.sha256` value with one you received over a trusted channel. Release files also carry build attestations (`gh attestation verify`, see [RELEASING.md](RELEASING.md)). The bundle contains the unmodified official MongoDB, PostgreSQL, Valkey, Caddy and Node images next to the gachipad images, plus `backup.sh`, `restore.sh`, `upgrade.sh`, `update.sh` and `migrate-db.sh`.
 
 To upgrade an offline installation, copy the new bundle and its `.sha256` file next to each other and run `./upgrade.sh ../gachipad-<newer>-linux-amd64.tar.gz` (it checks the checksum, backs up the database, loads the images and keeps your `.env`).
 
 ### HTTPS
 
 `SITE_ADDRESS=:80` serves plain HTTP. If you set a host name (such as `gachipad.local`), Caddy needs a `tls` line in `deploy/tls/*.caddy`: `tls internal` for Caddy's own CA, or your certificate and key. Without it Caddy tries a public ACME CA, which fails on a network without internet. Plain HTTP exposes document content and credentials to anyone who can watch the traffic, so use HTTPS wherever the network is shared. Details and client CA trust steps: [deploy/tls/README.md](deploy/tls/README.md).
+
+### Database
+
+gachipad supports multiple database backends to fit different deployment models:
+
+- **SQLite** (default for new installs): Stored in WAL mode on a shared Docker volume. Zero setup, no extra credentials, and the lowest memory footprint.
+- **Bundled PostgreSQL**: Runs PostgreSQL 17 via Docker Compose. Multi-instance collab scale-out ready.
+- **Bundled MongoDB**: Runs MongoDB 8 via Docker Compose. Upgraded 1.0.x installations retain MongoDB automatically without data migration.
+- **External database**: Connect to external PostgreSQL, MySQL, MariaDB, or MongoDB servers by supplying `DATABASE_URL` (MySQL and MariaDB are supported as external servers only).
+
+Valkey remains mandatory for all choices. For operational trade-offs, backup/restore procedures, and offline migration details, see the [Operations guide](docs/OPERATIONS.md#9-데이터베이스-관리-및-업그레이드).
 
 Backups, scaling, monitoring and every `.env` setting are in the [Operations guide](docs/OPERATIONS.md) (Korean) and [deploy/README.md](deploy/README.md) (English).
 

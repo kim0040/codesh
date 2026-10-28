@@ -4,16 +4,37 @@
 
 ---
 
+## 목차
+
+1. [시스템 요구사항](#1-시스템-요구사항)
+2. [오프라인 번들 설치](#2-오프라인-번들-설치)
+3. [환경 변수 (.env) 설정](#3-환경-변수-env-설정)
+4. [HTTPS 및 TLS 구성](#4-https-및-tls-구성)
+5. [mDNS (gachipad.local) 옵션](#5-mdns-gachipadlocal-옵션)
+6. [Collab 인스턴스 수평 확장 (Scaling)](#6-collab-인스턴스-수평-확장-scaling)
+7. [프록시 및 네트워크 그룹 구성](#7-프록시-및-네트워크-그룹-구성)
+8. [관리 콘솔과 설정 (§10)](#8-관리-콘솔과-설정-10)
+9. [데이터베이스 관리 및 업그레이드](#9-데이터베이스-관리-및-업그레이드)
+10. [모니터링 및 메트릭](#10-모니터링-및-메트릭)
+11. [용량 목표와 부하 테스트 (Capacity)](#11-용량-목표와-부하-테스트-capacity)
+12. [CLI 도구 (gachipad CLI)](#12-cli-도구-gachipad-cli)
+13. [로그 및 문제 해결](#13-로그-및-문제-해결)
+14. [운영자 보안 점검표](#14-운영자-보안-점검표)
+15. [업데이트](#15-업데이트)
+16. [codesh에서 gachipad로 이름 변경 (1.0.x에서 업그레이드)](#16-codesh에서-gachipad로-이름-변경-10x에서-업그레이드)
+
+---
+
 ## 1. 시스템 요구사항
 
 - **운영체제**: Linux (Docker Compose 지원 환경 권장)
-- **런타임 의존성**: Docker Engine 및 Docker Compose 플러그인(`docker compose`)
+- **런타임 의존성**: Docker Engine 및 Docker Compose 플러그인 2.20 이상(`docker compose`)
 - **하드웨어 권장 사양**:
   - 최소: 2 vCPU, 4GB RAM
   - 권장: 4 vCPU, 8GB RAM (부하 테스트에 쓴 사양). 사용자 규모별 사양은 11.5를 참고하십시오.
-  - 디스크: 최소 20GB 이상 (MongoDB 데이터 볼륨 및 Docker 이미지 보관)
+  - 디스크: 최소 20GB 이상 (데이터베이스 볼륨 및 Docker 이미지 보관). SQLite 백엔드를 사용할 경우 런타임 스냅샷(`VACUUM INTO`) 및 백업 검증·복원을 위해 비압축 데이터베이스 파일 크기의 약 2배 이상의 여유 디스크 공간(운영 여유 공간)을 확보해야 합니다(압축 백업 아카이브 및 안전 백업 저장을 위한 디스크 공간은 별도로 확보해야 합니다).
 - **네트워크**:
-  - 외부 인터넷 연결 없이 오프라인 환경에서 단독 구동할 수 있습니다.
+  - 외부 인터넷 연결 없이 오프라인 환경이나 내부 네트워크 환경에서 단독 구동할 수 있습니다.
   - 런타임 중 외부 CDN, 웹 폰트, 분석 스크립트, 외부 API 호출이 발생하지 않습니다. 유일한 예외는 운영자가 끌 수 있는 업데이트 확인(15장)으로, 12시간마다 GitHub API에 GET 요청 하나를 보내고 인터넷이 없으면 조용히 실패합니다. `UPDATE_CHECK=off`이면 아무 요청도 보내지 않습니다.
   - 외부 노출 포트: Caddy 에지 프록시의 HTTP(80) 및 HTTPS(443) 포트만 외부에 공개됩니다.
 
@@ -21,7 +42,7 @@
 
 ## 2. 오프라인 번들 설치
 
-인터넷 연결이 불가능한 내부망 서버에는 사전 패키징된 오프라인 번들(`.tar.gz`)을 통해 배포합니다.
+인터넷 연결이 불가능한 내부 네트워크 서버에는 사전 패키징된 오프라인 번들(`.tar.gz`)을 통해 배포합니다.
 
 ### 2.1 번들 생성 (인터넷 가능 빌드 머신)
 Docker와 인터넷이 연결된 환경(또는 개발 박스)에서 번들 스크립트를 실행합니다.
@@ -32,20 +53,23 @@ deploy/bundle.sh [버전]
 - 직접 만들 필요 없이 [GitHub 릴리스](https://github.com/kim0040/gachipad/releases)에서 `gachipad-<버전>-linux-amd64.tar.gz`(또는 `-linux-arm64`)와 `.sha256` 파일을 받아도 됩니다. 릴리스 파일은 GitHub Actions가 만들고 빌드 출처 증명(attestation)이 붙습니다(15.8).
 - 번들 아카이브 내부에는 모든 컨테이너 이미지(`images.tar`), 설정 예시(`.env.example`), 배포 파일(`docker-compose.yml`), 관리 스크립트(`install.sh`, `backup.sh`, `restore.sh`, `upgrade.sh` 등)가 포함됩니다.
 
-### 2.2 오프라인 및 내부망 설치 절차
+### 2.2 오프라인 및 내부 네트워크 설치 절차
 생성된 번들과 `.sha256` 파일을 대상 서버로 복사하고, 체크섬을 확인한 다음 압축을 풀고 설치 스크립트를 실행합니다. 체크섬 값은 번들과 다른 신뢰할 수 있는 경로(예: 직접 전달한 메모)로 대조하십시오.
 ```sh
 sha256sum -c gachipad-<버전>.tar.gz.sha256
 tar xzf gachipad-<버전>.tar.gz
 cd gachipad-<버전>        # 릴리스 파일은 이름이 gachipad-<버전>-linux-amd64(또는 -arm64)입니다
-PUBLIC_URL=http://gachipad.local ./install.sh
+PUBLIC_URL=http://gachipad.local ./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL]
 ```
 `install.sh` 스크립트는 다음 작업을 순차적으로 수행합니다.
 1. 번들 안의 `SHA256SUMS`로 모든 파일을 검사하고, 맞지 않으면 아무것도 하지 않고 중단.
-1. `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`).
-2. `.env` 파일이 없으면 `.env.example`을 복사하고 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
-3. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성.
-4. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 시작할 때마다 일회성 서비스 `mongo-users`가 앱 전용 MongoDB 사용자 `gachipad_app`을 만들거나 비밀번호와 역할을 다시 맞춥니다.
+2. 데이터베이스 백엔드 확인: TTY 환경에서는 로컬 데이터베이스 포트(5432, 3306, 27017), 실행 중인 DB 컨테이너, 설치된 클라이언트 도구(`psql`, `mysql`/`mariadb`, `mongosh` 등), 가용 메모리를 검사하여 표시하고 대화형 선택 프롬프트(기본값: sqlite)를 제공합니다. 비대화형 환경에서는 `--db` 인자가 없으면 SQLite가 기본 선택됩니다. `DATABASE_URL` 플래그나 환경 변수가 있으면 해당 외부 데이터베이스 또는 SQLite 파일이 우선 적용됩니다.
+3. `images.tar`로부터 Docker 이미지를 로컬에 로드(`docker load`).
+4. 백엔드 가드 검사: 기존에 다른 백엔드로 생성된 비어있지 않은 데이터 볼륨이나 마커가 존재하면 데이터 복사 도구 없는 임의의 백엔드 전환을 즉시 거부하고 중단.
+5. `.env` 파일이 없으면 `.env.example`을 복사하고 선택한 백엔드(`GACHIPAD_DB`, `DATABASE_URL`) 및 전달받은 환경 변수(`PUBLIC_URL`, `HTTP_PORT` 등)를 반영.
+6. `generate-secrets.sh`를 실행하여 32자 이상의 무작위 암호화 비밀키 자동 생성 및 선택한 DB에 맞는 `COMPOSE_PROFILES` 구성.
+7. `docker compose up -d --wait`로 전체 스택 실행 및 `/healthz` 헬스체크 통과 대기 (최대 120초). 번들 MongoDB를 사용할 경우 일회성 서비스 `mongo-users`가 앱 전용 사용자 `gachipad_app`을 준비합니다.
+8. `state/database-kind`에 선택된 백엔드 마커 기록.
 
 ---
 
@@ -57,6 +81,14 @@ PUBLIC_URL=http://gachipad.local ./install.sh
 |---|---|---|
 | `GACHIPAD_VERSION` | `1.0.1` | 실행할 gachipad 릴리스(이미지 태그). `install.sh`, `upgrade.sh`, `update.sh`가 맞춰 줍니다. |
 | `GACHIPAD_REGISTRY` | `ghcr.io/kim0040` | `docker compose pull`이 이미지를 받는 곳입니다. 공개 GitHub 패키지 또는 직접 운영하는 미러를 지정합니다. 오프라인 번들은 번들의 값으로 맞춥니다. |
+| `GACHIPAD_DB` | `sqlite` | 데이터베이스 백엔드 선택 (`sqlite`, `postgres`, `mongodb`, `external`). 신규 설치 기본값은 `sqlite`입니다. |
+| `GACHIPAD_DATABASE_URL` | 자동 파생 | 번들 PostgreSQL, MongoDB 또는 기본 SQLite의 내부 연결 URL입니다. `generate-secrets.sh`가 자동 설정하므로 수동 편집하지 않습니다. |
+| `DATABASE_URL` | 비어 있음 | 외부 PostgreSQL, MySQL/MariaDB, MongoDB 서버 연결 URL 또는 명시적 SQLite 파일 경로입니다. |
+| `POSTGRES_PASSWORD` | 자동 생성 | 번들 PostgreSQL 17의 `gachipad_app` 사용자 비밀번호입니다. `GACHIPAD_DB=postgres`일 때 생성됩니다. |
+| `POSTGRES_DATABASE` | `gachipad` | 번들 PostgreSQL 데이터베이스 이름입니다. |
+| `POSTGRES_USER` | `gachipad_app` | 번들 PostgreSQL 사용자 이름입니다. |
+| `GACHIPAD_EXTERNAL_BACKUP_CONFIRMED` | 비어 있음 | 외부 데이터베이스 사용 시 외부 서버 백업을 수행했음을 확인하는 플래그입니다(`1`로 설정). |
+| `GACHIPAD_COPY_WINDOW_MINUTES` | `15` | `migrate-db.sh` 및 `copy-db`가 사용하는 오프라인 복사 시간 창(분 단위 15~1440)입니다. |
 | `UPDATE_CHECK` | `on` | 새 릴리스 확인(15장). `off`이면 외부로 아무 요청도 보내지 않습니다. |
 | `UPDATE_REPO` | `kim0040/gachipad` | 릴리스를 확인할 GitHub 저장소(`소유자/이름`)입니다. |
 | `UPDATE_CHANNEL` | `stable` | `prerelease`로 바꾸면 릴리스 후보(`1.2.0-rc.1` 등)도 알려 줍니다. |
@@ -225,25 +257,209 @@ docker compose up -d --scale collab=3
 
 ---
 
-## 9. 백업, 복원 및 업그레이드
+## 9. 데이터베이스 관리 및 업그레이드
 
-### 9.1 데이터베이스 백업
+gachipad는 SQLite, 번들 PostgreSQL, 번들 MongoDB 및 외부 데이터베이스 서버(PostgreSQL, MySQL/MariaDB, MongoDB)를 지원합니다. Valkey는 데이터베이스 백엔드 선택과 무관하게 실시간 협업 상태, 세션, 락 관리를 위해 항상 필수로 구동됩니다.
+
+### 9.1 데이터베이스 백엔드 선택 (옵션별 비교)
+
+환경의 인프라 규모와 요구사항에 따라 적합한 백엔드를 선택합니다.
+
+| 백엔드 | 운영 노력 | 백업 방식 | Collab 인스턴스 확장 | 리소스 사용량 | 권장 시점 |
+|---|---|---|---|---|---|
+| **SQLite** (신규 기본값) | 가장 낮음 (별도 서버 프로세스 및 자격 증명 없음, 파일 기반) | `backup.sh`: `VACUUM INTO` 온라인 스냅샷 (`gachipad-data` 볼륨 내부 임시 생성 후 압축), live WAL 잠금 없음 | 단일 호스트 (공유 볼륨 내 복제본 간 공유, 다중 호스트 불가) | 매우 낮음 (별도 DB 컨테이너 없음, 메모리 오버헤드 최소) | 신규 설치 기본값, 단일 서버 배포, 설정 간소화 및 최소 자원 소모 환경 |
+| **번들 PostgreSQL** | 낮음 (Compose `postgres` 프로필로 `postgres:17-alpine` 자동 구동) | `backup.sh`: `pg_dump --format=custom` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 중간 (수백 MB 수준의 메모리 점유) | 복수 협업 인스턴스 확장이 필요하고 표준 관계형 데이터베이스를 선호하는 단일 호스트 환경 |
+| **번들 MongoDB** | 중간 (Compose `mongodb` 프로필로 `mongo:8.0.34` 및 `mongo-users` 구동) | `backup.sh`: `mongodump` 압축 아카이브 | 다중 인스턴스 확장 가능 (`COLLAB_REPLICAS` 증가 지원) | 높음 (WiredTiger 캐시 기본 2GB + 컨테이너 메모리) | 1.0.x 기존 설치를 데이터 마이그레이션 없이 그대로 유지하며 업그레이드하는 환경 |
+| **외부 PostgreSQL** | 운영자 관리 (별도 전용 DB 인프라 운영 및 모니터링) | 운영자 자체 백업 도구 (`pg_dump` 등). gachipad 로컬 백업 스크립트는 로컬 아카이브를 만들지 않음 | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 (외부 서버 리소스 활용) | 고가용성 PostgreSQL 클러스터 및 자체 백업 체계가 이미 갖춰진 엔터프라이즈 환경 |
+| **외부 MySQL/MariaDB** | 운영자 관리 (번들 서비스 없음, 외부 연결 전용) | 운영자 자체 백업 도구 (`mysqldump`, logical backup 등) | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 | 기존에 운영 중인 중앙 MySQL 또는 MariaDB 인프라를 연동하고자 하는 환경 |
+| **외부 MongoDB** | 운영자 관리 (외부 MongoDB Replica Set 인프라 관리) | 운영자 자체 백업 도구 (`mongodump` 등) | 다중 호스트 및 다중 인스턴스 확장 가능 | gachipad 호스트 리소스 사용 없음 | 별도의 고가용성 MongoDB 클러스터(Replica Set)를 이미 운영 중인 환경 |
+
+### 9.2 설치 시 데이터베이스 지정 (install.sh)
+
+`install.sh` 실행 시 `--db` 옵션이나 `DATABASE_URL`을 지정하여 백엔드를 선택할 수 있습니다.
+```sh
+./install.sh [--db sqlite|postgres|mongodb|external] [--database-url URL]
+```
+
+- **대화형 환경(TTY) 감지**:
+  - 터미널에서 대화형으로 설치를 실행하면 로컬 포트(5432, 3306, 27017), 실행 중인 DB 컨테이너, 설치된 클라이언트 도구(`psql`, `mysql`/`mariadb`, `mongosh`), 사용 가능한 메모리를 자동으로 검사하여 한 줄 요약으로 출력합니다(어떠한 자격 증명도 임의로 대입하지 않습니다).
+  - 설치 스크립트는 설정 및 메모리 비용이 가장 낮고 별도 자격 증명이 필요 없는 SQLite를 기본값으로 추천하며, 프롬프트(`Database [sqlite/postgres/mongodb/external] (default sqlite):`)를 통해 원하는 백엔드를 선택받습니다.
+- **비대화형 실행**:
+  - `--db` 플래그를 생략하면 자동으로 SQLite(`GACHIPAD_DB=sqlite`)가 선택됩니다.
+- **외부 데이터베이스(`external`) 연결**:
+  - `DATABASE_URL` 플래그 또는 환경 변수가 제공되면 `--db` 설정보다 항상 우선합니다.
+  - 지원되는 URL 스킴: `sqlite:`, `postgres://`, `postgresql://`, `mysql://`, `mariadb://`, `mongodb://`, `mongodb+srv://`.
+  - 대화형 실행 시 `external`을 선택하고 URL을 전달하지 않으면 숨김 입력 프롬프트(`DATABASE_URL (hidden):`)로 안전하게 입력받습니다. 비대화형 환경에서 URL 없이 `external`을 지정하면 `GACHIPAD_DB=external requires DATABASE_URL` 오류와 함께 종료됩니다.
+  - 입력된 URL은 `.env` 파일에 작은따옴표 이스케이프(`'...'`) 형태로 저장되어 특수 문자(`$`, `#`, 공백 등)가 원본 그대로 보존되며 설치 과정 중 화면에 노출되지 않습니다.
+- **백엔드 변경 보호 가드**:
+  - 설치 스크립트는 `.env`를 갱신하기 전에 기존 볼륨을 검사합니다. 비어있지 않은 기존 데이터 볼륨(예: `gachipad_postgres-data`, `gachipad_mongo-data`, `gachipad_gachipad-data`)이나 기존 백엔드 마커(`state/database-kind`)가 감지되면, 임의의 백엔드 전환을 방지하기 위해 다음 메시지를 출력하고 즉시 거부합니다.
+    `install.sh: database backend change refused (<old> -> <new>); use ./migrate-db.sh to copy data and switch backends.`
+
+### 9.3 데이터베이스 비밀번호 변경 및 비밀값 갱신
+
+데이터베이스 접속 비밀번호나 인증 정보를 변경한 경우 반드시 비밀값 생성 스크립트를 실행하여 `.env`와 파생 설정을 갱신해야 합니다.
+```sh
+./generate-secrets.sh .env
+```
+- **PostgreSQL 주의사항**:
+  - `POSTGRES_PASSWORD` 환경 변수는 신규 볼륨이 처음 생성될 때 초기 비밀번호를 시딩하는 용도로만 사용됩니다.
+  - 이미 데이터가 생성된 PostgreSQL 볼륨에서는 `.env`의 `POSTGRES_PASSWORD`를 변경하더라도 내부 데이터베이스 롤(`gachipad_app`)의 실제 비밀번호가 자동으로 회전되지 않습니다.
+  - 따라서 비밀번호 변경 시 `psql`을 통해 PostgreSQL 컨테이너 내부에서 사용자 비밀번호를 직접 변경(`ALTER USER gachipad_app WITH PASSWORD '...';`)한 뒤, `.env`를 동일하게 수정하고 `./generate-secrets.sh .env`를 실행해야 합니다.
+
+### 9.4 백엔드별 백업 (backup.sh)
+
 ```sh
 ./backup.sh [저장디렉터리]
 ```
 - 기본 저장 디렉터리는 `./backups`입니다.
-- 실행 중인 MongoDB 컨테이너 내부에서 `mongodump`를 실행하여 `gachipad-<타임스탬프>.archive.gz` 아카이브 파일로 백업합니다.
-- 백업 파일은 `0600`, 새로 만드는 백업 디렉터리는 `0700`으로 생성됩니다. root 비밀번호는 컨테이너 안의 임시 설정 파일로만 전달되고 명령행 인자에 나타나지 않습니다.
-- Valkey(참여 코드, 접속자 상태, 승인·차단, 카운터)는 백업 대상에서 제외됩니다. 볼륨을 유지하고 운영 중 flush하지 마십시오.
+- 백업 파일은 `0600`, 새로 생성되는 디렉터리는 `0700` 권한으로 안전하게 작성됩니다.
+- 백엔드별 백업 동작:
+  - **SQLite**: 실행 중인 `api` 컨테이너 내에서 `node:sqlite`를 통해 데이터 볼륨(`/data`) 내부 임시 경로에 온라인 `VACUUM INTO` 스냅샷을 생성합니다. 라이브 WAL 파일에 잠금을 걸지 않고 원자적으로 일관된 스냅샷을 얻은 뒤 gzip으로 스트리밍 압축합니다. 임시 스냅샷 디렉터리는 작업 완료 후 즉시 제거됩니다.
+  - **PostgreSQL**: `postgres` 컨테이너 내부에서 `pg_dump --format=custom`을 실행하고 gzip으로 압축하여 저장합니다.
+  - **MongoDB**: `mongo` 컨테이너 내부에서 `mongodump --archive --gzip`을 실행하여 저장합니다.
+  - **외부 데이터베이스**: 외부 데이터베이스는 로컬 백업 아카이브를 생성하지 않으며, `GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1` 환경 변수가 설정되어 있지 않으면 0이 아닌 종료 코드로 다음 안내를 출력합니다.
+    `backup: DATABASE_URL uses an external database; no local backup was made. Back up the external server with its own tools before updates or restores.`
+    운영자는 업데이트나 점검 전에 반드시 해당 외부 데이터베이스 서버의 자체 백업 도구로 백업을 완료해야 합니다.
+- Valkey(참여 코드, 접속자 상태, 임시 락, 카운터)는 휘발성 데이터이므로 백업 대상에서 제외됩니다.
 
-### 9.2 백업 복원
+### 9.5 백엔드별 복원 (restore.sh)
+
 ```sh
-./restore.sh backups/gachipad-<타임스탬프>.archive.gz [--yes]
+./restore.sh <아카이브.gz> [--yes]
 ```
-- Collab 및 API 컨테이너를 일시 정지하여 진행 중인 쓰기 작업을 안전하게 플러시합니다.
-- `mongorestore --drop`을 사용하여 기존 데이터베이스를 백업 데이터로 대체한 후 서비스를 다시 시작합니다.
+- 복원 스크립트는 기존 데이터베이스 내용을 아카이브의 내용으로 완전히 교체합니다.
+- 백엔드별 복원 동작:
+  - **SQLite**:
+    1. 압축 아카이브에서 헤더를 검사하여 유효한 `SQLite format 3` 백업인지 확인하고 `PRAGMA integrity_check`를 수행합니다.
+    2. 데이터 볼륨의 여유 공간을 검사합니다(압축 해제 크기 + 20% 또는 최소 64 MiB 이상의 여유 공간 필요).
+    3. 복원 전 현재 데이터베이스의 안전 백업(`safety backup`)을 먼저 생성합니다.
+    4. 쓰기 작업(API, Collab)을 중지합니다.
+    5. 대상 데이터베이스 파일 옆에 임시 복원 파일(`<db>.restore`)을 생성하고 검증한 뒤, 기존 `-wal` 및 `-shm` 파일을 삭제하고 원자적으로 새 파일로 교체(`rename`)합니다.
+  - **PostgreSQL**:
+    1. `pg_restore --list`를 통해 전체 스트림을 검사하여 TOC(목차) 및 무결성을 사전 검증합니다.
+    2. 복원 전 라이브 데이터베이스의 안전 백업을 먼저 생성합니다.
+    3. 쓰기 작업을 중지합니다.
+    4. 고유한 임시 데이터베이스(`gp_restore_<timestamp>_<pid>`)를 생성하고 `pg_restore --single-transaction`으로 데이터를 복원합니다.
+    5. 복원이 성공하면 `template1`에 연결하여 단일 트랜잭션 내에서 라이브 데이터베이스와 임시 데이터베이스의 이름을 원자적으로 스왑합니다(`ALTER DATABASE live RENAME TO old; ALTER DATABASE stage RENAME TO live; COMMIT;`).
+    6. 스왑 트랜잭션이 성공적으로 커밋된 후에만 이전 데이터베이스(`old`)를 삭제합니다. 복원이나 스왑 중 오류가 발생하면 라이브 데이터베이스는 아무런 변경 없이 그대로 유지됩니다.
+  - **MongoDB**:
+    1. `gzip -t` 및 `mongorestore --dryRun`으로 사전 검증을 수행합니다.
+    2. 현재 데이터의 안전 백업을 생성합니다.
+    3. 쓰기 작업을 중지하고 `mongorestore --drop`을 실행하여 데이터를 복원합니다.
+  - **외부 데이터베이스**:
+    - 로컬 아카이브를 통한 복원을 거부합니다. 외부 데이터베이스는 해당 외부 서버의 자체 관리 도구를 사용하여 복원해야 합니다.
 
-### 9.3 새 버전으로 업그레이드
+### 9.6 데이터베이스 오프라인 마이그레이션 (migrate-db.sh)
+
+`migrate-db.sh`는 현재 운영 중인 백엔드에서 다른 백엔드로 데이터를 안전하게 오프라인 복사하고 전환하는 도구입니다.
+
+```sh
+./migrate-db.sh --to sqlite|postgres|mongodb|external [--window-minutes N] [--yes]
+```
+
+#### 주요 플래그 및 환경 변수
+- `--to sqlite|postgres|mongodb|external`: 대상 백엔드 (필수).
+- `--window-minutes N`: 복사 시간 창 (분 단위 15~1440, 기본값 15 또는 `GACHIPAD_COPY_WINDOW_MINUTES`).
+- `--yes`: 대화형 확인 프롬프트 생략 (비대화형 실행 시 필수).
+- `DATABASE_URL`: 대상이 `external`인 경우 연결 URL (보안을 위해 명령행 인자가 아닌 환경 변수 또는 TTY 숨김 프롬프트로 전달). 번들 대상을 선택할 때는 `unset DATABASE_URL`로 환경 변수를 해제해야 합니다.
+- `GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1`: 소스가 외부 데이터베이스인 경우, 외부 서버 백업이 완료되었음을 확인하는 환경 변수.
+
+#### 마이그레이션 단계별 동작 과정 (다운타임 안내)
+1. **사전 검사 및 락 획득**:
+   - 설치 락(`state/install.lock`)을 획득하고, 미완료 트랜잭션(`state/transaction`) 유무를 확인합니다.
+   - 필요한 호스트 도구(`tee -p`, `curl`, `gzip` 등)와 버전 일치 여부(`VERSION` == `GACHIPAD_VERSION`)를 검증합니다.
+2. **동일 백엔드 검증**:
+   - 소스와 대상이 동일한 번들 백엔드이거나 동일한 외부 URL인 경우 즉시 거부합니다.
+3. **스테이징 환경 구성**:
+   - 비공개 임시 디렉터리(`.env.migrate-db.XXXXXX`)를 생성하고, 현재 `.env`와 마커 파일(`state/database-kind`)을 백업합니다.
+   - 대상 백엔드에 필요한 비밀값과 Compose 프로필을 스테이징 디렉터리 내부에서 미리 생성합니다(라이브 `.env`는 변경되지 않음).
+4. **프리플라이트 점검 (Preflight, 소스 다운타임 전 실행)**:
+   - 번들 대상 볼륨이 이미 존재하는 경우 비어 있는지 확인하고(데이터가 있으면 거부), 새 볼륨인 경우 고유 마이그레이션 레이블을 부여하여 생성합니다.
+   - API 컨테이너 내에서 이미지 버전 및 복사 도구 스크립트의 존재를 검증합니다.
+   - 소스 스키마 버전과 크기를 측정하고, 로컬 디스크(`/data`), 백업 디스크(`backups`), 대상 볼륨 파일시스템의 여유 공간(소스 크기 + max(20%, 64 MiB))을 사전에 검증합니다.
+   - 외부 대상인 경우 실제 접속 및 테이블/컬렉션이 완전히 비어 있는지 검사합니다.
+5. **서비스 쓰기 정지 (다운타임 시작)**:
+   - 프리플라이트 통과 후 Caddy, API, Collab 컨테이너를 정상 중지(`stop_writes`)하여 진행 중인 문서 변경 사항을 안전하게 플러시합니다. **이 시점부터 복사 및 검증이 완료될 때까지 서비스 다운타임이 발생합니다.**
+6. **SQLite 소스 체크포인트**:
+   - 소스가 SQLite인 경우, 남아 있는 WAL 변경 사항을 메인 데이터베이스 파일로 안전하게 병합하기 위해 `PRAGMA wal_checkpoint(TRUNCATE)`를 실행하고 `-wal`/`-shm` 파일이 완전히 제거되었는지 확인합니다.
+7. **대상 서비스 구동 및 소스 정지 백업**:
+   - 번들 대상 서비스(PostgreSQL 또는 MongoDB)를 기동합니다.
+   - 쓰기가 정지된 소스 데이터베이스에 대해 안전 백업(`database_backup`)을 수행합니다.
+8. **오프라인 데이터 복사 (copy-db)**:
+   - API 컨테이너 내에서 `copy-db` CLI를 실행하여 데이터를 추출하고 대상에 삽입합니다.
+   - 진단 데이터 및 시간 창(`WINDOW`) 내에 만료 예정인 레코드는 건너뜁니다.
+   - 복사는 반드시 마감 시간(`WINDOW - 5`분) 이내에 완료되어야 합니다.
+   - 복사 완료 후 소스와 대상 간 SHA-256 레코드 다이제스트 일치 여부를 검증합니다.
+9. **설정 적용 및 서비스 재개 (다운타임 종료)**:
+   - 복사 검증이 성공하면 스테이징의 `.env`를 원자적으로 교체하고 `state/database-kind` 마커를 갱신합니다.
+   - 대상 데이터베이스와 API, Collab을 가동하고 헬스체크 통과를 확인한 후 Caddy 인그레스를 다시 열어 서비스를 재개합니다.
+   - 스테이징 스냅샷 및 트랜잭션 마커를 정리합니다.
+   - **소스 데이터 볼륨은 자동으로 삭제되지 않고 보존됩니다.**
+
+#### 소스 불변성 및 쓰기 정지 필수 요건
+- 복사 도구는 단일 파일 핸들과 inode를 통해 SQLite 소스 파일을 검증합니다.
+- 복사가 진행되는 동안 SQLite 소스 파일의 경로를 이동하거나 이름을 바꾸거나 심볼릭 링크를 교체해서는 안 됩니다. 경로가 변경되면 복사는 즉시 실패(`exit 1`)합니다.
+- 복사 도중 API와 Collab 등 모든 쓰기 프로세스가 반드시 정지 상태를 유지해야 합니다.
+
+#### 거부(Refusal) 및 실패(Failure) 메시지와 운영자 조치 사항
+
+| 메시지 | 원인 | 운영자 조치 |
+|---|---|---|
+| `migrate-db: destination was not modified: refused (see the Result line above); use an empty destination.` | 대상 볼륨이나 데이터베이스에 기존 데이터가 이미 존재함 | 대상 데이터베이스나 볼륨을 완전히 비우거나 새로운 빈 대상을 지정하여 재시도하십시오. 기존 데이터를 확인 없이 임의로 삭제하지 마십시오. |
+| `migrate-db: source refused (see the Result line above); nothing was copied. Fix the source and retry; do not delete -wal/-shm files, which can hold committed data.` | 소스 SQLite에 잔여 WAL 파일이 있거나, MongoDB 소스가 Primary가 아니거나 복제 지연이 발생함 | 소스 데이터베이스 상태를 확인하십시오. SQLite의 경우 커밋된 데이터가 유실될 수 있으므로 `-wal`/`-shm` 파일을 절대로 임의 삭제하지 마십시오. |
+| `migrate-db: destination was not modified; nothing was copied. Fix the cause and retry.` | 대상에 쓰기 작업이 시작되기 전에 연결 실패, 타임아웃 또는 스키마 불일치로 실패함 | 소스와 설정이 안전하게 이전 상태로 복구되었으므로, 오류 로그(`state/migrate-db.log`)를 확인하여 원인을 수정한 뒤 재시도하십시오. |
+| `migrate-db: destination may hold a partial copy; inspect and clear it before retrying. Existing destination volumes are kept.` | 데이터 복사 도중 네트워크 단절, 프로세스 종료 등으로 인해 대상에 일부 데이터가 복사됨 | 대상 데이터베이스를 수동으로 점검하고 복사된 잔여 데이터를 완전히 비운 뒤 재시도하십시오. 기존 소스 데이터는 안전하게 유지됩니다. |
+| `migrate-db: destination volume identity could not be verified; retained for manual inspection.` | 새로 생성한 대상 볼륨의 고유 식별자가 일치하지 않아 자동 삭제되지 않음 | 안전을 위해 보존된 볼륨이므로 `docker volume ls`로 상태를 수동 점검한 후 불필요 시 수동 삭제하십시오. |
+| `migrate-db: new backend may have accepted writes; destination retained. Reconcile those writes before retrying or removing any data.` | 인그레스가 열린 후 헬스체크 실패 등으로 롤백되었으며, 새 백엔드에 사용자의 쓰기가 유입되었을 가능성이 있음 | 새 백엔드에 저장된 데이터를 수동으로 대조하고 조정한 후 대상을 정리하십시오. |
+| `migrate-db: automatic recovery incomplete; configuration snapshots kept in <STAGE>.` | 자동 복구 과정에서 오류가 발생하여 원본 설정 복구가 불완전하게 끝남 (종료 코드 3) | 출력된 수동 복구 지침에 따라 `<STAGE>/original.env`를 복원하고 이전 서비스를 수동으로 재시작하십시오. |
+
+#### 복사 시간 창(--window-minutes) 튜닝 및 처리량
+
+- 기본 시간 창은 15분이며, 마감 시간은 `15 - 5 = 10분`, 만료 마진은 `15분`입니다.
+- **실측 처리량 (개발 환경 기준)**:
+  - MongoDB -> PostgreSQL: 약 40 MB/s (10분 기준 약 12 GB 업로드 데이터 또는 약 130만 개 레코드 처리 가능)
+  - MongoDB -> SQLite: 약 85 ~ 106 MB/s (10분 기준 약 25 GB 업로드 데이터 또는 약 220만 개 레코드 처리 가능)
+  - 레코드 수가 많고 업로드 크기가 작은 데이터셋의 경우 처리 속도가 약 4 ~ 7 MB/s 수준으로 낮아질 수 있습니다.
+- **시간 창 계산 공식**:
+  `최소 윈도우(분) = 데이터 크기(MB) / 처리량(MB/s) / 60 * 2 + 5`
+  네트워크 지연, 디스크 속도 및 대량의 레코드 수를 고려하여 최소 계산값의 2배 이상을 설정하는 것을 권장합니다(최대 1440분 = 24시간).
+
+#### 1.0.1 업데이터 환경에서의 migrate-db.sh 1회 수동 추출
+
+1.0.1 버전의 업데이터는 파일 배포 화이트리스트가 고정되어 있어 신규 스크립트인 `migrate-db.sh`를 자동으로 배포하지 못합니다. 1.0.1에서 1.1.0으로 업그레이드한 환경에서는 다음 명령어를 통해 1.1.0 번들 아카이브로부터 스크립트를 1회 수동 추출하여 배치해야 합니다.
+
+```sh
+sha256sum -c gachipad-deploy-1.1.0.tar.gz.sha256 && \
+bundle_root="$(tar -tzf gachipad-deploy-1.1.0.tar.gz | cut -d / -f 1 | sort -u)" && \
+tar -xOf gachipad-deploy-1.1.0.tar.gz "$bundle_root/migrate-db.sh" >migrate-db.sh.new && \
+chmod 700 migrate-db.sh.new && mv migrate-db.sh.new migrate-db.sh && ./migrate-db.sh --help
+```
+
+#### 마이그레이션 성공 후 소스 데이터 수동 정리
+
+마이그레이션이 완료된 후 새 백엔드에서 공유와 업로드 데이터가 정상 동작함을 확인했다면, 디스크 공간 확보를 위해 이전 소스 데이터 볼륨을 수동으로 삭제할 수 있습니다(사전 백업 아카이브는 계속 보관하십시오).
+
+- **구 MongoDB 소스 정리**:
+  ```sh
+  docker compose --profile mongodb rm -sfv mongo-users mongo
+  docker volume rm <프로젝트명>_mongo-data
+  ```
+- **구 PostgreSQL 소스 정리**:
+  ```sh
+  docker compose --profile postgres rm -sf postgres
+  docker volume rm <프로젝트명>_postgres-data
+  ```
+- **구 SQLite 소스 정리**:
+  API 및 Collab 컨테이너가 공유 데이터 볼륨 마운트를 해제해야 하므로 일시 중지 후 정리합니다.
+  ```sh
+  docker compose stop caddy api collab && docker compose rm -f api collab
+  docker volume rm <프로젝트명>_gachipad-data
+  docker compose up -d --pull never
+  ```
+- **구 외부 데이터베이스 정리**:
+  해당 외부 데이터베이스 서버의 자체 관리 도구를 사용하여 수동으로 데이터베이스를 정리하십시오.
+
+### 9.7 새 버전으로 업그레이드
 인터넷이 되는 서버는 `./update.sh`로 업데이트합니다(15.4). 인터넷이 없는 서버는 새 번들로 업그레이드합니다.
 ```sh
 ./upgrade.sh ../gachipad-<새버전>.tar.gz

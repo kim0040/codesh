@@ -8,22 +8,24 @@ Developer-facing contract shared by every package. When this file and the code d
 browser ──HTTP /api/*──────────▶ apps/api    (Fastify, :3001)
         ──SSE  /api/events─────▶ apps/api
         ──WS   /collab?doc=<id>▶ apps/collab (Hocuspocus, :3002)
-apps/api, apps/collab ──▶ MongoDB 8 (:27017)   persistent state
-apps/api, apps/collab ──▶ Valkey 8 (:6379)     pub/sub, presence, codes, caches
+apps/api, apps/collab ──▶ Database           persistent state (SQLite, PostgreSQL, MongoDB, MySQL/MariaDB)
+apps/api, apps/collab ──▶ Valkey 8 (:6379)   pub/sub, presence, codes, caches
 production: Caddy (:80/:443) serves apps/web/dist and proxies /api, /collab (lb_policy query doc)
 dev: Vite (:5173) proxies /api → :3001 and /collab → :3002 (ws)
 ```
 
-- One Valkey and one MongoDB. `apps/collab` can run N instances; `@hocuspocus/extension-redis` (ioredis, Valkey-compatible) keeps them in sync, and Caddy routes by `doc` query so one doc normally lives on one instance.
+- One Valkey and one database (SQLite, PostgreSQL, MongoDB, or MySQL/MariaDB). `apps/collab` can run N instances; `@hocuspocus/extension-redis` (ioredis, Valkey-compatible) keeps them in sync, and Caddy routes by `doc` query so one doc normally lives on one instance.
 - No runtime request requires the public internet. No CDN, font, analytics or external API.
 - The one exception is the update check (§15): apps/api sends one plain GET to the GitHub releases API about every 12 h. It is on by default, off with `UPDATE_CHECK=off`, never blocks startup or a request, and fails silently in 5 s without internet. Browsers never contact anything but the gachipad server.
+
+Storage layer: Persistent storage implements a single `Stores` interface (`ShareStore`, `UpdateLog`, `FileStore`, `SettingsStore`, `AuditStore`) in `packages/storage`. The backend is selected at runtime by the URL scheme of `DATABASE_URL` (`sqlite:`, `postgres:`/`postgresql:`, `mysql:`/`mariadb:`, or `mongodb:`/`mongodb+srv:`). Ephemeral collaboration state, pub/sub channels, document locks, presence, rate limits, and join codes remain on Valkey, which stays required regardless of the selected database backend.
 
 ## 2. Packages
 
 | Path | Role |
 |---|---|
 | `packages/shared` | zod schemas + TS types for every API body/response, SSE event, awareness state, constants (limits, TTLs, key names) |
-| `packages/storage` | `ShareStore`, `UpdateLog`, `FileStore`, `SettingsStore`, `AuditStore` interfaces + MongoDB implementation (official `mongodb` driver). Nothing else imports `mongodb` |
+| `packages/storage` | `ShareStore`, `UpdateLog`, `FileStore`, `SettingsStore`, `AuditStore` interfaces (`Stores`) with backends for SQLite, PostgreSQL, MongoDB, and MySQL/MariaDB. Database drivers are isolated to this package |
 | `packages/highlight` | language registry (id, name, extensions, color, loader), CodeMirror themes (2 dark, 2 light) with WCAG-checked token colors, language detection |
 | `packages/i18n` | `ko` and `en` dictionaries (same keys, typed), `t()` helper. Only these two locales |
 | `packages/ui` | design tokens (CSS variables), Tailwind v4 theme, shared React components on Radix primitives |

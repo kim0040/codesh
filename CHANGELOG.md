@@ -5,7 +5,23 @@ All notable changes to gachipad are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The section of a version is the
 text of its GitHub release (RELEASING.md).
 
-## [1.1.0] - Unreleased
+## [1.1.0] - 2026-10-28
+
+### Added
+
+- Selectable database backends: SQLite with WAL mode as the default for new installations, bundled PostgreSQL 17, bundled MongoDB 8, and external PostgreSQL, MySQL, MariaDB, or MongoDB reached via `DATABASE_URL` (MySQL and MariaDB are supported as external servers only; Valkey remains mandatory for all backends).
+- Database selection during installation: `install.sh --db sqlite|postgres|mongodb|external` (with `--database-url` or interactive prompt for external databases, and local database and client detection on TTY).
+- Backend-specific backups and restores: online consistent SQLite snapshots via `VACUUM INTO` without live WAL locks, transactional PostgreSQL backups and staged restores via `pg_dump` and `pg_restore`, MongoDB archives via `mongodump` and `mongorestore`, and safety-backup guarantees before destructive restores. External databases require operator-managed server backups and explicit acknowledgment (`GACHIPAD_EXTERNAL_BACKUP_CONFIRMED=1`).
+- Offline database migration tool: `migrate-db.sh` for safe offline transitions between backends (`--to sqlite|postgres|mongodb|external`), featuring preflight validation, quiescent source backup, transactional state recovery, and automatic rollback on failure while preserving original backend volumes and data.
+- Offline copy CLI and tunable copy window: `copy-db` CLI tool supporting cross-backend data transfer with SHA-256 integrity verification, skipping diagnostics and near-expiry records, and `migrate-db.sh --window-minutes` (or `GACHIPAD_COPY_WINDOW_MINUTES`, 15 to 1440 minutes, default 15) to scale the deadline and expiration margin for larger databases.
+- Code completion: optional keyword and word suggestions in the editor that appear after a short pause in typing (or Ctrl+Space) and are accepted with Tab or Enter, drawn from language keywords and words in the document; disabled for viewers or when turned off in Settings.
+- Language suggestion: automatic programming language detection while typing plain text, displaying a suggestion badge in the status bar with one-click acceptance or dismissal.
+- First-run tutorial and replay: a lazy-loaded step-by-step tour with a spotlight overlay guiding new users through key controls on their first editor visit, replayable anytime from Settings.
+- Guide pages: dedicated in-app documentation under `/guide` covering workflow, features, network topology, privacy/security, and FAQs, with lazy per-language copy and redirection from legacy home-page section anchors.
+- Local diagnostics export: bounded client-side diagnostics in Settings (up to 500 event groups, 256 KB, 14-day retention) and server-side diagnostics in the admin console, with manual JSON export and zero automated external telemetry.
+- Richer admin console: new dedicated panels for Overview (real-time metrics, system health badges, 24-hour activity chart), Shares (title search, pagination, Lock/Unlock and permanent Delete actions), Diagnostics (level, source, and timeframe filters, plus server bundle export), and Security (rate limits, proxy status, and sampled failed-login audit).
+- Owner-controlled participant permissions: three new access switches in Share → Access (`allowParticipantRename`, `allowParticipantFiles`, `allowParticipantLanguage`), defaulting to off and enforced on both the API and collab server.
+- Release source maps: web source maps packaged as `gachipad-web-sourcemaps-<version>.tar.gz` attached to GitHub releases alongside `scripts/symbolicate.mjs` for post-hoc symbolication, excluded from runtime container images.
 
 ### Changed
 
@@ -30,22 +46,6 @@ text of its GitHub release (RELEASING.md).
 - Source checkouts must run `./generate-secrets.sh .env` once after `git pull` before rebuilding containers.
 - Operator-provided TLS certificates require `gachipad.local` in Subject Alternative Names (SAN) before setting `SITE_ALIASES=, gachipad.local`.
 - `install.sh` refuses fresh installation when legacy `codesh_mongo-data` volume is detected without `.env` unless `GACHIPAD_NEW_INSTALL=1` is specified.
-
-## [1.0.2] - 2026-10-25
-
-### Added
-
-- Code completion: optional keyword and word suggestions in the editor that appear after a short pause in typing (or Ctrl+Space) and are accepted with Tab or Enter, drawn from language keywords and words in the document; disabled for viewers or when turned off in Settings.
-- Language suggestion: automatic programming language detection while typing plain text, displaying a suggestion badge in the status bar with one-click acceptance or dismissal.
-- First-run tutorial and replay: a lazy-loaded step-by-step tour with a spotlight overlay guiding new users through key controls on their first editor visit, replayable anytime from Settings.
-- Guide pages: dedicated in-app documentation under `/guide` covering workflow, features, network topology, privacy/security, and FAQs, with lazy per-language copy and redirection from legacy home-page section anchors.
-- Local diagnostics export: bounded client-side diagnostics in Settings (up to 500 event groups, 256 KB, 14-day retention) and server-side diagnostics in the admin console, with manual JSON export and zero automated external telemetry.
-- Richer admin console: new dedicated panels for Overview (real-time metrics, system health badges, 24-hour activity chart), Shares (title search, pagination, Lock/Unlock and permanent Delete actions), Diagnostics (level, source, and timeframe filters, plus server bundle export), and Security (rate limits, proxy status, and sampled failed-login audit).
-- Owner-controlled participant permissions: three new access switches in Share → Access (`allowParticipantRename`, `allowParticipantFiles`, `allowParticipantLanguage`), defaulting to off and enforced on both the API and collab server.
-- Release source maps: web source maps packaged as `codesh-web-sourcemaps-<version>.tar.gz` attached to GitHub releases alongside `scripts/symbolicate.mjs` for post-hoc symbolication, excluded from runtime container images.
-
-### Changed
-
 - Smooth caret and blinking: cursor glides with a 100 ms decelerating curve during local typing and navigation, with a 1.2 s ease-in-out blink cycle; caret stays solid when reduced motion is preferred.
 - App-wide motion polish: smooth scale and translate transitions on button presses, switches, tab switching, and dialogs, with motion-safe fallbacks for users preferring reduced motion.
 - Admin access hardening: optional `ADMIN_ALLOW_CIDR` restricts admin console and API access to trusted IPv4 and IPv6 networks before token verification, sessions, or database operations.
@@ -124,7 +124,6 @@ The first release: real-time code sharing for one network, with no outside servi
   edit keys in every open tab. Shares with a PIN or approval load their copy only after the server
   accepts the connection. Lab previews never keep copies.
 
-[1.1.0]: https://github.com/kim0040/gachipad/compare/v1.0.2...HEAD
-[1.0.2]: https://github.com/kim0040/codesh/compare/v1.0.1...v1.0.2
+[1.1.0]: https://github.com/kim0040/gachipad/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/kim0040/codesh/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kim0040/codesh/releases/tag/v1.0.0

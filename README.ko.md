@@ -128,13 +128,24 @@ tar xzf gachipad-<버전>-linux-amd64.tar.gz && cd gachipad-<버전>-linux-amd64
 PUBLIC_URL=http://gachipad.local ./install.sh       # 이미지 로드, 새 비밀키로 .env 작성, 시작, /healthz 대기
 ```
 
-`install.sh`는 이미지를 올리기 전에 번들 안의 `SHA256SUMS`로 모든 파일을 검사합니다. 체크섬은 서명이 아닙니다. `.sha256` 값은 번들과 다른, 신뢰할 수 있는 경로로 받은 값과 대조하십시오. 릴리스 파일에는 빌드 출처 증명도 포함되어 있습니다(`gh attestation verify`, [RELEASING.md](RELEASING.md)). 번들에는 gachipad 이미지와 함께 변경하지 않은 공식 MongoDB, Valkey, Caddy, Node 이미지와 `backup.sh`, `restore.sh`, `upgrade.sh`, `update.sh`가 들어 있습니다.
+`install.sh`는 이미지를 올리기 전에 번들 안의 `SHA256SUMS`로 모든 파일을 검사합니다. 체크섬은 서명이 아닙니다. `.sha256` 값은 번들과 다른, 신뢰할 수 있는 경로로 받은 값과 대조하십시오. 릴리스 파일에는 빌드 출처 증명도 포함되어 있습니다(`gh attestation verify`, [RELEASING.md](RELEASING.md)). 번들에는 gachipad 이미지와 함께 변경하지 않은 공식 MongoDB, PostgreSQL, Valkey, Caddy, Node 이미지와 `backup.sh`, `restore.sh`, `upgrade.sh`, `update.sh`, `migrate-db.sh`가 들어 있습니다.
 
 오프라인 설치를 업그레이드할 때는 새 번들과 `.sha256` 파일을 같은 폴더에 두고 `./upgrade.sh ../gachipad-<새 버전>-linux-amd64.tar.gz`를 실행합니다. 체크섬 검사, 데이터베이스 백업, 이미지 로드를 진행하며 기존 `.env`는 안전하게 유지됩니다.
 
 ### HTTPS
 
 `SITE_ADDRESS=:80`이면 일반 HTTP로 동작합니다. `gachipad.local` 같은 호스트 이름을 쓰려면 `deploy/tls/*.caddy`에 `tls` 설정이 필요합니다. Caddy 내장 CA를 쓰려면 `tls internal`, 직접 준비한 인증서가 있다면 인증서와 키 경로를 적어줍니다. 설정이 없으면 Caddy가 공개 ACME CA 발급을 시도하므로 인터넷이 없는 환경에서는 실패합니다. 일반 HTTP는 같은 네트워크를 볼 수 있는 사람에게 문서 내용과 인증 정보를 그대로 노출하므로, 공용 네트워크에서는 HTTPS를 권장합니다. 자세한 설정과 클라이언트 루트 CA 등록 절차는 [deploy/tls/README.md](deploy/tls/README.md)에 있습니다.
+
+### 데이터베이스
+
+gachipad는 배포 환경에 맞춰 다양한 데이터베이스 백엔드를 지원합니다.
+
+- **SQLite** (신규 설치 기본값): 공유 Docker 볼륨에 WAL 모드로 저장됩니다. 별도의 서버 자격 증명이나 프로세스가 필요 없으며 메모리 사용량이 가장 적습니다.
+- **번들 PostgreSQL**: Docker Compose로 PostgreSQL 17을 함께 구동합니다. 다중 collab 인스턴스 확장을 지원합니다.
+- **번들 MongoDB**: Docker Compose로 MongoDB 8을 함께 구동합니다. 기존 1.0.x 설치 환경을 데이터 마이그레이션 없이 그대로 승계합니다.
+- **외부 데이터베이스**: `DATABASE_URL`을 통해 외부 PostgreSQL, MySQL, MariaDB, MongoDB에 연결합니다 (MySQL과 MariaDB는 외부 서버만 지원합니다).
+
+Valkey는 모든 데이터베이스 옵션에서 실시간 협업 상태 관리를 위해 항상 필수로 실행됩니다. 백엔드별 운영 트레이드오프, 백업·복원 절차 및 오프라인 마이그레이션 방법은 [운영자 안내서](docs/OPERATIONS.md#9-데이터베이스-관리-및-업그레이드)를 참고하십시오.
 
 백업, 수평 확장, 모니터링, `.env` 설정 전체는 [운영자 안내서](docs/OPERATIONS.md)와 [deploy/README.md](deploy/README.md)(영어)에서 확인할 수 있습니다.
 
