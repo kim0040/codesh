@@ -28,7 +28,9 @@ jobs:
     timeout-minutes: 30
     services:
       mongo:
-        image: mongo:8.0.34
+        # MongoDB 8.0.34 refuses to start on the runners' Linux 6.19+ kernel (SERVER-121912, OPERATIONS
+        # 13.2); 7.0 is not affected. Return to the bundled 8.0.x once a fixed 8.0 image is published.
+        image: mongo:7.0.45
         ports: ["27017:27017"]
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' || exit 1"
@@ -73,7 +75,9 @@ jobs:
     timeout-minutes: 60
     services:
       mongo:
-        image: mongo:8.0.34
+        # MongoDB 8.0.34 refuses to start on the runners' Linux 6.19+ kernel (SERVER-121912, OPERATIONS
+        # 13.2); 7.0 is not affected. Return to the bundled 8.0.x once a fixed 8.0 image is published.
+        image: mongo:7.0.45
         ports: ["27017:27017"]
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' || exit 1"
