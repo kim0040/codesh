@@ -197,6 +197,33 @@ describe("caret in a long run of conjoining jamo", () => {
     }
   });
 
+  it("glides for a new syllable after a long cluster whose start was not found", () => {
+    const doc = leading + vowel.repeat(5000);
+    const base = EditorState.create({ doc, selection: { anchor: doc.length } });
+    // The IME replaces the composing tail and a leading jamo starts the next syllable.
+    const replaced = base.update({
+      changes: { from: doc.length - 1, to: doc.length, insert: vowel + "\u1102" },
+      selection: { anchor: doc.length + 1 },
+      userEvent: "input.type.compose",
+    });
+    expect(glides(replaced)).toBe(true);
+    // An append too long for the incremental path still finds the new syllable.
+    const insert = vowel.repeat(128) + "\u1102";
+    const appended = base.update({
+      changes: { from: doc.length, insert },
+      selection: { anchor: doc.length + insert.length },
+      userEvent: "input.type.compose",
+    });
+    expect(glides(appended)).toBe(true);
+    // Replacing within the cluster without starting a syllable still snaps.
+    const same = base.update({
+      changes: { from: doc.length - 1, to: doc.length, insert: vowel + vowel },
+      selection: { anchor: doc.length + 1 },
+      userEvent: "input.type.compose",
+    });
+    expect(glides(same)).toBe(false);
+  });
+
   it("bounds document reads across repeated composing appends to a long cluster", () => {
     let current = EditorState.create({
       doc: leading + vowel.repeat(5000),

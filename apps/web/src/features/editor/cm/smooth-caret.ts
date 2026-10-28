@@ -71,7 +71,11 @@ function hangulSyllableStep(tr: Transaction): boolean {
   const appended = mapAppendedSyllableStart(tr, oldHead, oldStart);
   if (appended !== undefined) return appended;
   const newStart = syllableStart(tr.newDoc, tr.newSelection.main.head);
-  return oldStart !== null && newStart !== null && oldStart !== newStart;
+  if (newStart === null) return false;
+  // An unknown old start means no syllable began in the last SYLLABLE_READ_LIMIT characters before
+  // the caret, so a start found in that window is a real new syllable.
+  if (oldStart === null) return newStart > oldHead - SYLLABLE_READ_LIMIT;
+  return oldStart !== newStart;
 }
 
 /** Characters read at a time when walking back to where a syllable starts. */
