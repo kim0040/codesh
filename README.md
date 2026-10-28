@@ -102,12 +102,21 @@ Press `?` outside a text field for the shortcuts of your operating system. The f
 
 Upgrading an existing 1.0.x installation? See [Renaming codesh to gachipad (upgrading from 1.0.x)](docs/OPERATIONS.md#16-codesh에서-gachipad로-이름-변경-10x에서-업그레이드) in the Operations guide.
 
-gachipad runs on any Linux host with Docker Engine and the Docker Compose plugin (`docker compose`). Only Caddy publishes ports: HTTP (80) and HTTPS (443).
+gachipad runs on Linux hosts with Docker Engine and the Docker Compose plugin (`docker compose`), or on Windows 10/11 using WSL 2 and Docker Desktop. Only Caddy publishes ports: HTTP (80) and HTTPS (443).
 
 | Scale | Minimum | Recommended | Notes |
 |---|---|---|---|
 | One share with 50 people | 2 vCPU, 4 GB RAM, 20 GB SSD | 4 vCPU, 8 GB RAM | with 4 GB RAM set `MONGO_CACHE_GB=1` |
 | About 200 people at once (classes, labs, small shares) | 4 vCPU, 8 GB RAM, 40 GB SSD | 8 vCPU, 16 GB RAM | one collab instance is enough; use `COLLAB_REPLICAS=2` from about 400 people |
+
+### Choose internal or public
+
+When running `install.sh`, select either internal network mode or public internet mode:
+
+- **Internal network** (`./install.sh --network internal`, default): Designed for internal networks. Supports plain HTTP or internal HTTPS (using Caddy's internal CA or an operator-supplied certificate), offers `gachipad.local` via mDNS on native Linux, and uses generous internal resource and rate limits.
+- **Public internet** (`./install.sh --network public --domain share.example.org`): Designed for direct internet hosting. Requires a public DNS name you own whose A/AAAA records point to the host, and inbound TCP ports 80 and 443 reachable. Caddy automatically provisions and renews free certificates from an ACME CA (Let's Encrypt or ZeroSSL) and redirects HTTP to HTTPS. To use an external TLS-terminating reverse proxy instead of Caddy direct HTTPS, pass `--behind-proxy <CIDR>` (e.g. `PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32`). An optional ACME account email can be set with `--acme-email ops@example.org`.
+
+Public mode enforces HTTPS and HSTS, disables mDNS, isolates client discovery to prevent local network leakages, restricts the admin console to loopback and private CIDRs by default, and applies strict abuse and quota limits. The only extra outside network traffic in public mode is Caddy's ACME exchange for certificate issuance and renewal; proxy-terminated public mode and internal mode introduce no new external requests.
 
 ### With internet: Docker Compose
 
@@ -134,6 +143,41 @@ On native Linux, `install.sh` offers `gachipad.local` via mDNS by default (with 
 
 To upgrade an offline installation, copy the new bundle and its `.sha256` file next to each other and run `./upgrade.sh ../gachipad-<newer>-linux-amd64.tar.gz` (it checks the checksum, backs up the database, loads the images and keeps your `.env`).
 
+### Windows
+
+On 64-bit Windows 10 22H2 (build 19045) or Windows 11, install gachipad inside WSL 2 with Docker Desktop (with WSL integration enabled for your distro):
+
+```cmd
+install.cmd
+```
+
+Or run PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Network internal
+```
+
+Main switches for `install.ps1`:
+- `-Network internal|public`: Choose internal network or public internet deployment mode.
+- `-Domain <domain>` and `-AcmeEmail <email>`: Domain name and optional ACME account email for public mode.
+- `-BehindProxy`: Enable reverse-proxy mode behind a TLS-terminating proxy.
+- `-Db sqlite|postgres|mongodb|external` and `-DatabaseUrl <URL>`: Select the database backend.
+- `-Distro <distro>` and `-InstallDir <dir>`: Target WSL distribution and Linux directory (defaults to `~/gachipad` in the Linux filesystem; drvfs `/mnt/c` paths are rejected).
+- `-OpenFirewall`: Automatically add inbound TCP firewall rules for HTTP/HTTPS (requires PowerShell run as Administrator).
+- `-InstallWsl`: Automatically run `wsl --install -d Ubuntu` if WSL is missing (requires elevation and reboot).
+- `-BundlePath <archive.tar.gz>`: Path to a local `.tar.gz` bundle archive.
+- `-InstallArgs <arguments>`: Additional arguments forwarded to `./install.sh`.
+
+After installation, manage gachipad from Windows using `gachipad.ps1`:
+
+```powershell
+.\deploy\gachipad.ps1 update --check
+.\deploy\gachipad.ps1 backup
+.\deploy\gachipad.ps1 logs
+```
+
+The Windows installer is tested with extensive test suites, but has not yet been verified on every real-world Windows build, language, and hardware configuration. See the [Operations guide](docs/OPERATIONS.md#18-windows-환경-설치-및-운영-wsl-2) for requirements, detailed error troubleshooting, firewall rules, and NAT versus mirrored networking.
+
 ### HTTPS
 
 `SITE_ADDRESS=:80` serves plain HTTP. If you set a host name (such as `gachipad.local`), Caddy needs a `tls` line in `deploy/tls/*.caddy`: `tls internal` for Caddy's own CA, or your certificate and key. Without it Caddy tries a public ACME CA, which fails on a network without internet. Plain HTTP exposes document content and credentials to anyone who can watch the traffic, so use HTTPS wherever the network is shared. Details and client CA trust steps: [deploy/tls/README.md](deploy/tls/README.md).
@@ -153,7 +197,7 @@ Backups, scaling, monitoring and every `.env` setting are in the [Operations gui
 
 ## Updates
 
-- **Release check**: with `UPDATE_CHECK=on` (the default) the API asks `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` a few minutes after it starts and then about every 12 hours. This is the only outside request gachipad ever makes. It sends no cookies, identifiers or statistics, never blocks a request, and fails quietly after 5 seconds when there is no internet. `UPDATE_CHECK=off` in `.env` turns it off completely. A newer release shows up in the admin console.
+- **Release check**: with `UPDATE_CHECK=on` (the default) the API asks `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` a few minutes after it starts and then about every 12 hours. In internal or behind-proxy modes, this is the only outside request gachipad ever makes. In public direct mode, Caddy additionally performs an ACME exchange with the certificate authority for free certificate issuance and renewal. It sends no cookies, identifiers or statistics, never blocks a request, and fails quietly after 5 seconds when there is no internet. `UPDATE_CHECK=off` in `.env` turns it off completely. A newer release shows up in the admin console.
 - **Manual update with rollback** (in an installed bundle):
   ```sh
   ./update.sh --check              # installed vs. newest release; changes nothing

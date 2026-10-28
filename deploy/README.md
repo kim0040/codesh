@@ -41,6 +41,137 @@ gachipad supports multiple database backends, selected during installation or co
 - **External database connection**: If `--db external` is selected without a URL on a TTY, a hidden input prompt asks for `DATABASE_URL`. Multiline values are rejected, and URLs are stored single-quoted in `.env` to preserve special characters (`$`, `#`, spaces).
 - **Backend guard**: Refuses switching if non-empty data volumes or a recorded marker from another backend exist (`database backend change refused; use ./migrate-db.sh to copy data and switch backends`).
 
+## Network deployment modes
+
+`install.sh` supports two deployment modes: internal network mode (`--network internal`, default) and hardened public internet mode (`--network public`).
+
+### Selection and flags
+
+```sh
+# Internal network mode (default):
+./install.sh --network internal
+
+# Public internet mode with automatic Caddy ACME HTTPS:
+./install.sh --network public --domain share.example.org [--acme-email ops@example.org]
+
+# Public internet mode behind an external TLS reverse proxy:
+PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32
+```
+
+- **Interactive prompt**: On a TTY without explicit flags, `install.sh` prompts for `internal` or `public`. Non-interactive executions default to `internal`.
+- **Public domain validation**: `--domain` (or `PUBLIC_URL=https://...`) must be a domain you own with A/AAAA DNS records pointing to the host. IP addresses, `.local`, single-label names, `.test`, `.example`, and `.invalid` are rejected. Ports 80 and 443 must reach Caddy.
+- **Behind proxy (`--behind-proxy <CIDR>`)**: Used when an external proxy terminates TLS and forwards HTTP to Caddy. The CIDR must be a non-universal prefix (IPv4 >= /8, IPv6 >= /32) and must not overlap `NETWORK_SUBNET`. A single-host CIDR (`/32` or `/128`) is recommended; prefixes wider than `/16` trigger a warning. The proxy must supply `X-Forwarded-For` and `X-Forwarded-Proto: https`. Connections outside that CIDR are rejected with `403 Forbidden`.
+- **Switching modes on existing installs**: Re-running `install.sh` without `--network` preserves the stored mode in `.env`. Switching `internal -> public` saves prior settings as `GACHIPAD_INTERNAL_*` and applies strict public limits. Switching `public -> internal` restores saved `GACHIPAD_INTERNAL_*` values while retaining tightened security limits for operator review.
+- **Transactional rollback**: `.env` is backed up to a private snapshot before changes and restored if container startup, `/healthz` or `/readyz` checks fail.
+
+### What changes in public mode
+
+- **HTTPS and HSTS**: Caddy serves automatic HTTPS (via Let's Encrypt or ZeroSSL) and sends `Strict-Transport-Security: max-age=31536000` and `X-Robots-Tag: noindex`. Files in `deploy/tls/*.caddy` are ignored in public mode. Session cookies enforce `Secure`, `HttpOnly`, and `SameSite=Lax`.
+- **Admin CIDR restriction**: Empty or default `ADMIN_ALLOW_CIDR` restricts admin endpoints to loopback and private ranges (`127.0.0.0/8,::1/128,10.0.0.0/8,192.168.0.0/16,fc00::/7`; `172.16.0.0/12` is excluded). Unauthorized clients receive 404 before auth handling. Add your public IP to `ADMIN_ALLOW_CIDR` in `.env` to widen access. Admin authentication uses `Authorization: Bearer <ADMIN_TOKEN>`.
+- **mDNS off**: The mDNS profile is removed, any running mDNS advertiser is stopped, and `./mdns.sh enable` is rejected.
+- **Per-client discovery isolation**: Public sessions without an explicit room are placed into individual discovery groups (`client:<id>`). Implicit nearby document previews and broadcasts across /24 or /64 subnets are disabled.
+- **Stricter limits in `.env`**:
+  - `RATE_LIMIT_API_PER_MIN=300` (internal: 1200)
+  - `RATE_LIMIT_CODE_PER_MIN=10` (internal: 30)
+  - `RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN=300` (public-only shared fleet budget)
+  - `RATE_LIMIT_CREATE_PER_MIN=10` (internal: 60)
+  - `RATE_LIMIT_LOGIN_PER_MIN=5` (internal: 10)
+  - `QUOTA_SHARES_PER_CLIENT=50` (internal: 200); `QUOTA_SHARES_PER_IP=200` (internal: 1000)
+  - `QUOTA_UPLOADS_PER_CLIENT=50` (internal: 200); `QUOTA_UPLOADS_PER_IP=200` (internal: 1000)
+  - `QUOTA_BYTES_PER_CLIENT=104857600` / 100 MiB (internal: 512 MiB)
+  - `QUOTA_BYTES_PER_IP=536870912` / 512 MiB (internal: 2 GiB)
+  - `UPLOAD_STORAGE_MAX_BYTES=2147483648` / 2 GiB (internal: 10 GiB)
+  - `SSE_MAX_PER_CLIENT=5` (internal: 20); `SSE_MAX_PER_IP=50` (internal: 200)
+  - `PRESENCE_MAX_PER_NET=100` (internal: 500)
+  - For large shared NAT networks (schools, corporate egress), raise `SSE_MAX_PER_IP`, `RATE_LIMIT_API_PER_MIN`, and `RATE_LIMIT_CODE_PER_MIN`.
+- **Join-code failure budget**: A Valkey fixed-minute counter limits failed 6-digit code lookups fleet-wide to 300/min. Clean addresses (IPv4 or IPv6 /48) without recent failures get one free miss (up to 3x budget fleet-wide). If the budget is exhausted during a scan attack, code joins return 429 (`Retry-After`), but direct share links (`/<id>`), existing sessions, and ordinary API operations continue to work.
+- **Upload pool per-address cap**: In-flight and held uploads are tracked per IPv4 or IPv6 /64, capped at `floor(UPLOAD_STORAGE_MAX_BYTES/4)` (512 MiB default). Exceeding this returns HTTP 429 (`upload_pool_limited`).
+- **Unknown client rule**: If forwarded IP resolution ends inside `TRUST_PROXY` or headers are malformed, the client IP becomes `unknown`. Unknown clients share a conservative rate-limit bucket and cannot satisfy `ADMIN_ALLOW_CIDR`. If `unknown` requests exceed 5% over 5 minutes, `/api/admin/overview` sets `unknownClientIdentity: true`.
+- **IPv4-only binding default**: Public installs default to `GACHIPAD_BIND_ADDRESS=0.0.0.0:`. Publishing IPv6 without source-preservation can map external clients to Docker bridge gateway addresses. IPv6 requires an operator-managed dual-stack Docker network with `ip6tables` enabled and `userland-proxy` disabled.
+- **Metrics scraping**: `/metrics/api` and `/metrics/collab` require loopback or compose network sources and refuse requests arriving through the compose gateway (403). Scrape from within Caddy or a container on the compose network.
+- **Proxy idle timeout**: Set upstream keepalive/idle timeout on external reverse proxies below 120 s (Caddy public idle timeout is 2m).
+- **Guest document creation**: Guests can create documents by default. To close the site, set `guestAllowed=false` in the admin console and configure OIDC or LDAP.
+
+## Windows installer (WSL 2)
+
+gachipad runs on Windows 10/11 using WSL 2 and Docker Desktop.
+
+### Requirements
+
+- 64-bit Windows 10 22H2 (build 19045) or Windows 11 (build 22000+). 32-bit Windows is not supported.
+- CPU virtualization enabled in UEFI/BIOS and Windows features (`HypervisorPresent`).
+- WSL 2 with a supported Linux distro (e.g. Ubuntu; Docker Desktop helper distros `docker-desktop` and `docker-desktop-data` are excluded).
+- Docker Desktop with WSL integration enabled for the distro (or Docker Engine inside WSL with `systemd=true`).
+- Windows PowerShell 5.1 or PowerShell 7+.
+
+### Installation
+
+Run `install.cmd` or invoke `install.ps1` from PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Network internal
+```
+
+Switches:
+- `-Network internal|public`: Choose network mode.
+- `-Domain <domain>`, `-AcmeEmail <email>`, `-BehindProxy`: Configure public internet mode.
+- `-Db sqlite|postgres|mongodb|external`, `-DatabaseUrl <URL>`: Select database backend.
+- `-Distro <distro>`: Target WSL distribution.
+- `-InstallDir <dir>`: Target directory inside WSL Linux filesystem (default `~/gachipad`). Must not be on a Windows mount (`/mnt/c` or drvfs/9p).
+- `-OpenFirewall`: Automatically add inbound firewall rules (requires Administrator elevation).
+- `-InstallWsl`: Automatically run `wsl --install -d Ubuntu` if WSL is missing (requires elevation and reboot).
+- `-BundlePath <archive.tar.gz>`: Path to an offline bundle archive.
+- `-InstallArgs <arguments>`: Additional arguments forwarded to Linux `install.sh`.
+
+### Error messages and troubleshooting
+
+- **OS / Virtualization**:
+  - `A 64-bit version of Windows is required...`: Upgrade to 64-bit Windows.
+  - `Supported hosts are 64-bit Windows 10 22H2 (build 19045) or Windows 11...`: Upgrade Windows.
+  - `Virtualization: not detected...`: Enable VT-x/AMD-V in UEFI and Virtual Machine Platform in Windows features.
+- **WSL 2 / Distro**:
+  - `WSL 2 is not available...`: Run `wsl --install -d Ubuntu` in elevated PowerShell and reboot.
+  - `No WSL distribution is installed...`: Install Ubuntu via `wsl --install -d Ubuntu` and finish initial setup.
+  - `WSL distro '<distro>' is version 1...`: Convert with `wsl --set-version '<distro>' 2`.
+  - `WSL distro '<distro>' was not found...`: Choose an installed distro name.
+  - `Could not read WSL distribution versions...`: Run `wsl --update` then retry.
+- **Docker**:
+  - `Docker socket permission was denied...`: Run `sudo usermod -aG docker $USER` inside WSL, then `wsl --shutdown`.
+  - `Docker Desktop is installed but is not running...`: Start Docker Desktop.
+  - `Docker Desktop is running, but WSL integration is off...`: Enable WSL Integration in Docker Desktop Settings > Resources > WSL Integration.
+  - `Docker Engine is installed inside '<distro>' without systemd...`: Add `[boot]\nsystemd=true` to `/etc/wsl.conf` and run `wsl --shutdown`.
+  - `Docker is not available...`: Install Docker Desktop or Docker Engine.
+  - `Docker Compose is missing...`: Install the Docker Compose plugin.
+- **Filesystem / Source**:
+  - `InstallDir must be inside the WSL Linux filesystem, not /mnt/c...` (exit 42): Select a native Linux path like `~/gachipad`.
+  - `The source does not contain install.sh...` (exit 43): Provide a valid offline bundle or deploy folder.
+  - `images.tar is missing...` (exit 44): Use the full offline bundle (`gachipad-*`), not the deploy-only bundle (`gachipad-deploy-*`).
+  - `A copied .sh file has CR line endings...` (exit 45): Set `git config core.autocrlf false` and check out with LF line endings.
+  - `Bundle checksum mismatch...`: Re-download the bundle and `.sha256` sidecar.
+
+### Firewall and networking
+
+- **Firewall**: With `-OpenFirewall`, adds inbound TCP rules for HTTP (`HTTP_PORT`, 80) and HTTPS (`HTTPS_PORT`, 443) named `'gachipad HTTP'` and `'gachipad HTTPS'`. Profiles: `Domain, Private` (internal mode) or `Domain, Private, Public` (public mode). Without elevation, prints manual `New-NetFirewallRule` commands.
+- **NAT vs Mirrored networking**:
+  - Docker Desktop automatically forwards container ports to the Windows host.
+  - For standalone Docker Engine in WSL 2 NAT mode, external machines cannot reach WSL ports by default. Enable mirrored networking (Windows 11 22H2+: add `networkingMode=mirrored` under `[wsl2]` in `%USERPROFILE%\.wslconfig`, then run `wsl --shutdown`), or configure `netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=80 connectaddress=<WSL_IP> connectport=80`.
+
+### State and command wrapper
+
+- State is saved in `%LOCALAPPDATA%\gachipad\install.json` (`Distro`, `InstallDir`).
+- Application files reside inside the WSL Linux filesystem (`~/gachipad`).
+- Manage the installation using `gachipad.ps1`:
+  ```powershell
+  .\deploy\gachipad.ps1 update --check
+  .\deploy\gachipad.ps1 backup
+  .\deploy\gachipad.ps1 logs
+  ```
+  Validates script names case-sensitively against installed `.sh` files and blocks `lib.sh` or path traversal.
+
+### Known unverified areas
+
+The Windows installer is tested with automated Pester suites and mocked WSL execution, but physical verification across every Windows build, non-English Windows locales (e.g. Korean/German wsl.exe decoding), ConPTY terminal interactions with Ctrl-C, physical firewall rules, and Docker Desktop source-IP preservation remains ongoing.
+
 ## Backups and restores
 
 - **Backup (`./backup.sh [dir]`)**: Default directory `./backups`. Backups are written with `0600` permissions into a `0700` directory.
@@ -124,7 +255,7 @@ gachipad supports multiple database backends, selected during installation or co
 - `/collab` is proxied to every `collab` replica (`dynamic a` over the compose service name) with `lb_policy query doc`: one document normally lives on one instance. Replicas that fail `/healthz` are skipped.
 - `/metrics/api` and `/metrics/collab` expose Prometheus metrics to loopback and the dedicated compose subnet only. With several collab replicas `/metrics/collab` answers from one of them; scrape the containers directly for per-instance numbers.
 - HTTPS: set `SITE_ADDRESS=gachipad.local`, `PUBLIC_URL=https://gachipad.local` and copy `tls/internal.caddy.example` to `tls/local.caddy` (see `tls/README.md`).
-- A host name in `SITE_ADDRESS` needs a `tls/*.caddy` file with a `tls ...` line (`tls internal`, or `tls <cert> <key>`). Without one Caddy's automatic HTTPS contacts a public ACME CA (Let's Encrypt/ZeroSSL), which fails on a network without internet and is an outside request. `:80` and bare IP addresses need no `tls` line.
+- In internal mode, a host name in `SITE_ADDRESS` needs a `tls/*.caddy` file with a `tls ...` line (`tls internal`, or `tls <cert> <key>`). In public mode, Caddy handles automatic HTTPS directly (or accepts TLS from a configured proxy) and ignores `tls/*.caddy`. `:80` and bare IP addresses need no `tls` line.
 - Clients behind Caddy: the API trusts `X-Forwarded-For` only from `TRUST_PROXY` (default: the compose network), so rate limits, PIN counters and the nearby network group use the real client address.
 
 ## More collab instances

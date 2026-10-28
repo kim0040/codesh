@@ -102,12 +102,21 @@ CLI는 `packages/cli`에 있으며 이 저장소에서 직접 빌드해요(`pnpm
 
 codesh 1.0.x에서 업그레이드하시나요? [운영자 안내서의 이름 변경 안내](docs/OPERATIONS.md#16-codesh에서-gachipad로-이름-변경-10x에서-업그레이드)를 참고하세요.
 
-Docker Engine과 Docker Compose 플러그인(`docker compose`)이 설치된 Linux 서버면 바로 실행할 수 있습니다. 외부에 노출되는 포트는 Caddy의 HTTP(80)와 HTTPS(443)뿐입니다.
+Docker Engine과 Docker Compose 플러그인(`docker compose`)이 설치된 Linux 서버 또는 WSL 2와 Docker Desktop을 사용하는 64비트 Windows 10/11 환경에서 실행할 수 있습니다. 외부에 노출되는 포트는 Caddy의 HTTP(80)와 HTTPS(443)뿐입니다.
 
 | 규모 | 최소 | 권장 | 메모 |
 |---|---|---|---|
 | 한 공유 50명 | 2 vCPU, 4 GB RAM, SSD 20 GB | 4 vCPU, 8 GB RAM | RAM 4 GB에서는 `MONGO_CACHE_GB=1` |
 | 동시 약 200명 (수업, 실습, 소그룹) | 4 vCPU, 8 GB RAM, SSD 40 GB | 8 vCPU, 16 GB RAM | collab 하나로 충분하며 약 400명부터 `COLLAB_REPLICAS=2` |
+
+### 내부망 또는 공개 인터넷 환경 선택
+
+`install.sh` 실행 시 배포 대상 환경에 맞게 내부망 모드 또는 공개 인터넷 모드를 선택합니다:
+
+- **내부망 모드** (`./install.sh --network internal`, 기본값): 내부 네트워크 환경을 위한 모드입니다. 일반 HTTP 또는 내부 HTTPS(Caddy 내장 CA 또는 자체 인증서)를 제공하며, 네이티브 Linux 환경에서 `gachipad.local` mDNS 단축 도메인을 지원하고 내부망 환경에 맞춘 여유 있는 리소스 및 요청 한도를 사용합니다.
+- **공개 인터넷 모드** (`./install.sh --network public --domain share.example.org`): 인터넷 공개 호스팅을 위한 모드입니다. 소유한 공용 DNS 도메인 이름(A/AAAA 레코드가 서버 공인 IP를 가리켜야 함)과 외부에서 접근 가능한 TCP 80/443 포트가 필요합니다. Caddy가 무료 공개 ACME CA(Let's Encrypt 또는 ZeroSSL)를 통해 자동으로 인증서를 발급·갱신하고 HTTP를 HTTPS로 리다이렉트합니다. Caddy 직접 HTTPS 대신 외부 TLS 종단 프록시 뒤에 배치할 때는 `--behind-proxy <CIDR>`(예: `PUBLIC_URL=https://share.example.org ./install.sh --network public --behind-proxy 192.0.2.7/32`)를 지정합니다. `--acme-email ops@example.org`로 인증서 관리용 이메일을 등록할 수도 있습니다.
+
+공개 인터넷 모드는 HTTPS와 HSTS를 강제하고, mDNS를 끄며, 불필요한 네트워크 정보 노출을 막기 위해 클라이언트 디스커버리 그룹을 개별 격리합니다. 또한 관리자 콘솔을 로컬 루프백 및 사설망 CIDR로 기본 제한하고 강화된 남용 방지 및 업로드 한도를 적용합니다. 공개 인터넷 직접 모드에서 추가로 발생하는 유일한 외부 네트워크 통신은 Caddy의 무료 ACME 인증서 발급·갱신 트래픽이며, 프록시 종단 공개 모드 및 내부망 모드는 추가 외부 요청을 일절 발생시키지 않습니다.
 
 ### 인터넷이 되는 서버: Docker Compose
 
@@ -134,6 +143,41 @@ PUBLIC_URL=http://gachipad.local ./install.sh       # 이미지 로드, 새 비�
 
 오프라인 설치를 업그레이드할 때는 새 번들과 `.sha256` 파일을 같은 폴더에 두고 `./upgrade.sh ../gachipad-<새 버전>-linux-amd64.tar.gz`를 실행합니다. 체크섬 검사, 데이터베이스 백업, 이미지 로드를 진행하며 기존 `.env`는 안전하게 유지됩니다.
 
+### Windows 환경 설치
+
+64비트 Windows 10 22H2 (빌드 19045) 또는 Windows 11에서는 WSL 2와 Docker Desktop(해당 배포판의 WSL 통합 활성화)을 통해 설치할 수 있습니다:
+
+```cmd
+install.cmd
+```
+
+또는 PowerShell에서 실행합니다:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1 -Network internal
+```
+
+`install.ps1`의 주요 스위치:
+- `-Network internal|public`: 내부망 모드 또는 공개 인터넷 모드 선택.
+- `-Domain <domain>` 및 `-AcmeEmail <email>`: 공개 인터넷 모드용 도메인 이름 및 선택적 ACME 계정 이메일.
+- `-BehindProxy`: TLS 종단 프록시 뒷단 모드 활성화.
+- `-Db sqlite|postgres|mongodb|external` 및 `-DatabaseUrl <URL>`: 데이터베이스 백엔드 선택.
+- `-Distro <distro>` 및 `-InstallDir <dir>`: 대상 WSL 배포판 및 Linux 설치 경로 지정 (기본값: WSL Linux 파일시스템 내 `~/gachipad`, drvfs `/mnt/c` 경로는 거부됨).
+- `-OpenFirewall`: HTTP/HTTPS 인바운드 방화벽 규칙 자동 추가 (관리자 권한 PowerShell 필요).
+- `-InstallWsl`: WSL이 없는 경우 관리자 권한으로 `wsl --install -d Ubuntu` 실행 (재부팅 필요).
+- `-BundlePath <archive.tar.gz>`: 로컬 `.tar.gz` 번들 아카이브 파일 경로.
+- `-InstallArgs <arguments>`: 리눅스 `./install.sh`로 전달할 추가 인자.
+
+설치 후에는 Windows 환경에서 `gachipad.ps1`을 통해 서비스를 관리합니다:
+
+```powershell
+.\deploy\gachipad.ps1 update --check
+.\deploy\gachipad.ps1 backup
+.\deploy\gachipad.ps1 logs
+```
+
+Windows 설치 도구는 회귀 테스트 스위트로 검증되었으나, 다양한 실제 Windows 빌드, 언어 및 하드웨어 구성 환경에서의 검증이 계속 진행 중입니다. 요구사항, 오류별 해결 방법, 방화벽 설정 및 NAT/미러링 네트워크 구성에 관한 자세한 내용은 [운영자 안내서](docs/OPERATIONS.md#18-windows-환경-설치-및-운영-wsl-2)를 참고하십시오.
+
 ### HTTPS
 
 `SITE_ADDRESS=:80`이면 일반 HTTP로 동작합니다. `gachipad.local` 같은 호스트 이름을 쓰려면 `deploy/tls/*.caddy`에 `tls` 설정이 필요합니다. Caddy 내장 CA를 쓰려면 `tls internal`, 직접 준비한 인증서가 있다면 인증서와 키 경로를 적어줍니다. 설정이 없으면 Caddy가 공개 ACME CA 발급을 시도하므로 인터넷이 없는 환경에서는 실패합니다. 일반 HTTP는 같은 네트워크를 볼 수 있는 사람에게 문서 내용과 인증 정보를 그대로 노출하므로, 공용 네트워크에서는 HTTPS를 권장합니다. 자세한 설정과 클라이언트 루트 CA 등록 절차는 [deploy/tls/README.md](deploy/tls/README.md)에 있습니다.
@@ -153,7 +197,7 @@ Valkey는 모든 데이터베이스 옵션에서 실시간 협업 상태 관리�
 
 ## 업데이트
 
-- **릴리스 확인**: `UPDATE_CHECK=on`(기본값)이면 API가 시작되고 몇 분 뒤, 그 뒤로 약 12시간마다 `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` 요청을 한 번 보냅니다. gachipad가 외부로 보내는 유일한 요청이며 쿠키, 식별자, 사용 통계를 일절 보내지 않습니다. 다른 요청을 차단하지 않으며 인터넷이 없으면 5초 안에 조용히 시간 초과 처리됩니다. `.env`의 `UPDATE_CHECK=off`로 완전히 끌 수 있습니다. 새 릴리스는 관리자 콘솔에 표시됩니다.
+- **릴리스 확인**: `UPDATE_CHECK=on`(기본값)이면 API가 시작되고 몇 분 뒤, 그 뒤로 약 12시간마다 `GET https://api.github.com/repos/<UPDATE_REPO>/releases/latest` 요청을 한 번 보냅니다. 내부망 모드나 프록시 종단 환경에서는 gachipad가 외부로 보내는 유일한 요청입니다(공개 인터넷 직접 모드에서는 무료 인증서 발급·갱신을 위한 Caddy의 ACME 통신이 추가됩니다). 쿠키, 식별자, 사용 통계를 일절 보내지 않으며, 다른 요청을 차단하지 않고 인터넷이 없으면 5초 안에 조용히 시간 초과 처리됩니다. `.env`의 `UPDATE_CHECK=off`로 릴리스 확인을 완전히 끌 수 있습니다. 새 릴리스는 관리자 콘솔에 표시됩니다.
 - **되돌리기를 지원하는 수동 업데이트** (설치된 번들 폴더에서):
   ```sh
   ./update.sh --check              # 설치된 버전과 최신 릴리스 비교, 아무것도 바꾸지 않음
