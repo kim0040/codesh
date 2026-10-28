@@ -1,6 +1,7 @@
 import { generateJoinCode, JOIN_CODE_COOLDOWN_SECONDS, keys } from "@gachipad/shared";
 import type { Ctx } from "./ctx.js";
 import { ApiError } from "./errors.js";
+import { abuseKeys } from "./net.js";
 
 export type CodeKind = "share" | "lab";
 
@@ -83,14 +84,18 @@ export async function touchCode(
 export async function resolveCode(
   ctx: Ctx,
   code: string,
+  ip = "unknown",
 ): Promise<{ shareId: string } | { labId: string } | null> {
   const budget = keys.rateLimit("global", "code-failures");
+  const address = abuseKeys(ip).at(-1)?.key ?? "unknown";
+  const recentMiss = keys.rateLimit(address, "code-recent-miss");
   let window = 0;
   if (ctx.config.network === "public") {
     const [admitted, audit] = (await ctx.valkey.eval(
       RESERVE_LOOKUP,
-      1,
+      2,
       budget,
+      recentMiss,
       ctx.config.codeFailureBudgetPerMinute,
     )) as [number, number];
     if (admitted < 0) {
@@ -113,6 +118,8 @@ export async function resolveCode(
     window = admitted;
   }
   const [shareId, labId] = await ctx.valkey.mget(keys.code(code), keys.labCode(code));
+  if (ctx.config.network === "public" && !shareId && !labId)
+    await ctx.valkey.set(recentMiss, "1", "EX", 600);
   if (window && (shareId || labId)) await ctx.valkey.eval(REFUND_LOOKUP, 1, budget, window);
   if (shareId) return { shareId };
   if (labId) return { labId };
@@ -122,6 +129,7 @@ export async function resolveCode(
 // Reserve before the lookup, refund hits. One Valkey clock and atomic admission across replicas
 // bound parallel guesses; matching the window on refund prevents crossing-window undercounts.
 const RESERVE_LOOKUP = `
+if redis.call('EXISTS', KEYS[2]) == 0 then return {0, 0} end
 local now = tonumber(redis.call('TIME')[1])
 local window = math.floor(now / 60) + 1
 local state = redis.call('HMGET', KEYS[1], 'window', 'count', 'logged')
@@ -146,3 +154,26 @@ if tonumber(redis.call('HGET', KEYS[1], 'window')) == tonumber(ARGV[1]) then
 end
 return 1
 `;
+
+/** Read with Valkey's clock so expired windows are never shown as exhausted. */
+export async function codeFailureStatus(
+  ctx: Ctx,
+): Promise<{ count: number; limit: number; exhausted: boolean }> {
+  const limit = ctx.config.codeFailureBudgetPerMinute;
+  const count =
+    ctx.config.network === "public"
+      ? Number(
+          await ctx.valkey.eval(
+            `
+local window = math.floor(tonumber(redis.call('TIME')[1]) / 60) + 1
+local state = redis.call('HMGET', KEYS[1], 'window', 'count')
+if tonumber(state[1]) ~= window then return 0 end
+return tonumber(state[2]) or 0
+`,
+            1,
+            keys.rateLimit("global", "code-failures"),
+          ),
+        )
+      : 0;
+  return { count, limit, exhausted: count >= limit };
+}

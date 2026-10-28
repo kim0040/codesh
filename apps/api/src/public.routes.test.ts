@@ -52,7 +52,11 @@ describe.skipIf(!integration)("public network boundaries", () => {
   });
 
   it("applies the public admin default to the actual client rather than the TLS proxy", async () => {
-    const config = loadConfig({ GACHIPAD_NETWORK: "public", PUBLIC_URL: publicConfig.publicUrl });
+    const config = loadConfig({
+      TRUST_PROXY: "127.0.0.1/32",
+      GACHIPAD_NETWORK: "public",
+      PUBLIC_URL: publicConfig.publicUrl,
+    });
     h = await createHarness({ config: { ...publicConfig, adminAllowCidr: config.adminAllowCidr } });
     const bearer = { ...https, authorization: "Bearer admin-token-for-tests" };
     expect(
@@ -63,21 +67,18 @@ describe.skipIf(!integration)("public network boundaries", () => {
     );
   });
 
-  it("shares one atomic failed-lookup budget across IPs, refunds hits, audits once, and resets windows", async () => {
+  it("lets clean addresses join during an attack, limits recent missers, audits once and resets windows", async () => {
     h = await createHarness({ config: { ...publicConfig, codeFailureBudgetPerMinute: 3 } });
     const key = keys.rateLimit("global", "code-failures");
     const audit = vi.spyOn(h.stores.audit, "append");
-    const owner = h.client();
+    const owner = h.client({ ip: "10.1.2.3" });
     const share = await owner.request("POST", "/api/shares", { body: {}, headers: https });
-    expect(share.statusCode).toBe(200);
     const { code } = share.json<{ code: string }>();
-    for (let i = 0; i < 5; i++)
-      expect((await owner.get(`/api/codes/${code}`, https)).statusCode).toBe(200);
-    expect(await h.valkey.hget(key, "count")).toBe("0");
+    const attackers = Array.from({ length: 8 }, (_, i) => h.client({ ip: `198.51.100.${i + 1}` }));
+    for (const attacker of attackers)
+      expect((await attacker.get("/api/codes/999999", https)).statusCode).toBe(404);
     const replies = await Promise.all(
-      Array.from({ length: 8 }, (_, i) =>
-        h.client({ ip: `198.51.100.${i + 1}` }).get("/api/codes/999999", https),
-      ),
+      attackers.map((client) => client.get("/api/codes/999999", https)),
     );
     expect(replies.map((r) => r.statusCode).sort()).toEqual([
       404, 404, 404, 429, 429, 429, 429, 429,
@@ -87,13 +88,92 @@ describe.skipIf(!integration)("public network boundaries", () => {
       1,
     );
     expect(JSON.stringify(audit.mock.calls)).not.toContain("999999");
-    // Exhaustion temporarily pauses even correct codes; API/id-based joins remain available.
-    expect((await owner.get(`/api/codes/${code}`, https)).statusCode).toBe(429);
-    expect((await owner.get("/api/session", https)).statusCode).toBe(200);
-    await h.valkey.hset(key, "window", "1");
     expect((await owner.get(`/api/codes/${code}`, https)).statusCode).toBe(200);
+    expect((await attackers[0]?.get(`/api/codes/${code}`, https))?.statusCode).toBe(429);
+    const status = (
+      await owner.get("/api/admin/security", {
+        ...https,
+        authorization: "Bearer admin-token-for-tests",
+      })
+    ).json();
+    expect(status.codeFailures).toEqual({ count: 3, limit: 3, exhausted: true });
+    await h.valkey.hset(key, "window", "1");
+    expect((await attackers[0]?.get(`/api/codes/${code}`, https))?.statusCode).toBe(200);
     expect(await h.valkey.hget(key, "count")).toBe("0");
     expect(await h.valkey.ttl(key)).toBeGreaterThan(0);
+    expect(await h.valkey.ttl(keys.rateLimit("198.51.100.1", "code-recent-miss"))).toBeGreaterThan(
+      0,
+    );
+    // An IPv6 address change inside a /64 cannot shed its recent misses.
+    expect(
+      (await h.client({ ip: "2001:db8:1::1" }).get("/api/codes/999999", https)).statusCode,
+    ).toBe(404);
+    await h.valkey.hset(key, "count", 3);
+    expect(
+      (await h.client({ ip: "2001:db8:1::2" }).get(`/api/codes/${code}`, https)).statusCode,
+    ).toBe(429);
+    expect(
+      (await h.client({ ip: "2001:db8:2::1" }).get(`/api/codes/${code}`, https)).statusCode,
+    ).toBe(200);
+  });
+
+  it("allows thirty successful code joins per minute behind one NAT with a ten-miss limit", async () => {
+    const config = loadConfig();
+    h = await createHarness({
+      config: { ...publicConfig, rateLimit: { ...config.rateLimit, codePerMinute: 10 } },
+    });
+    const owner = h.client();
+    const { code } = (
+      await owner.request("POST", "/api/shares", { body: {}, headers: https })
+    ).json<{ code: string }>();
+    for (let i = 0; i < 30; i++)
+      expect(
+        (await h.client({ ip: "198.51.100.7" }).get(`/api/codes/${code}`, https)).statusCode,
+      ).toBe(200);
+    expect(await h.valkey.get(keys.rateLimit("198.51.100.7", "code"))).toBeNull();
+  });
+
+  it("makes trusted terminal hops unknown, denies admin and shares limits", async () => {
+    const config = loadConfig();
+    h = await createHarness({
+      config: {
+        ...publicConfig,
+        trustProxy: ["127.0.0.1/32", "172.29.88.0/24", "10.20.0.0/24"],
+        adminAllowCidr: ["0.0.0.0/0"],
+        rateLimit: { ...config.rateLimit, apiPerMinute: 2 },
+      },
+    });
+    for (const ip of ["172.29.88.1", "10.20.0.7", "127.0.0.1"])
+      expect(
+        (
+          await h
+            .client({ ip })
+            .get("/api/admin/security", { ...https, authorization: "Bearer admin-token-for-tests" })
+        ).statusCode,
+      ).toBe(404);
+    for (const [i, ip] of ["172.29.88.1", "10.20.0.7", "127.0.0.1"].entries())
+      expect((await h.client({ ip }).get("/api/session", https)).statusCode).toBe(
+        i < 2 ? 200 : 429,
+      );
+    expect(await h.valkey.get(keys.rateLimit("unknown", "api"))).toBe("3");
+  });
+
+  it("caps held upload storage per IPv4 address and IPv6 /64 despite fresh cookies, and releases failed batches", async () => {
+    const config = loadConfig({ UPLOAD_STORAGE_MAX_BYTES: "100" });
+    h = await createHarness({ config: { ...publicConfig, limits: config.limits } });
+    // Keep multipart helpers on their usual path while exercising the public upload accounting.
+    const upload = (ip: string, data: string) =>
+      h.client({ ip }).request("POST", "/api/uploads", {
+        payload: `--b\r\nContent-Disposition: form-data; name="file"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\n${data}\r\n--b--\r\n`,
+        headers: { ...https, "content-type": "multipart/form-data; boundary=b" },
+      });
+    for (const ip of ["198.51.100.7", "2001:db8:1::1"])
+      expect((await upload(ip, "x".repeat(25))).statusCode).toBe(200);
+    for (const ip of ["198.51.100.7", "2001:db8:1::2"])
+      expect((await upload(ip, "x")).statusCode).toBe(503);
+    expect((await upload("198.51.100.8", "x".repeat(26))).statusCode).toBe(503);
+    expect((await upload("198.51.100.8", "x".repeat(25))).statusCode).toBe(200);
+    expect((await upload("2001:db8:2::1", "x".repeat(25))).statusCode).toBe(200);
   });
 
   it("keeps the internal code path independent of the global budget", async () => {
@@ -115,6 +195,8 @@ describe.skipIf(!integration)("public network boundaries", () => {
     const first = (await owner.get("/api/session", https)).json<{ net: string }>();
     const second = (await neighbour.get("/api/session", https)).json<{ net: string }>();
     expect(first.net).not.toBe(second.net);
+    expect(await h.valkey.exists(keys.nearbyNet(first.net))).toBe(0);
+    expect(await h.valkey.exists(keys.nearbyItem(created.json<{ id: string }>().id))).toBe(0);
     const nearby = await neighbour.get("/api/nearby", https);
     expect(nearby.statusCode).toBe(200);
     expect(nearby.json()).toEqual([]);

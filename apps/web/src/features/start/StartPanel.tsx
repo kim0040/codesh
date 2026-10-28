@@ -10,6 +10,7 @@ import { useEventsSnapshot } from "../../lib/events";
 import { firstLines } from "../../lib/format";
 import { useLocale, useT } from "../../lib/i18n";
 import { openTemplates } from "../../lib/overlays";
+import { useSession } from "../../lib/session";
 import { collectDroppedFiles } from "../editor/dropped-files";
 import { useCreateShare } from "./use-create-share";
 
@@ -150,6 +151,8 @@ function JoinByCode() {
 function Nearby() {
   const t = useT();
   const { nearby, ready, connected } = useEventsSnapshot();
+  const session = useSession();
+  if (session.data?.net.startsWith("client:")) return null;
   return (
     <section aria-labelledby="nearby-title" className="flex flex-col gap-3" data-testid="nearby">
       <h2 id="nearby-title" className="flex items-center gap-2 text-body-sm font-semibold">

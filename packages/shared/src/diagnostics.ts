@@ -715,6 +715,7 @@ export interface AdminOverview {
   health: { mongo: boolean; valkey: boolean; collab: "healthy" | "unknown" };
 }
 export interface AdminSecurity {
+  codeFailures: { count: number; limit: number; exhausted: boolean };
   cidrRestricted: boolean;
   proxyRestricted: boolean;
   loginPerMinute: number;

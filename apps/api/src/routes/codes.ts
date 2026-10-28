@@ -3,6 +3,7 @@ import { findShare } from "../access.js";
 import { releaseCode, resolveCode } from "../codes.js";
 import type { Ctx } from "../ctx.js";
 import { ApiError, notFound } from "../errors.js";
+import { rateRelease } from "../rate.js";
 import { type App, limited } from "./types.js";
 
 export function codeRoutes(app: App, ctx: Ctx): void {
@@ -15,7 +16,7 @@ export function codeRoutes(app: App, ctx: Ctx): void {
     },
     async (request) => {
       const { code } = request.params;
-      const target = await resolveCode(ctx, code);
+      const target = await resolveCode(ctx, code, request.session.ip);
       if (!target) throw notFound("No share or lab with this code");
       if ("labId" in target) {
         const lab = await ctx.stores.labs.get(target.labId);
@@ -23,6 +24,7 @@ export function codeRoutes(app: App, ctx: Ctx): void {
           await releaseCode(ctx, "lab", code);
           throw notFound("No share or lab with this code");
         }
+        await rateRelease(ctx, request.session.ip, "code");
         return { labId: target.labId };
       }
       try {
@@ -35,6 +37,7 @@ export function codeRoutes(app: App, ctx: Ctx): void {
         }
         throw error;
       }
+      await rateRelease(ctx, request.session.ip, "code");
       return { id: target.shareId };
     },
   );

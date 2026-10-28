@@ -102,7 +102,7 @@ export async function announceShare(
   net: string,
   preview: string,
 ): Promise<void> {
-  if (!share.access.nearby) return;
+  if (!share.access.nearby || net.startsWith("client:")) return;
   const item = keys.nearbyItem(share.id);
   const pipeline = ctx.valkey.multi();
   pipeline.zadd(keys.nearbyNet(net), Date.now(), share.id);

@@ -10,7 +10,7 @@ import {
 import "@fastify/cookie";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Ctx } from "./ctx.js";
-import { resolveClientIp, resolveNet } from "./net.js";
+import { cidrContains, parseIp, resolveClientIp, resolveNet } from "./net.js";
 import { requireCapacity } from "./quotas.js";
 
 export interface Identity {
@@ -61,11 +61,25 @@ export const guestName = (clientId: string) => `Guest-${clientId.slice(0, 4)}`;
 /** The client address after applying the trusted-proxy rules of §7. */
 export function clientIp(ctx: Ctx, request: FastifyRequest): string {
   const forwarded = request.headers["x-forwarded-for"];
-  return resolveClientIp(
+  const resolved = resolveClientIp(
     request.ip,
     typeof forwarded === "string" ? forwarded : undefined,
     ctx.trusted,
   );
+  const bytes = parseIp(resolved);
+  if (
+    ctx.config.network === "public" &&
+    (!bytes || ctx.trusted.some((cidr) => cidrContains(cidr, bytes)))
+  ) {
+    if (Date.now() - ctx.unknownClientWarningAt >= 60_000) {
+      ctx.unknownClientWarningAt = Date.now();
+      request.log.warn(
+        "Public client identity is unknown: check Docker userland-proxy/IPv6 port bindings and the TLS proxy X-Forwarded-For chain",
+      );
+    }
+    return "unknown";
+  }
+  return resolved;
 }
 
 /** Starts a session for the browser: a new client id in the signed `gachipad_sid` cookie. */

@@ -50,6 +50,7 @@ const NEARBY_CACHE_MS = 5000;
 
 /** Everything a route needs: stores, Valkey, settings and the event publishers. */
 export class Ctx {
+  unknownClientWarningAt = 0;
   readonly config: Config;
   readonly stores: Stores;
   readonly valkey: Redis;

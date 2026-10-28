@@ -59,7 +59,7 @@ const envSchema = z.object({
   /** Requests per client IP and minute, per bucket. */
   RATE_LIMIT_API_PER_MIN: z.coerce.number().int().positive().default(1200),
   RATE_LIMIT_CODE_PER_MIN: z.coerce.number().int().positive().default(30),
-  RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN: z.coerce.number().int().positive().default(60),
+  RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN: z.coerce.number().int().positive().default(300),
   RATE_LIMIT_CREATE_PER_MIN: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_LOGIN_PER_MIN: z.coerce.number().int().positive().default(10),
   /** Asks GitHub for the latest release now and then; `off` makes no outbound request at all. */
@@ -139,6 +139,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const storage = storageKindFromUrl(databaseUrl);
   const production = parsed.NODE_ENV === "production";
   if (parsed.GACHIPAD_NETWORK === "public") {
+    if (!parsed.TRUST_PROXY.split(",").some((cidr) => cidr.trim()))
+      throw new Error("Public mode requires TRUST_PROXY with the actual proxy CIDRs");
     let url: URL;
     try {
       url = new URL(parsed.PUBLIC_URL);
@@ -148,7 +150,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (
       url.protocol !== "https:" ||
       !url.hostname.includes(".") ||
-      /(?:\.local|\.localhost)\.?$|^[\d.]+$|:|\.$/.test(url.hostname) ||
+      /(?:\.local|\.localhost|\.test|\.example|\.invalid)\.?$|^[\d.]+$|:|\.$/.test(url.hostname) ||
       url.username ||
       url.password ||
       url.port ||
@@ -184,7 +186,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     adminAllowCidr: (
       parsed.ADMIN_ALLOW_CIDR.trim() ||
       (parsed.GACHIPAD_NETWORK === "public"
-        ? "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+        ? "127.0.0.0/8,::1/128,10.0.0.0/8,192.168.0.0/16,fc00::/7"
         : "")
     )
       .split(",")

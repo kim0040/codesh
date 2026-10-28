@@ -67,7 +67,7 @@ network_proxy_cidr() {
   [ "$prefix" -gt 0 ] || return 1
   local -a parts=()
   if [[ "$address" == *:* ]]; then
-    [ "$prefix" -le 128 ] && [[ "$address" =~ ^[0-9a-fA-F:]+$ ]] || return 1
+    [ "$prefix" -ge 32 ] && [ "$prefix" -le 128 ] && [[ "$address" =~ ^[0-9a-fA-F:]+$ ]] || return 1
     [[ "$address" != *:::* ]] || return 1
     rest="${address/::/}"
     [[ "$rest" != *::* ]] || return 1
@@ -80,13 +80,39 @@ network_proxy_cidr() {
     if [[ "$address" == *::* ]]; then [ "$count" -lt 8 ];
     else [[ "$address" != :* && "$address" != *: ]] && [ "$count" -eq 8 ]; fi
   else
-    [ "$prefix" -le 32 ] || return 1
+    [ "$prefix" -ge 8 ] && [ "$prefix" -le 32 ] || return 1
     IFS='.' read -r -a parts <<<"$address"
     [ "${#parts[@]}" -eq 4 ] && [[ "$address" != *. ]] || return 1
     for part in "${parts[@]}"; do
       [[ "$part" =~ ^(0|[1-9][0-9]{0,2})$ ]] && [ "$part" -le 255 ] || return 1
     done
   fi
+}
+
+# NETWORK_SUBNET is the IPv4 compose network. Compare the common prefix before trusting a proxy.
+network_proxy_overlaps() {
+  local proxy="$1" subnet="$2" a b prefix mask
+  [[ "$proxy" != *:* && "$subnet" != *:* ]] || return 1
+  prefix="${proxy##*/}"
+  [ "$prefix" -le "${subnet##*/}" ] || prefix="${subnet##*/}"
+  local -a parts=()
+  IFS='.' read -r -a parts <<<"${proxy%/*}"
+  a=$((parts[0]*16777216 + parts[1]*65536 + parts[2]*256 + parts[3]))
+  IFS='.' read -r -a parts <<<"${subnet%/*}"
+  b=$((parts[0]*16777216 + parts[1]*65536 + parts[2]*256 + parts[3]))
+  mask=$(( (0xffffffff << (32-prefix)) & 0xffffffff ))
+  [ "$((a & mask))" = "$((b & mask))" ]
+}
+
+network_gateway() {
+  local subnet="$1" prefix address mask
+  local -a parts=()
+  prefix="${subnet##*/}"
+  IFS='.' read -r -a parts <<<"${subnet%/*}"
+  address=$((parts[0]*16777216 + parts[1]*65536 + parts[2]*256 + parts[3]))
+  mask=$(( (0xffffffff << (32-prefix)) & 0xffffffff ))
+  address=$(( (address & mask) + 1 ))
+  printf '%s.%s.%s.%s' "$((address>>24))" "$(((address>>16)&255))" "$(((address>>8)&255))" "$((address&255))"
 }
 
 select_network() {
@@ -114,7 +140,10 @@ select_network() {
     fi
     network_domain "$NETWORK_DOMAIN" || die 'public mode requires a DNS name you own; IP addresses, .local and single-label names are not allowed'
     if [ "$PROXY_OPTION_SET" = 0 ] && [ "$previous" = public ]; then PROXY_OPTION="$(env_get GACHIPAD_BEHIND_PROXY)"; fi
-    [ -z "$PROXY_OPTION" ] || network_proxy_cidr "$PROXY_OPTION" || die '--behind-proxy requires a valid non-universal IPv4 or IPv6 CIDR'
+    [ -z "$PROXY_OPTION" ] || network_proxy_cidr "$PROXY_OPTION" || die '--behind-proxy requires an IPv4 prefix >= 8 or IPv6 prefix >= 32'
+    if [ -n "$PROXY_OPTION" ] && network_proxy_overlaps "$PROXY_OPTION" "${NETWORK_SUBNET:-$(env_get NETWORK_SUBNET 172.29.88.0/24)}"; then
+      die '--behind-proxy must not overlap NETWORK_SUBNET; use a separate proxy network'
+    fi
     [ -n "$ACME_OPTION" ] || ACME_OPTION="$(env_get ACME_EMAIL)"
     [ -z "$ACME_OPTION" ] || [[ "$ACME_OPTION" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || die 'ACME_EMAIL / --acme-email must be a plain email address'
     PUBLIC_URL="https://$NETWORK_DOMAIN"
@@ -132,11 +161,11 @@ select_network() {
 }
 
 persist_network() {
-  local fresh="$1" name value previous
+  local fresh="$1" name value previous stored internal_default
   previous="$(env_get GACHIPAD_NETWORK internal)"
   if [ "$GACHIPAD_NETWORK" = public ]; then
     if [ "$previous" != public ]; then
-      for name in SITE_ADDRESS PUBLIC_URL SITE_ALIASES CADDY_TRUSTED_PROXIES TRUST_PROXY; do
+      for name in SITE_ADDRESS PUBLIC_URL SITE_ALIASES CADDY_TRUSTED_PROXIES TRUST_PROXY ADMIN_ALLOW_CIDR GACHIPAD_BIND_ADDRESS; do
         # The caller has not written network overrides yet.
         value="$(env_get "$name")"
         env_set "GACHIPAD_INTERNAL_$name" "$value"
@@ -145,21 +174,34 @@ persist_network() {
     env_set PUBLIC_URL "$PUBLIC_URL"
     env_set SITE_ADDRESS "$SITE_ADDRESS"
     env_set SITE_ALIASES ''
+    env_set GACHIPAD_PUBLIC_TLS "$(if [ -n "$PROXY_OPTION" ]; then echo proxy; else echo acme; fi)"
+    # The shipped compose network is IPv4-only: published IPv6 would use docker-proxy and lose IPs.
+    env_set GACHIPAD_BIND_ADDRESS '0.0.0.0:'
+    echo 'install: public ports bind IPv4 only; IPv6 requires a dual-stack Docker network with ip6tables enabled and userland-proxy disabled.'
     env_set GACHIPAD_BEHIND_PROXY "$PROXY_OPTION"
     env_set ACME_EMAIL "$ACME_OPTION"
     env_set CADDY_TRUSTED_PROXIES "${PROXY_OPTION:-127.0.0.1/32}"
     value="$(env_get NETWORK_SUBNET 172.29.88.0/24)"
+    env_set NETWORK_GATEWAY "$(network_gateway "$value")"
     [ -z "$PROXY_OPTION" ] || value+=",$PROXY_OPTION"
     env_set TRUST_PROXY "$value"
     if [ -z "$(env_get ADMIN_ALLOW_CIDR)" ]; then
-      env_set ADMIN_ALLOW_CIDR '127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7'
+      env_set ADMIN_ALLOW_CIDR '127.0.0.0/8,::1/128,10.0.0.0/8,192.168.0.0/16,fc00::/7'
     fi
     echo 'install: public admin access is restricted by ADMIN_ALLOW_CIDR; add your administrator IP/CIDR in .env to widen it.'
-    if [ "$fresh" = 1 ]; then
-      while IFS='=' read -r name value; do env_set "$name" "${!name:-$value}"; done <<'LIMITS'
+    echo 'install: public admin defaults omit 172.16.0.0/12; add your administrator CIDR outside NETWORK_SUBNET to ADMIN_ALLOW_CIDR if needed.'
+    if [ "$fresh" = 1 ] || [ "$previous" != public ]; then
+      while IFS='=' read -r name value; do
+        stored="$(env_get "$name")"
+        internal_default="$(sed -n "s/^$name=//p" .env.example | tail -n 1)"
+        if [ "$fresh" = 1 ]; then env_set "$name" "${!name:-$value}"
+        elif [ -z "$stored" ] || [ "$stored" = "$internal_default" ]; then env_set "$name" "$value"
+        else echo "install: keeping operator $name=$stored; recommended public value: $value"
+        fi
+      done <<'LIMITS'
 RATE_LIMIT_API_PER_MIN=300
 RATE_LIMIT_CODE_PER_MIN=10
-RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN=60
+RATE_LIMIT_CODE_GLOBAL_FAILURES_PER_MIN=300
 RATE_LIMIT_CREATE_PER_MIN=10
 RATE_LIMIT_LOGIN_PER_MIN=5
 QUOTA_WINDOW_SECONDS=86400
@@ -182,10 +224,11 @@ LIMITS
   elif [ "$previous" = public ]; then
     env_set PUBLIC_URL "$PUBLIC_URL"
     env_set SITE_ADDRESS "$SITE_ADDRESS"
-    for name in SITE_ALIASES CADDY_TRUSTED_PROXIES TRUST_PROXY; do
+    for name in SITE_ALIASES CADDY_TRUSTED_PROXIES TRUST_PROXY ADMIN_ALLOW_CIDR GACHIPAD_BIND_ADDRESS; do
       env_set "$name" "$(env_get "GACHIPAD_INTERNAL_$name")"
     done
     env_set GACHIPAD_BEHIND_PROXY ''
+    env_set GACHIPAD_PUBLIC_TLS acme
   fi
   env_set GACHIPAD_NETWORK "$GACHIPAD_NETWORK"
 }
@@ -194,7 +237,9 @@ network_addresses() {
   echo "install: network $(env_get GACHIPAD_NETWORK internal)"
   if [ "$(env_get GACHIPAD_NETWORK internal)" = public ]; then
     echo "install: open $(env_get PUBLIC_URL)"
-    echo "install: point DNS A/AAAA for $NETWORK_DOMAIN to this server's public IPv4/IPv6 address (or the TLS proxy)."
+    echo "install: point DNS A for $NETWORK_DOMAIN to this server's public IPv4 address (or the TLS proxy)."
+    echo 'install: guests can create documents; set guestAllowed=false in the admin console and configure OIDC/LDAP for a closed site.'
+    echo 'install: for a large shared NAT, raise SSE_MAX_PER_IP, RATE_LIMIT_API_PER_MIN and RATE_LIMIT_CODE_PER_MIN as needed.'
     if [ -n "$(env_get GACHIPAD_BEHIND_PROXY)" ]; then
       echo 'install: open TCP 443 on the TLS proxy; forward HTTP to Caddy only from the configured proxy CIDR. Send X-Forwarded-For and X-Forwarded-Proto: https.'
     else
@@ -677,7 +722,33 @@ install_unlock() {
 # wait_healthy [seconds] [path]: local Caddy, with the configured site's Host and TLS SNI.
 # curl is required: wget variants differ in redirect, TLS routing and total-deadline semantics.
 wait_healthy() {
-  if [ "$(env_get GACHIPAD_NETWORK internal)" = public ]; then wait_api "${1:-120}"; return; fi
+  if [ "$(env_get GACHIPAD_NETWORK internal)" = public ]; then
+    local public_deadline public_remaining public_code public_host public_port public_id public_state stable_state=""
+    public_deadline=$((SECONDS + ${1:-120}))
+    wait_api "${1:-120}" || return 1
+    command -v curl >/dev/null 2>&1 || die 'curl is required for bounded health checks'
+    public_host="$(env_get PUBLIC_URL)"; public_host="${public_host#https://}"
+    public_port="$(env_get HTTP_PORT 80)"
+    while [ "$SECONDS" -lt "$public_deadline" ]; do
+      public_remaining=$((public_deadline - SECONDS))
+      public_code="$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' \
+        --resolve "$public_host:$public_port:127.0.0.1" --connect-timeout "$public_remaining" --max-time "$public_remaining" \
+        "http://$public_host:$public_port/healthz" 2>/dev/null)" || public_code=000
+      if [ "$SECONDS" -lt "$public_deadline" ]; then
+        case "$(env_get GACHIPAD_PUBLIC_TLS acme):$public_code" in acme:3[0-9][0-9] | proxy:403)
+          public_id="$(docker compose ps -q caddy)"
+          public_state="$(docker inspect --format '{{.State.Running}} {{.State.Restarting}} {{.RestartCount}}' "$public_id" 2>/dev/null)" || public_state=""
+          if [[ "$public_state" == 'true false '* ]]; then
+            [ "$stable_state" != "$public_state" ] || return 0
+            stable_state="$public_state"
+          else stable_state=""; fi
+          ;; esac
+      fi
+      [ "$SECONDS" -ge "$public_deadline" ] || sleep 1
+    done
+    echo 'public Caddy did not answer locally before the deadline; refusing installation' >&2
+    return 1
+  fi
   local port url deadline remaining code site host scheme=http
   command -v curl >/dev/null 2>&1 || die "curl is required for bounded health checks"
   site="$(env_get SITE_ADDRESS :80)"

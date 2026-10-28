@@ -172,7 +172,12 @@ install_cleanup() {
       cp -p "$ENV_SNAPSHOT" .env.install-recovery && mv .env.install-recovery .env || restored=0
     else rm -f .env || restored=0; fi
     if [ "$restored" = 1 ] && [ "$FRESH" = 0 ] && [ "$START_ATTEMPTED" = 1 ]; then
-      docker compose up -d --wait || { echo 'install: settings restored; could not restart the previous configuration. Run docker compose up -d --wait.' >&2; status=1; }
+      # Candidate process overrides must not mask the restored file during rollback.
+      unset GACHIPAD_NETWORK PUBLIC_URL SITE_ADDRESS COMPOSE_PROFILES GACHIPAD_DB DATABASE_URL HTTP_PORT HTTPS_PORT COLLAB_REPLICAS
+      local -a restart_command=(docker compose up -d --wait --wait-timeout 120)
+      # macOS does not ship GNU timeout; Compose still bounds the readiness wait there.
+      if command -v timeout >/dev/null 2>&1; then restart_command=(timeout -k 5 150 "${restart_command[@]}"); fi
+      "${restart_command[@]}" || { echo 'install: settings restored; could not restart the previous configuration. Run docker compose up -d --wait.' >&2; status=1; }
     fi
   fi
   if [ "$restored" = 1 ]; then

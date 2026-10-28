@@ -14,6 +14,7 @@ import {
 } from "@gachipad/shared";
 import { diagnosticShareRef } from "@gachipad/storage";
 import { z } from "zod";
+import { codeFailureStatus } from "../codes.js";
 import { randomKey } from "../crypto.js";
 import type { Ctx } from "../ctx.js";
 import { notFound } from "../errors.js";
@@ -135,6 +136,7 @@ export function adminDiagnosticRoutes(app: App, ctx: Ctx): void {
   app.get(
     "/api/admin/security",
     async (): Promise<AdminSecurity> => ({
+      codeFailures: await codeFailureStatus(ctx),
       cidrRestricted: ctx.config.adminAllowCidr.length > 0,
       proxyRestricted: ctx.config.trustProxy.length > 0,
       loginPerMinute: ctx.config.rateLimit.loginPerMinute,
