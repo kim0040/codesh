@@ -366,12 +366,15 @@ gachipad는 SQLite, 번들 PostgreSQL, 번들 MongoDB 및 외부 데이터베이
 
 #### 마이그레이션 단계별 동작 과정 (다운타임 안내)
 1. **사전 검사 및 락 획득**:
-   - 설치 락(`state/install.lock`)을 획득하고, 미완료 트랜잭션(`state/transaction`) 유무를 확인합니다.
+   - 설치 락(`state/install.lock`)을 획득하고, 미완료 트랜잭션(`state/transaction`) 유무를 확인합니다. `install.sh`, `backup.sh`, `restore.sh`, `update.sh`, `upgrade.sh` 공통 배포 스크립트는 시작 시(의존성 점검, 잠금 획득, 파일/로그/상태 변경 전) `state/transaction`에 미완료 또는 실행 중인 마이그레이션 마커(`database migration`)가 존재하면 어떠한 변경도 수행하기 전에 즉시 실행을 거부(`exit 1`)하고 복구 레시피를 출력합니다.
+   - 단, `update.sh`의 `--help`, `--check`, `--disable-auto`, 그리고 `--enable-auto --dry-run` 옵션은 마커 유무와 관계없이 정상 동작합니다(일반 설치 락은 여전히 적용됨).
    - 필요한 호스트 도구(`tee -p`, `curl`, `gzip` 등)와 버전 일치 여부(`VERSION` == `GACHIPAD_VERSION`)를 검증합니다.
 2. **동일 백엔드 검증**:
    - 소스와 대상이 동일한 번들 백엔드이거나 동일한 외부 URL인 경우 즉시 거부합니다.
 3. **스테이징 환경 구성**:
-   - 비공개 임시 디렉터리(`.env.migrate-db.XXXXXX`)를 생성하고, 현재 `.env`와 마커 파일(`state/database-kind`)을 백업합니다.
+   - 비공개 임시 디렉터리(`.env.migrate-db.XXXXXX`)를 생성하고, 원본 설정을 복사하기 전에 대상 식별자와 `preflight` 단계를 먼저 기록합니다.
+   - 각 단계 경계(`preflight`, `backup`, `copy`, `switch`, `live`)에 진입하기 직전, `state/transaction.tmp`를 비공개로 작성하고 명시적으로 디스크에 동기화(`sync`)한 뒤, 원자적 이름 변경(`mv`)을 통해 `state/transaction`에 스냅샷 경로(`snapshot`), 단계(`phase`), 소스 및 대상 종류(`source`, `destination`), 대상 볼륨(`volume`), 무작위 실행 식별자(`run` ID)를 비공개 메타데이터로 기록합니다(연결 정보나 비밀값은 포함하지 않음).
+   - 트랜잭션 마커 없이 남아 있는 임시 스테이징 디렉터리(`.env.migrate-db.*`)나 `state/transaction.tmp` 파일은 미완료 마이그레이션 또는 중단된 업데이트(15.7절)의 증거로 간주되어 변경 작업을 차단하므로, 임의로 무시하지 말고 보존 및 수동 점검해야 합니다.
    - 대상 백엔드에 필요한 비밀값과 Compose 프로필을 스테이징 디렉터리 내부에서 미리 생성합니다(라이브 `.env`는 변경되지 않음).
 4. **프리플라이트 점검 (Preflight, 소스 다운타임 전 실행)**:
    - 번들 대상 볼륨이 이미 존재하는 경우 비어 있는지 확인하고(데이터가 있으면 거부), 새 볼륨인 경우 고유 마이그레이션 레이블을 부여하여 생성합니다.
@@ -392,8 +395,9 @@ gachipad는 SQLite, 번들 PostgreSQL, 번들 MongoDB 및 외부 데이터베이
    - 복사 완료 후 소스와 대상 간 SHA-256 레코드 다이제스트 일치 여부를 검증합니다.
 9. **설정 적용 및 서비스 재개 (다운타임 종료)**:
    - 복사 검증이 성공하면 스테이징의 `.env`를 원자적으로 교체하고 `state/database-kind` 마커를 갱신합니다.
-   - 대상 데이터베이스와 API, Collab을 가동하고 헬스체크 통과를 확인한 후 Caddy 인그레스를 다시 열어 서비스를 재개합니다.
-   - 스테이징 스냅샷 및 트랜잭션 마커를 정리합니다.
+   - 대상 데이터베이스와 API, Collab을 가동하고 API 준비 상태를 확인한 뒤, Caddy 인그레스를 다시 열기 직전에 단계 마커를 `live`로 원자적 갱신합니다.
+   - Caddy 인그레스를 열어 외부 트래픽을 재개하고 서비스 헬스체크 정상 통과를 검증합니다.
+   - 마이그레이션이 완전히 성공하면 스테이징 스냅샷 및 트랜잭션 마커를 정리합니다.
    - **소스 데이터 볼륨은 자동으로 삭제되지 않고 보존됩니다.**
 
 #### 소스 불변성 및 쓰기 정지 필수 요건
@@ -412,6 +416,109 @@ gachipad는 SQLite, 번들 PostgreSQL, 번들 MongoDB 및 외부 데이터베이
 | `migrate-db: destination volume identity could not be verified; retained for manual inspection.` | 새로 생성한 대상 볼륨의 고유 식별자가 일치하지 않아 자동 삭제되지 않음 | 안전을 위해 보존된 볼륨이므로 `docker volume ls`로 상태를 수동 점검한 후 불필요 시 수동 삭제하십시오. |
 | `migrate-db: new backend may have accepted writes; destination retained. Reconcile those writes before retrying or removing any data.` | 인그레스가 열린 후 헬스체크 실패 등으로 롤백되었으며, 새 백엔드에 사용자의 쓰기가 유입되었을 가능성이 있음 | 새 백엔드에 저장된 데이터를 수동으로 대조하고 조정한 후 대상을 정리하십시오. |
 | `migrate-db: automatic recovery incomplete; configuration snapshots kept in <STAGE>.` | 자동 복구 과정에서 오류가 발생하여 원본 설정 복구가 불완전하게 끝남 (종료 코드 3) | 출력된 수동 복구 지침에 따라 `<STAGE>/original.env`를 복원하고 이전 서비스를 수동으로 재시작하십시오. |
+| `migrate-db: migration in progress (pid <owner>); wait.` | 마이그레이션 프로세스가 현재 유효하게 실행 중임 (부팅 ID, 락 생성 시각, 실행 명령행 인자 검증 완료) | 현재 진행 중인 마이그레이션이 끝날 때까지 대기하십시오. |
+| `migrate-db: if no migrate-db.sh process is running, this marker may be stale; follow the recovery recipe below.` | 이전 마이그레이션이 비정상 종료되었거나 유효한 프로세스가 감지되지 않음 | 프로세스 종료를 확인한 후 출력된 단계별 복구 레시피에 따라 수동 복구를 진행하십시오. |
+| `unfinished database migration staging files or state/transaction.tmp; preserve them and recover manually per OPERATIONS 9.6, or for an interrupted update per OPERATIONS 15.7, before continuing` | 트랜잭션 마커 없이 잔여 스테이징 디렉터리(`.env.migrate-db.*`)나 `state/transaction.tmp`가 존재함 | 파일을 삭제하지 말고 보존한 상태에서 미완료 마이그레이션(9.6절) 또는 중단된 업데이트(15.7절) 지침에 따라 수동 점검 및 복구하십시오. |
+
+#### 비정상 종료(하드 크래시) 복구 절차 및 공통 배포 명령 거부
+
+마이그레이션 도중 SIGKILL, 전원 차단, 시스템 충돌 등으로 인해 프로세스가 비정상 종료되면 정상적인 EXIT 트랩 복구가 실행되지 못하고 `state/transaction`에 미완료 마이그레이션 마커(`database migration`)가 남게 됩니다.
+
+`install.sh`, `backup.sh`, `restore.sh`, `update.sh`, `upgrade.sh` 공통 배포 스크립트는 시작 시(의존성 점검, 잠금 획득, 파일 및 상태 변경 전) 이 마이그레이션 마커를 감지하여 작업을 즉시 거부(`exit 1`)하고 동일한 복구 지침을 출력합니다.
+
+- **안전 차단(Fail-Closed) 정책**:
+  - `state/transaction` 파일이 비어 있거나(empty), 권한 문제로 읽을 수 없거나(unreadable), 충돌로 인해 잘린 경우(torn), 심볼릭 링크나 일반 파일이 아닌 경우(nonregular), 또는 알 수 없는 내용인 경우 작업을 즉시 거부(`exit 1`)하고 트랜잭션 및 데이터 증거를 보존합니다.
+  - 오직 `FROM=`으로 시작하는 정상 읽기 가능한 업데이터 마커가 존재할 때만 15.7절의 수동 백업 복원(`restore.sh`) 흐름이 허용되며, 임의의 비 마이그레이션 텍스트는 허용되지 않습니다.
+  - `migrate-db.sh` 실행 중 `FROM=` 업데이터 마커를 만나면 마이그레이션 스냅샷 레시피 대신 15.7절 업데이트 롤백 복구를 안내합니다.
+  - 마커가 없는 레거시 1.0.x 설치 환경은 기존 동작을 그대로 유지합니다.
+  - `state/transaction.tmp`나 `.env.migrate-db.*` 스테이징 파일이 마커 없이 단독으로 남아 있는 경우에도 공통 스크립트 실행이 차단되며, 미완료 마이그레이션 또는 중단된 업데이트 증거로 보존하여 수동 점검해야 합니다.
+
+- **실행 중인 프로세스 검증 및 대기 안내**:
+  - 잠금 소유자에 대한 단순 프로세스 ID 검사만으로는 대기 안내를 출력하지 않습니다. 오직 다음 조건이 모두 검증된 경우에만 대기 메시지(`migrate-db: migration in progress (pid <owner>); wait.`)를 출력하고 종료합니다:
+    1. `state/install.lock.d/owner`의 PID가 숫자이고, 자기 자신(`$$`)이 아니며, 현재 생존(`kill -0 <owner>`)해 있음.
+    2. 현재 시스템의 부팅 ID(`/proc/sys/kernel/random/boot_id`)가 잠금에 기록된 `state/install.lock.d/boot`와 일치함.
+    3. 시스템 부팅 시각(`/proc/stat`의 `btime`) 이후에 생성된 잠금 파일임(`stat -c %Y state/install.lock.d` >= `btime`).
+    4. 해당 프로세스의 실행 명령행(`/proc/<owner>/cmdline`)에 `migrate-db.sh` 실행 인자가 정확히 포함되어 있음.
+  - 위 조건 중 하나라도 만족하지 않거나(부팅 ID 불일치, 이전 부팅의 오래된 잠금, 무관한 프로세스, 프로세스 종료 등) 증거를 읽을 수 없는 경우, 마커가 오래되었을 수 있다는 경고(`migrate-db: if no migrate-db.sh process is running, this marker may be stale; follow the recovery recipe below.`)와 함께 단계별 복구 레시피 전체를 출력합니다. 운영자는 복구 착수 전 실제 프로세스 종료 여부를 반드시 확인해야 합니다.
+
+비정상 종료 발생 시 다음 절차에 따라 수동 복구를 진행하십시오.
+
+##### 1. 선행 확인 및 공통 정리
+
+1. 마이그레이션 프로세스가 완전히 종료되었는지 먼저 확인합니다.
+2. 셸 환경 변수 재정의를 해제합니다.
+   ```sh
+   unset DATABASE_URL GACHIPAD_DB COMPOSE_PROFILES GACHIPAD_DATABASE_URL
+   ```
+3. `live` 단계를 제외하고, 쓰기 프로세스를 재개하기 전에 생존해 있는 마이그레이션 실행 전용 일회성 컨테이너를 강제 제거합니다(`state/transaction`의 `run` 식별자 확인, 32자리 16진수).
+   ```sh
+   docker rm -f gachipad-migrate-<run>-image gachipad-migrate-<run>-preflight gachipad-migrate-<run>-checkpoint gachipad-migrate-<run>-users gachipad-migrate-<run>-copy
+   ```
+4. `preflight`와 `live` 단계를 제외하고, 서비스 쓰기 정지 상태를 유지합니다.
+   ```sh
+   docker compose stop caddy api collab
+   ```
+
+##### 2. 단계(Phase)별 복구 요약
+
+`state/transaction`의 `phase=` 값에 따라 단계별 복구를 수행합니다. 마커에 단계 메타데이터가 누락된 구버전 마커이거나 알 수 없는 단계인 경우(`unknown`)에는 가장 보수적인 복구 레시피(`switch` 단계와 동일)를 적용합니다.
+
+| 단계 (`phase`) | 상태 및 라이브 영향 | 설정 및 마커 복원 | 컨테이너 및 서비스 복구 명령 | 대상 데이터 점검 및 복구 |
+|---|---|---|---|---|
+| `preflight` | 쓰기 프로세스를 중지하지 않았고 라이브 설정(`.env`)도 변경되지 않음. 대상 데이터베이스는 접속 및 빈 상태 탐색만 수행됨. | 복원 불필요 (라이브 설정 유지) | 쓰기 중지, 설정 복원, 백엔드 재시작 불필요 (`migrate-db: preflight did not stop writers or change the live configuration; no writer stop, configuration restore or backend restart is needed.`) | 대상은 탐색만 되었으므로 기존 대상 데이터를 보존함 (`migrate-db: destination was only probed; preserve existing destination data.`). 스냅샷 디렉터리가 누락된 경우에도 라이브 설정은 안전하게 유지됩니다. |
+| `backup` | 소스 데이터 정지 백업 및 대상 컨테이너 기동 단계에서 중단됨. | 라이브 설정(`.env`) 및 마커(`state/database-kind`) 변경 없음 (저장된 소스 설정 유지) | 1. 쓰기 중지 유지: `docker compose stop caddy api collab`<br>2. 대상 컨테이너 정리 (아래 대상 백엔드 정리 표 참조)<br>3. 잔여 백업 일회성 컨테이너 점검: `docker ps -a --filter label=com.docker.compose.oneoff=True --filter "label=com.docker.compose.project=<project>"`<br>4. 소스 재기동: `docker compose up -d --pull never --wait` 후 공유 및 업로드 데이터 확인 | 대상 기동으로 빈 볼륨이 초기화되었을 수 있으므로 재시도 전 점검 (`destination startup may have initialized an empty volume; inspect it before retrying.`). 소스 볼륨은 절대로 삭제하지 마십시오. |
+| `copy` | 쓰기 정지 상태에서 오프라인 데이터 복사(`copy-db`) 도중 중단됨. | 라이브 설정 및 마커 변경 없음 (저장된 소스 설정 유지) | 1. 쓰기 중지 유지: `docker compose stop caddy api collab`<br>2. 대상 컨테이너 정리 (아래 대상 백엔드 정리 표 참조)<br>3. 잔여 백업 일회성 컨테이너 점검<br>4. 소스 재기동: `docker compose up -d --pull never --wait` 후 공유 및 업로드 데이터 확인 | 대상에 부분 복사본이 포함될 수 있으므로, 재시도 전 대상 데이터만 점검 및 정리 (`inspect and clear only destination data before retrying.`). |
+| `switch` (또는 `unknown` / 구버전) | 설정 파일 교체(`mv .env.migrate-next .env`) 후 API/Collab 시작/대기 중 중단됨. 대상 백엔드에 사용자 쓰기가 유입되었을 가능성이 있음. | 1. 설정 복원: `cp -p <stage>/original.env .env`<br>2. 마커 복원: `cp -p <stage>/original.kind state/database-kind` (마이그레이션 전 마커가 없었다면 `rm -f state/database-kind`) | 1. 쓰기 중지 유지: `docker compose stop caddy api collab`<br>2. 대상 컨테이너 정리 (아래 대상 백엔드 정리 표 참조)<br>3. 잔여 백업 일회성 컨테이너 점검<br>4. 저장된 이전 소스 재기동: `docker compose up -d --pull never --wait` 후 공유 및 업로드 데이터 확인 | 대상 백엔드가 사용자 쓰기를 수락했을 수 있으므로, 재시도나 데이터 삭제 전 해당 쓰기 내역을 반드시 보존하고 대조(`reconcile`)하십시오 (`destination may have accepted writes; retain and reconcile those writes before retrying or removing data.`). |
+| `live` | Caddy 인그레스 개방(`INGRESS_OPENED=1`) 이후 또는 헬스체크 대기 중 중단됨. 인그레스가 열려 신규 쓰기가 대상 백엔드로 유입되었을 가능성이 있음. | **활성 백엔드 설정 판별**:<br>`cmp -s .env <stage>/.env`<br>- `exit 0`: 스테이징된 새 백엔드 설정이 라이브에 활성화되어 있음. 대상 컨테이너 및 라이브 설정을 유지하고 전진 복구(roll forward) 우선 적용. 설정 복원 불필요.<br>- `exit 1`: 이전 백엔드 설정 복원 상태(소프트 실패 후 소스 재기동 실패 생존 등) 또는 `.env` 수동 편집. 롤백으로 취급하고 스위치 이후 발생한 대상 쓰기 내역을 먼저 대조. 복원된 백엔드 재기동은 아래 명령 참조. 또는 전진 복구로 전환 시: `cp -p <stage>/.env .env` 및 `state/database-kind`에 대상 기록.<br>- 기타 종료 코드: 수동 점검. | 1. 대상 컨테이너를 중지/제거하거나 소스 설정을 복원하는 것을 첫 번째 조치로 수행하지 마십시오.<br>2. `cmp -s` 종료 코드 0인 경우: 대상과 라이브 설정을 유지하고 `docker compose ps` 확인 후 `/healthz` 및 공유/업로드 정상 확인 시 마커 제거.<br>3. `cmp -s` 종료 코드 1인 경우: `docker compose up -d --pull never --wait`로 복원된 이전 백엔드 재시작. 아직 마커를 제거하지 마십시오.<br>4. 롤백은 스위치 이후 대상 쓰기 내역을 대조한 뒤에만 운영자가 결정해야 하며, 대조 완료 전까지 양쪽 데이터베이스와 스냅샷을 모두 보존하십시오. | 대상 컨테이너 및 대상 데이터 보존. 스위치 이후 발생한 쓰기 내역을 대조하기 전까지 데이터를 삭제하지 마십시오. |
+
+##### 3. 대상 데이터베이스 정리 및 파일 보존 규칙
+
+대상 백엔드 종류별로 다음 명령을 실행하여 대상 컨테이너 및 데이터를 정리합니다.
+
+| 대상 백엔드 (`destination`) | 대상 컨테이너 정리 명령 | 점검 대상 및 주의 사항 |
+|---|---|---|
+| PostgreSQL | `docker compose --env-file <stage>/.env rm -sf postgres` | 마커의 `volume=`에 기록된 대상 볼륨만 점검합니다 (소스 볼륨은 절대로 삭제하지 마십시오). |
+| MongoDB | `docker compose --env-file <stage>/.env rm -sfv mongo-users mongo` | 대상 컨테이너 및 익명 볼륨을 함께 삭제합니다. 마커의 대상 볼륨만 점검합니다. |
+| SQLite | 해당 없음 (컨테이너 없음) | 공용 `gachipad-data` 볼륨 내 `/data/gachipad.db`, `/data/gachipad.db-wal`, `/data/gachipad.db-shm` 대상 파일만 쓰기 프로세스가 정지된 상태에서 점검 및 정리하며, 공용 데이터 볼륨 내의 다른 파일(사용자 업로드 등)은 반드시 보존합니다. |
+| External (외부) | 해당 없음 (외부 서버) | `<stage>/.env`에 구성된 외부 대상을 해당 서버의 자체 관리 도구로 점검 및 정리하되, 연결 자격 증명(비밀번호 등)은 외부에 노출되지 않도록 비공개로 유지합니다. `switch` 및 `live` 단계에서는 스위치 이후 발생한 쓰기가 대조될 때까지 외부 대상 연결 정보가 포함된 스냅샷 디렉터리를 보존하십시오. |
+
+- **SQLite 대상 공유 데이터 볼륨 규칙**:
+  - SQLite 대상은 사용자 업로드 파일(`uploads`)이 함께 저장되는 공유 데이터 볼륨(`gachipad-data`)을 사용하므로, 이 볼륨을 절대로 삭제해서는 안 됩니다 (`SQLite destination uses shared data volume <volume>; preserve the volume, uploads and all other files.`).
+  - 오직 쓰기 프로세스가 정지되고 해당 쓰기 내역이 대조된 상태에서 대상 파일인 `/data/gachipad.db`, `/data/gachipad.db-wal`, `/data/gachipad.db-shm` 파일만을 점검 및 정리하며, 공용 데이터 볼륨 내의 다른 파일(사용자 업로드 등)은 반드시 보존합니다.
+
+- **PostgreSQL / MongoDB 번들 대상 볼륨 삭제 및 검증된 빈 상태(provable emptiness) 확인**:
+  - 초기화된 빈 볼륨 안내 및 볼륨 삭제는 PostgreSQL / MongoDB에만 적용됩니다.
+  - 이들 백엔드의 대상 볼륨을 삭제하려면 반드시 다음 두 조건을 모두 만족해야 합니다:
+    1. 고유 실행 레이블 검증:
+       `docker volume ls -q --filter label=gachipad.migration=<run>` 명령을 실행하여 마커의 `volume=`과 정확히 일치하는 볼륨명이 출력되어야 합니다 (레이블 일치만으로는 삭제가 허용되지 않습니다).
+    2. 대상 컨테이너가 정지된 상태에서 검증된 빈 상태 증명:
+       먼저 볼륨 존재를 검사하여 없는 볼륨이 자동 생성되는 것을 방지한 뒤, 읽기 전용/네트워크 차단/`volume-nocopy` Node 빈 디렉터리 프로브를 실행해야 합니다:
+       ```sh
+       docker volume inspect <volume> >/dev/null && docker run --rm --pull never --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 0 --cap-add DAC_OVERRIDE --mount type=volume,src=<volume>,dst=/probe,volume-nocopy,readonly --entrypoint node "$(docker compose images -q api | head -n1)" -e 'process.exit(require("node:fs").readdirSync("/probe").length === 0 ? 0 : 1)'
+       ```
+       오직 종료 코드 0(`exit 0`)만이 비어 있음을 증명합니다. 프로브 실패는 빈 상태에 대한 증명이 아니며 볼륨 삭제가 허용되지 않습니다.
+
+- **잔여 백업 일회성 컨테이너 점검**:
+  `docker ps -a --filter label=com.docker.compose.oneoff=True --filter "label=com.docker.compose.project=<project>"`
+
+- **보존해야 할 데이터 및 파일**:
+  - **소스 데이터 및 볼륨**: 원본 소스 데이터베이스와 소스 볼륨은 절대로 삭제하지 마십시오.
+  - **소스 SQLite WAL/SHM 파일**: `-wal` 및 `-shm` 파일에는 아직 체크포인트되지 않은 커밋 데이터가 포함될 수 있으므로 절대로 임의 삭제하지 마십시오.
+  - **사용자 업로드 및 완료된 백업**: 사용자 업로드 파일(`uploads`) 및 `backups/` 내 정상 완료된 백업 아카이브는 항상 보존합니다.
+
+- **중단된 백업 파일 점검**:
+  - 모든 백업 프로세스가 종료된 후, 중단된 임시 백업 파일인 `backups/.backup.*` 파일만 점검하여 삭제합니다 (완료된 아카이브 보존).
+  - 소스가 SQLite인 경우 소스 SQLite 파일과 같은 디렉터리에 남아 있는 중단된 임시 디렉터리(`.gachipad-backup-*`)만 점검하여 제거합니다 (소스 데이터베이스 파일 및 `-wal`/`-shm` 파일은 보존).
+
+##### 4. 복구 검증 후 최종 정리
+
+복구가 완전히 성공하고 이전 백엔드에서 공유 및 업로드 데이터가 정상 동작함을 검증한 뒤(및 스위치 이후 발생한 대상 쓰기가 대조된 뒤)에만 다음 명령으로 스냅샷 디렉터리와 임시 파일, 트랜잭션 마커를 제거합니다.
+
+```sh
+rm -rf -- <stage> && rm -f .env.migrate-next .env.migrate-recovery state/database-kind.tmp state/transaction.tmp state/transaction
+```
+
+마지막으로 오래된 설치 락(`state/install.lock.d`)이 남아 있다면, 락 소유자 PID와 프로세스를 별도로 확인한 뒤에만 수동으로 제거하십시오 (`verify stale lock ownership before removing state/install.lock.d`).
 
 #### 복사 시간 창(--window-minutes) 튜닝 및 처리량
 
@@ -424,13 +531,15 @@ gachipad는 SQLite, 번들 PostgreSQL, 번들 MongoDB 및 외부 데이터베이
   `최소 윈도우(분) = 데이터 크기(MB) / 처리량(MB/s) / 60 * 2 + 5`
   네트워크 지연, 디스크 속도 및 대량의 레코드 수를 고려하여 최소 계산값의 2배 이상을 설정하는 것을 권장합니다(최대 1440분 = 24시간).
 
-#### 1.0.1 업데이터 환경에서의 migrate-db.sh 1회 수동 추출
+#### 1.0.1 업데이터 환경에서의 migrate-db.sh 및 lib.sh 수동 추출
 
-1.0.1 버전의 업데이터는 파일 배포 화이트리스트가 고정되어 있어 신규 스크립트인 `migrate-db.sh`를 자동으로 배포하지 못합니다. 1.0.1에서 1.1.0으로 업그레이드한 환경에서는 다음 명령어를 통해 1.1.0 번들 아카이브로부터 스크립트를 1회 수동 추출하여 배치해야 합니다.
+1.0.1 버전의 업데이터는 파일 배포 목록이 고정되어 있어 신규 스크립트인 `migrate-db.sh` 및 갱신된 `lib.sh`를 자동으로 배포하지 못합니다. 모든 스크립트(`install.sh`, `backup.sh`, `restore.sh`, `update.sh`, `upgrade.sh`, `migrate-db.sh`)는 구버전 `lib.sh`를 명시적으로 거부(`declare -F assert_no_database_migration >/dev/null || die 'lib.sh is older than this script'`)하므로, 1.0.1에서 1.1.0으로 업그레이드한 환경에서는 다음 명령어를 통해 1.1.0 번들 아카이브로부터 `lib.sh`와 `migrate-db.sh`를 함께 1회 수동 추출하여 배치해야 합니다.
 
 ```sh
 sha256sum -c gachipad-deploy-1.1.0.tar.gz.sha256 && \
 bundle_root="$(tar -tzf gachipad-deploy-1.1.0.tar.gz | cut -d / -f 1 | sort -u)" && \
+tar -xOf gachipad-deploy-1.1.0.tar.gz "$bundle_root/lib.sh" >lib.sh.new && \
+chmod 700 lib.sh.new && mv lib.sh.new lib.sh && \
 tar -xOf gachipad-deploy-1.1.0.tar.gz "$bundle_root/migrate-db.sh" >migrate-db.sh.new && \
 chmod 700 migrate-db.sh.new && mv migrate-db.sh.new migrate-db.sh && ./migrate-db.sh --help
 ```
@@ -837,6 +946,8 @@ API는 `/api/admin/update`(조회)와 `/api/admin/update/check`(즉시 확인, 1
 5. 파일·설정을 교체하고 새 앱을 기동합니다. Caddy는 정지한 채 컨테이너 내부 `/healthz`·`/readyz`의 2xx 응답을 확인합니다(`UPDATE_HEALTH_TIMEOUT`, 기본 180초; 각 요청도 남은 시간으로 제한). 검증 후 ingress를 엽니다.
 6. 검증 전 파일 복사·rename 오류나 HUP/INT/TERM, 기동 실패는 자동 복구로 이어집니다(15.7). 앱 검증을 통과한 뒤 ingress 활성화가 실패하면 이미 승인된 쓰기를 보존하기 위해 현재 파일·DB를 유지하고 쓰기를 닫은 채 `failed`로 기록합니다. 로그를 확인한 뒤 `docker compose up -d`로 재개합니다. SIGKILL·전원 차단처럼 trap이 실행되지 못한 경우에는 `state/transaction`, `state/update.json`, `rollback/`을 확인하고 수동 복구합니다. 미완료 transaction이 있으면 버전이 같더라도 다음 업데이트를 거절하며 스냅샷을 덮어쓰지 않습니다.
 
+`update.sh`는 인자 파싱을 먼저 수행하므로 `--help`, `--check`, `--disable-auto`, 그리고 `--enable-auto --dry-run` 옵션은 `state/transaction`의 마이그레이션 마커 유무와 관계없이 기존 동작을 유지합니다(일반 설치 락은 여전히 적용됨). 파일이나 상태를 변경하는 실제 업데이트 모드는 상태, 로그, 상태 JSON 변경 전에 `state/transaction`을 검사하여 미완료 마이그레이션 마커가 존재하면 즉시 거부(`exit 1`)하며, 이 거부로 인해 `state/update.json`이 덮어쓰이지 않습니다.
+
 모든 실행은 `state/update.log`(1 MiB에서 교체, 이전 파일 3개 보관)에 남고, 결과는 `state/update.json`에 기록되어 콘솔에 표시됩니다. 비밀값은 명령행 인자로 전달하지 않으며, GHCR 공개 이미지는 로그인 없이 받습니다. 복구가 끝난 뒤 상태 파일 기록이 실패해도 서비스는 유지되며 잠금은 해제됩니다. `rollback/`과 `rollback.previous.*`에는 `.env`·TLS 개인 키가 있으므로 설치 폴더 접근 권한을 제한하고 보관 정책에 따라 정리하십시오. 구버전의 `state/rollback/`도 다음 업데이트에서 `rollback.legacy.*`로 옮깁니다. 이전 버전의 이미지는 되돌리기를 위해 남겨 두므로 여유 공간이 부족하면 확인 후 `docker image prune`으로 정리하십시오.
 
 ### 15.5 오프라인 업데이트 (인터넷이 없는 서버)
@@ -866,7 +977,11 @@ sudo ./update.sh --disable-auto                              # 끄기
 ### 15.7 되돌리기 (롤백)
 - 자동: ingress와 실패한 API·Collab을 먼저 멈추고 이전 파일을 복구합니다. 새 앱 기동을 시도했다면 **DB 인프라만 먼저 시작하여 백업을 복원한 뒤** 이전 앱을 기동합니다. 복원은 호스트 `gzip -t`와 Mongo `mongorestore --dryRun`을 모두 통과하고 현재 DB의 안전 백업을 `backups/`에 추가한 뒤에만 DB를 삭제합니다. 안전 백업이 실패하면 삭제하지 않습니다. 새 릴리스가 추가한 collection도 지우고 백업의 DB를 되살립니다. 파일 교체 중 실패처럼 새 앱이 DB에 접근하기 전이면 DB 복원은 생략합니다. 이전 앱의 health/readiness 검증 후에만 ingress를 엽니다. 성공한 복구는 `rolled-back`, 복구 실패는 `failed`와 복구 지침으로 기록되며 종료 코드는 1입니다.
 - 수동: API·Collab·Caddy를 먼저 멈추고 `rollback/`의 파일을 설치 폴더로 복사합니다(`.env`, `docs`, `tls` 포함). 앱을 먼저 기동하지 말고 `./restore.sh backups/<업데이트 직전 백업> --yes`를 실행합니다. 이 명령은 비정상 종료·OOM 상태의 API·Collab도 정지시키고 공통 잠금 아래 백업 검증·현재 DB 안전 백업 → DB 복원 → 앱 검증 → ingress 개방 순서로 동작합니다. 복구와 실제 readiness를 확인한 뒤에만 `state/transaction`을 제거하고 업데이트를 재시도하십시오.
-- 온라인·오프라인 업데이트, 자동 타이머, backup/restore는 같은 설치 잠금을 사용합니다. `flock`이 없으면 atomic mkdir(`state/install.lock.d`)로 잠급니다. `flock` 획득 후 `owner` PID가 죽었거나 이전 부팅의 잠금임을 확인하면 자동 회수합니다. `flock` 없는 mkdir fallback에서 SIGKILL 뒤 남은 잠금은 `owner` PID와 실제 프로세스를 확인한 뒤에만 제거합니다. 복구가 실패하면 ingress를 닫은 채 `rollback/`, `state/transaction`, 백업과 로그를 보존합니다.
+- 온라인·오프라인 업데이트, 자동 타이머, backup/restore는 같은 설치 잠금을 사용합니다. `flock`이 없으면 atomic mkdir(`state/install.lock.d`)로 잠급니다. `flock` 획득 후 `owner` PID가 죽었거나 이전 부팅의 잠금임을 확인하면 자동 회수합니다. `flock` 없는 mkdir fallback에서 SIGKILL 뒤 남은 잠금은 `owner` PID와 실제 프로세스를 확인한 뒤에만 제거합니다. `install.sh`, `backup.sh`, `restore.sh`, `update.sh`, `upgrade.sh` 공통 명령은 시작 시(의존성 점검, 잠금 획득, 파일/로그/상태 변경 전) `state/transaction`을 검사하여 미완료 또는 실행 중인 마이그레이션 마커(`database migration`)가 존재하면 어떠한 변경도 수행하기 전에 즉시 실행을 거부(`exit 1`)하고 마이그레이션 복구 레시피(9.6절 참고)를 출력합니다.
+- 빈 파일(empty), 읽기 불가능한 권한(unreadable), 비정상 종료로 잘린 파일(torn), 심볼릭 링크나 일반 파일이 아닌 경우(nonregular), 또는 알 수 없는 마커인 경우 안전 차단(fail-closed) 정책에 따라 작업을 거부하고 트랜잭션 및 데이터 증거를 보존합니다.
+- 오직 `FROM=`으로 시작하는 정상적인 읽기 가능 업데이터 마커가 존재할 때만 15.7절의 수동 백업 복원(`restore.sh`) 흐름이 허용되며, 임의의 비 마이그레이션 텍스트는 허용되지 않습니다. 만약 `migrate-db.sh`가 `FROM=` 업데이터 마커를 만나면 마이그레이션 스냅샷 복구 대신 15.7절 업데이트 롤백 복구를 안내합니다. 마커가 없는 레거시 1.0.x 설치 환경 역시 기존 동작을 그대로 유지합니다.
+- `state/transaction.tmp` 파일은 `update.sh`와 공유됩니다. 읽기 가능한 `FROM=` 마커가 없는 상태에서 잔여 마이그레이션 스테이징 파일(`.env.migrate-db.*`)이나 `state/transaction.tmp` 파일이 남아 있다면 모든 변경 작업이 차단되며, 이를 미완료 마이그레이션(9.6절) 또는 중단된 업데이트(15.7절)의 증거로 보존하고 해당 절에 따라 수동 복구해야 합니다.
+- 복구가 실패하면 ingress를 닫은 채 `rollback/`, `state/transaction`, 백업과 로그를 보존합니다.
 
 현재 한계: commit 직후 신호가 오면 서비스가 정상이어도 콘솔의 마지막 상태가 maintenance로 남을 수 있으므로 실제 readiness와 로그를 확인하십시오. `+build` 메타데이터가 붙은 릴리스 태그는 다운로드 대상에서 메타데이터가 빠져 안전하게 실패할 수 있으므로 배포 태그에 사용하지 마십시오. Valkey의 조인 코드·grant·ban 등은 롤백하지 않으므로 키 형식 변경은 이전 앱과 호환되어야 합니다.
 
