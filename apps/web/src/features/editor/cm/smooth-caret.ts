@@ -1,4 +1,4 @@
-import { EditorSelection, type Extension, Transaction } from "@codemirror/state";
+import { EditorSelection, type Extension, type Text, Transaction } from "@codemirror/state";
 import {
   EditorView,
   type LayerMarker,
@@ -47,10 +47,12 @@ export function glides(tr: Transaction): boolean {
 }
 
 /**
- * A composition step that only inserts Hangul and moves the cursor on: a new syllable starts or a
- * committed one is followed by the next. Jamo joining the syllable already there leave the cursor
- * in the same place and only change its width, so that stays a snap. Judged by the composed text,
- * not by the UI language or the keyboard layout.
+ * A composition step that only inserts Hangul and starts a new syllable: the first jamo after
+ * committed text, or a syllable that splits into a finished one and the next. Jamo joining the
+ * syllable already there leave the cursor on it and only change its width, so that stays a snap.
+ * Judged by the composed text, not by the UI language or the keyboard layout, and by where the
+ * syllable under the cursor starts, not by how far the cursor moved: decomposed jamo advance the
+ * cursor with every one of them.
  */
 export function hangulStep(tr: Transaction): boolean {
   if (!tr.docChanged || tr.newSelection.main.head === tr.startState.selection.main.head) {
@@ -60,10 +62,45 @@ export function hangulStep(tr: Transaction): boolean {
   tr.changes.iterChanges((_from, _to, _fromB, _toB, inserted) => {
     if (!HANGUL.test(inserted.toString())) hangul = false;
   });
-  return hangul;
+  return (
+    hangul &&
+    syllableStart(tr.startState.doc, tr.startState.selection.main.head) !==
+      syllableStart(tr.newDoc, tr.newSelection.main.head)
+  );
 }
 
-class GlidingCaret implements LayerMarker {
+/** Longest run of conjoining jamo looked at when finding where a syllable starts. */
+const SYLLABLE_SPAN = 16;
+
+/** Position where the syllable ending at `head` starts, or -1 when there is nothing before it. */
+function syllableStart(doc: Text, head: number): number {
+  const from = Math.max(0, head - SYLLABLE_SPAN);
+  const text = doc.sliceString(from, head);
+  let i = text.length - 1;
+  while (i > 0 && joins(text.charCodeAt(i - 1), text.charCodeAt(i))) i--;
+  return from + i;
+}
+
+/** Role of a Hangul code in a syllable: leading, vowel or trailing jamo, or a whole syllable. */
+function jamoKind(code: number): "L" | "V" | "T" | "LV" | "LVT" | undefined {
+  if ((code >= 0x1100 && code <= 0x115f) || (code >= 0xa960 && code <= 0xa97c)) return "L";
+  if ((code >= 0x1160 && code <= 0x11a7) || (code >= 0xd7b0 && code <= 0xd7c6)) return "V";
+  if ((code >= 0x11a8 && code <= 0x11ff) || (code >= 0xd7cb && code <= 0xd7fb)) return "T";
+  if (code >= 0xac00 && code <= 0xd7a3) return (code - 0xac00) % 28 === 0 ? "LV" : "LVT";
+  return undefined;
+}
+
+/** Whether `next` continues the syllable `previous` ends (the Unicode Hangul cluster rules). */
+function joins(previous: number, next: number): boolean {
+  const a = jamoKind(previous);
+  const b = jamoKind(next);
+  if (a === "L") return b === "L" || b === "V" || b === "LV" || b === "LVT";
+  if (a === "LV" || a === "V") return b === "V" || b === "T";
+  if (a === "LVT" || a === "T") return b === "T";
+  return false;
+}
+
+export class GlidingCaret implements LayerMarker {
   constructor(
     readonly left: number,
     readonly top: number,
@@ -72,7 +109,14 @@ class GlidingCaret implements LayerMarker {
   ) {}
 
   eq(other: GlidingCaret): boolean {
-    return this.left === other.left && this.top === other.top && this.height === other.height;
+    // The way it moves counts too: a snap to the spot a running glide is heading for must still
+    // cut that glide short.
+    return (
+      this.left === other.left &&
+      this.top === other.top &&
+      this.height === other.height &&
+      this.glide === other.glide
+    );
   }
 
   draw(): HTMLElement {

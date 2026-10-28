@@ -289,9 +289,13 @@ test("typing, deletion and nearby keyboard moves glide on the same caret; jumps 
   }
 });
 
+/** The editor's text and the browser's selection inside it, as offsets into that text. */
+type EditorState = { text: string; start: number; end: number };
+
 /**
  * Drives a real IME composition through Chromium's CDP and counts the transform transitions the
- * gliding cursor starts. Each step settles first, so a glide finished or snapped is counted once.
+ * gliding cursor starts. `compose` and `commit` settle first, so a glide finished or snapped is
+ * counted once; `send` does not, for steps that must arrive while the previous glide still runs.
  */
 async function imeSession(owner: User) {
   const page = owner.page;
@@ -302,31 +306,88 @@ async function imeSession(owner: User) {
   await page.keyboard.press("Control+End");
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await page.evaluate(() => {
-    const w = window as unknown as { __glides: number };
+    const w = window as unknown as { __glides: number; __log: [string, number][] };
     w.__glides = 0;
+    w.__log = [];
+    const note = (name: string) => w.__log.push([name, performance.now()]);
+    document.addEventListener("compositionupdate", () => note("update"));
     document.addEventListener("transitionrun", (event) => {
       const target = event.target as HTMLElement;
       if (target.classList.contains("cm-smooth-caret") && event.propertyName === "transform") {
         w.__glides++;
+        note("run");
       }
+    });
+    document.addEventListener("transitioncancel", (event) => {
+      if ((event.target as HTMLElement).classList.contains("cm-smooth-caret")) note("cancel");
+    });
+    document.addEventListener("transitionend", (event) => {
+      if ((event.target as HTMLElement).classList.contains("cm-smooth-caret")) note("end");
     });
   });
   const cdp = await owner.context.newCDPSession(page);
   const settle = () => page.waitForTimeout(150);
+  const state = (): Promise<EditorState> =>
+    page.evaluate(() => {
+      const content = document.querySelector(".cm-content") as HTMLElement;
+      const selection = getSelection();
+      const at = (node: Node | null, offset: number) => {
+        if (!node || !content.contains(node)) return -1;
+        const range = document.createRange();
+        range.setStart(content, 0);
+        range.setEnd(node, offset);
+        return range.toString().length;
+      };
+      return {
+        text: content.textContent ?? "",
+        start: at(selection?.anchorNode ?? null, selection?.anchorOffset ?? 0),
+        end: at(selection?.focusNode ?? null, selection?.focusOffset ?? 0),
+      };
+    });
+  const send = (text: string) =>
+    cdp.send("Input.imeSetComposition", {
+      text,
+      selectionStart: text.length,
+      selectionEnd: text.length,
+    });
   return {
     glides: () => page.evaluate(() => (window as unknown as { __glides: number }).__glides),
-    async compose(text: string) {
-      await cdp.send("Input.imeSetComposition", {
-        text,
-        selectionStart: text.length,
-        selectionEnd: text.length,
-      });
+    log: () =>
+      page.evaluate(() => (window as unknown as { __log: [string, number][] }).__log.slice()),
+    state,
+    send,
+    // The editor text and the cursor right after a step, each one checked.
+    async compose(text: string, expected: { text: string; caret: number }) {
+      await send(text);
       await settle();
+      expect(await state()).toEqual({
+        text: expected.text,
+        start: expected.caret,
+        end: expected.caret,
+      });
     },
-    async commit(text: string) {
+    async commit(text: string, expected: { text: string; caret: number }) {
       await page.keyboard.insertText(text);
       await settle();
+      expect(await state()).toEqual({
+        text: expected.text,
+        start: expected.caret,
+        end: expected.caret,
+      });
     },
+    // The cursor as drawn after the next two frames (well inside one glide): its inline
+    // transition, running transitions, transform and height.
+    caret: () =>
+      page.evaluate(async () => {
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        const caret = document.querySelector(".cm-smooth-caret") as HTMLElement;
+        return {
+          transition: caret.style.transition,
+          running: caret.getAnimations().length,
+          transform: caret.style.transform,
+          height: caret.style.height,
+        };
+      }),
     // Where the cursor settles compared with CodeMirror's own (hidden) cursor.
     offset: () =>
       page.evaluate(() => {
@@ -334,7 +395,11 @@ async function imeSession(owner: User) {
         const native = document.querySelector(".cm-cursor-primary") as HTMLElement;
         const a = caret.getBoundingClientRect();
         const b = native.getBoundingClientRect();
-        return Math.max(Math.abs(a.left - b.left), Math.abs(a.top - b.top));
+        return Math.max(
+          Math.abs(a.left - b.left),
+          Math.abs(a.top - b.top),
+          Math.abs(a.height - b.height),
+        );
       }),
   };
 }
@@ -353,32 +418,244 @@ test("a Hangul composition glides to the next syllable and stays put inside one"
     const page = owner.page;
     // The first jamo moves the cursor on to a new place, so it glides; the jamo that join it into
     // a syllable only change its width, so they snap and start nothing.
-    await ime.compose("ㅎ");
+    await ime.compose("ㅎ", { text: "ㅎ", caret: 1 });
     const first = await ime.glides();
     expect(first).toBeGreaterThan(0);
-    for (const step of ["하", "한"]) {
-      await ime.compose(step);
-      expect(await visibleMainCursors(page)).toBe(1);
-      expect(await ime.offset()).toBeLessThan(1.5);
-    }
+    await ime.compose("하", { text: "하", caret: 1 });
+    expect(await visibleMainCursors(page)).toBe(1);
+    expect(await ime.offset()).toBeLessThan(1.5);
+    await ime.compose("한", { text: "한", caret: 1 });
+    expect(await visibleMainCursors(page)).toBe(1);
+    expect(await ime.offset()).toBeLessThan(1.5);
     expect(await ime.glides()).toBe(first);
-    await ime.commit("한");
+    await ime.commit("한", { text: "한", caret: 1 });
     expect(await ime.glides()).toBe(first);
     // The next syllable moves the cursor on again: another glide, to where the text ends.
-    await ime.compose("ㄱ");
+    await ime.compose("ㄱ", { text: "한ㄱ", caret: 2 });
     const second = await ime.glides();
     expect(second).toBeGreaterThan(first);
     expect(await ime.offset()).toBeLessThan(1.5);
-    await ime.compose("그");
-    await ime.compose("글");
-    await ime.commit("글");
-    await expect(page.locator(".cm-content")).toContainText("한글");
+    await ime.compose("그", { text: "한그", caret: 2 });
+    await ime.compose("글", { text: "한글", caret: 2 });
+    await ime.commit("글", { text: "한글", caret: 2 });
     expect(await visibleMainCursors(page)).toBe(1);
     expect(await ime.offset()).toBeLessThan(1.5);
     expect(await ime.glides()).toBe(second);
     // Ordinary typing afterwards glides as before.
     await page.keyboard.type("x");
     await expect.poll(ime.glides).toBeGreaterThan(second);
+    expect((await ime.state()).text).toBe("한글x");
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+test("decomposed Hangul jamo glide per syllable, not per jamo", async ({
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "IME composition can only be driven through Chromium's CDP",
+  );
+  const owner = await newUser(browser, "Jamo");
+  try {
+    const ime = await imeSession(owner);
+    const [h, a, n, s] = ["ᄒ", "ᅡ", "ᆫ", "ᄉ"];
+    await ime.compose(h, { text: h, caret: 1 });
+    const first = await ime.glides();
+    expect(first).toBeGreaterThan(0);
+    // The cursor moves with every jamo, but the syllable is the same one.
+    await ime.compose(h + a, { text: h + a, caret: 2 });
+    await ime.compose(h + a + n, { text: h + a + n, caret: 3 });
+    expect(await ime.glides()).toBe(first);
+    await ime.commit(h + a + n, { text: h + a + n, caret: 3 });
+    expect(await ime.glides()).toBe(first);
+    // The next syllable starts: a glide again.
+    await ime.compose(s, { text: h + a + n + s, caret: 4 });
+    expect(await ime.glides()).toBeGreaterThan(first);
+    expect(await ime.offset()).toBeLessThan(1.5);
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+test("a Hangul step that arrives during the previous glide still lands exactly", async ({
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "IME composition can only be driven through Chromium's CDP",
+  );
+  const owner = await newUser(browser, "Overlap");
+  try {
+    const ime = await imeSession(owner);
+    await ime.compose("한", { text: "한", caret: 1 });
+    await ime.commit("한", { text: "한", caret: 1 });
+    const before = await ime.glides();
+    // The new syllable glides; the next step follows at once, with no settling in between.
+    await ime.send("ㄱ");
+    await expect.poll(ime.glides, { intervals: [5] }).toBeGreaterThan(before);
+    await ime.send("그");
+    // The snap cut the running glide short: nothing is left moving, and the cursor is where the
+    // text ends right away, not after the old animation would have finished.
+    expect(await ime.caret()).toMatchObject({ transition: "none", running: 0 });
+    expect(await ime.state()).toEqual({ text: "한그", start: 2, end: 2 });
+    expect(await ime.offset()).toBeLessThan(1.5);
+    // The log shows the steps overlapped: the second update came less than one glide after the first run.
+    const log = await ime.log();
+    const run = log.filter(([name]) => name === "run").at(-1);
+    const updates = log.filter(([name]) => name === "update");
+    expect(run).toBeDefined();
+    expect((updates.at(-1)?.[1] ?? Number.POSITIVE_INFINITY) - (run?.[1] ?? 0)).toBeLessThan(100);
+    await ime.send("글");
+    await owner.page.keyboard.insertText("글");
+    await owner.page.waitForTimeout(150);
+    expect(await ime.state()).toEqual({ text: "한글", start: 2, end: 2 });
+    expect(await ime.offset()).toBeLessThan(1.5);
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+/**
+ * Stands in for the browser reporting the composing text late. Range rects are the measure source
+ * of the caret layer; `zero` makes them empty in height, `freeze` makes every one repeat the
+ * last rects measured before it was switched on.
+ */
+async function stubMeasure(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __measure: { mode: string; last: DOMRect[] } };
+    w.__measure = { mode: "live", last: [] };
+    const original = Range.prototype.getClientRects;
+    Range.prototype.getClientRects = function () {
+      const live = Array.from(original.call(this));
+      if (w.__measure.mode === "zero") {
+        return live.map((r) => new DOMRect(r.x, r.y, r.width, 0)) as unknown as DOMRectList;
+      }
+      if (w.__measure.mode === "freeze") return w.__measure.last as unknown as DOMRectList;
+      w.__measure.last = live;
+      return live as unknown as DOMRectList;
+    };
+  });
+  return (mode: "live" | "zero" | "freeze") =>
+    page.evaluate((next) => {
+      (window as unknown as { __measure: { mode: string } }).__measure.mode = next;
+    }, mode);
+}
+
+test("a stale or empty measure of the composing text snaps at once", async ({
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "IME composition can only be driven through Chromium's CDP",
+  );
+  const owner = await newUser(browser, "Stale");
+  try {
+    const ime = await imeSession(owner);
+    const page = owner.page;
+    // A glide long enough to still be running when the next step arrives.
+    await page.addStyleTag({
+      content: ".cm-smooth-caret { transition-duration: 800ms !important; }",
+    });
+    const measure = await stubMeasure(page);
+    await ime.compose("한", { text: "한", caret: 1 });
+    await ime.commit("한", { text: "한", caret: 1 });
+    await page.waitForTimeout(900);
+
+    // 1. A rect without height: no glide to it, the cursor drawn at once.
+    await measure("zero");
+    const empty = await ime.glides();
+    await ime.send("ㄱ");
+    expect(await ime.caret()).toMatchObject({ transition: "none", running: 0, height: "0px" });
+    expect(await ime.glides()).toBe(empty);
+    // The corrected measure that follows snaps too, and lands where the text ends.
+    await measure("live");
+    await ime.send("가");
+    expect((await ime.caret()).transition).toBe("none");
+    expect(await ime.state()).toEqual({ text: "한가", start: 2, end: 2 });
+    await page.waitForTimeout(900);
+    expect(await ime.offset()).toBeLessThan(1.5);
+
+    // 2. A step that would glide while the previous one is still gliding, measured at the same
+    // spot: the glide stops at once instead of running on to the stale target.
+    await ime.send("가ㄴ");
+    await expect.poll(ime.glides, { intervals: [5] }).toBeGreaterThan(empty);
+    const gliding = await ime.caret();
+    expect(gliding.running).toBeGreaterThan(0);
+    await measure("freeze");
+    await ime.send("가나ㅅ");
+    expect(await ime.caret()).toMatchObject({ transition: "none", running: 0 });
+    // The stale measure was drawn as measured; the next, live one corrects it without a glide.
+    expect((await ime.caret()).transform).toBe(gliding.transform);
+    await measure("live");
+    await ime.send("가나사");
+    expect((await ime.caret()).transition).toBe("none");
+    await page.waitForTimeout(900);
+    expect(await ime.state()).toEqual({ text: "한가나사", start: 4, end: 4 });
+    expect(await ime.offset()).toBeLessThan(1.5);
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+test("a Chinese composition and its candidate replacement snap", async ({
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "IME composition can only be driven through Chromium's CDP",
+  );
+  const owner = await newUser(browser, "Hanzi");
+  try {
+    const ime = await imeSession(owner);
+    await ime.compose("n", { text: "n", caret: 1 });
+    await ime.compose("ni", { text: "ni", caret: 2 });
+    // The candidate picked from the window replaces the pinyin, then commits.
+    await ime.compose("你", { text: "你", caret: 1 });
+    await ime.commit("你", { text: "你", caret: 1 });
+    await ime.compose("h", { text: "你h", caret: 2 });
+    await ime.compose("hao", { text: "你hao", caret: 4 });
+    await ime.compose("好", { text: "你好", caret: 2 });
+    await ime.commit("好", { text: "你好", caret: 2 });
+    expect(await ime.glides()).toBe(0);
+    expect(await visibleMainCursors(owner.page)).toBe(1);
+    expect(await ime.offset()).toBeLessThan(1.5);
+    await owner.page.keyboard.type("x");
+    await expect.poll(ime.glides).toBeGreaterThan(0);
+  } finally {
+    await closeAll(owner);
+  }
+});
+
+test("a Hanja replacement of a Hangul syllable snaps", async ({ browser, browserName }) => {
+  test.skip(
+    browserName !== "chromium",
+    "IME composition can only be driven through Chromium's CDP",
+  );
+  const owner = await newUser(browser, "Hanja");
+  try {
+    const ime = await imeSession(owner);
+    await ime.compose("한", { text: "한", caret: 1 });
+    const hangul = await ime.glides();
+    expect(hangul).toBeGreaterThan(0);
+    // The conversion window picks 韓 for the syllable: the same range, now Han, so no glide.
+    await ime.compose("韓", { text: "韓", caret: 1 });
+    expect(await ime.glides()).toBe(hangul);
+    expect(await ime.offset()).toBeLessThan(1.5);
+    await ime.commit("韓", { text: "韓", caret: 1 });
+    expect(await ime.glides()).toBe(hangul);
+    // A Hangul syllable after the Hanja is a new place for the cursor, so it glides again.
+    await ime.compose("ㄱ", { text: "韓ㄱ", caret: 2 });
+    expect(await ime.glides()).toBeGreaterThan(hangul);
+    await ime.compose("글", { text: "韓글", caret: 2 });
+    await ime.compose("契", { text: "韓契", caret: 2 });
+    await ime.commit("契", { text: "韓契", caret: 2 });
+    expect(await ime.offset()).toBeLessThan(1.5);
   } finally {
     await closeAll(owner);
   }
@@ -395,17 +672,16 @@ test("a Japanese composition, with its candidate window, still snaps", async ({
   const owner = await newUser(browser, "Kana");
   try {
     const ime = await imeSession(owner);
-    for (const step of ["か", "かん", "かんじ"]) {
-      await ime.compose(step);
-      expect(await visibleMainCursors(owner.page)).toBe(1);
-      expect(await ime.offset()).toBeLessThan(1.5);
-    }
-    await ime.commit("漢字");
-    await ime.compose("さ");
-    await expect(owner.page.locator(".cm-content")).toContainText("漢字さ");
+    await ime.compose("か", { text: "か", caret: 1 });
+    await ime.compose("かん", { text: "かん", caret: 2 });
+    await ime.compose("かんじ", { text: "かんじ", caret: 3 });
+    expect(await visibleMainCursors(owner.page)).toBe(1);
+    expect(await ime.offset()).toBeLessThan(1.5);
+    await ime.commit("漢字", { text: "漢字", caret: 2 });
+    await ime.compose("さ", { text: "漢字さ", caret: 3 });
     expect(await ime.offset()).toBeLessThan(1.5);
     expect(await ime.glides()).toBe(0);
-    await ime.commit("さ");
+    await ime.commit("さ", { text: "漢字さ", caret: 3 });
     expect(await ime.glides()).toBe(0);
     await owner.page.keyboard.type("x");
     await expect.poll(ime.glides).toBeGreaterThan(0);
