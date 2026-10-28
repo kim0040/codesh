@@ -137,7 +137,22 @@ Instances coordinate through Valkey (document locks, `@hocuspocus/extension-redi
 
 ## gachipad.local (mDNS)
 
-`COMPOSE_PROFILES=mdns` in `.env` starts `mdns/`, a small sidecar (`bonjour-service`, MIT) on the host network that answers for `MDNS_HOSTNAME` (default `gachipad.local`). Linux hosts only; set `MDNS_IP` when the host has several addresses. `apps/api` is not involved.
+gachipad includes an optional mDNS responder sidecar (`ghcr.io/kim0040/gachipad-mdns`) running in host network mode (`network_mode: host`) to answer multicast queries for `MDNS_HOSTNAME` (default `gachipad.local`). `apps/api` is not involved.
+
+- **Host requirements**: Requires a native Linux Docker host with a local unix socket. Docker Desktop (Linux VM boundary), WSL, macOS, Windows, and remote Docker daemon endpoints cannot advertise multicast packets to the host LAN and are declined automatically.
+- **Install-time behavior**: On native Linux, `install.sh` enables mDNS by default. Fresh installations prompt once on a TTY (`[Y/n]`) and default to yes non-interactively. You can pass `--mdns` to force enable, `--no-mdns` to skip, or set `GACHIPAD_MDNS=1|0` (CLI flags take precedence). Re-running `install.sh` without flags preserves your existing mDNS choice and hostname.
+- **Conflict detection**: During enablement, an offline probe container checks for name conflicts on the LAN. If `gachipad.local` is already answered by another host, it tests up to 10 candidates with `-N` suffixes (`gachipad-2.local`, etc.) and saves the first free name to `MDNS_HOSTNAME`. Probe timeouts (6 s Docker / 1.4 s Node), socket errors, or candidate exhaustion warn and keep the original hostname without aborting installation. `MDNS_ALIASES` entries are also checked for conflicts (warning only, no auto-rename). Virtual bridge interfaces (`docker*`, `br-*`, `veth*`, `virbr*`) are filtered from advertisements. Set `MDNS_IP` to pin a specific interface IP if the host has several addresses.
+- **Managing existing installs (`mdns.sh`)**: Manage mDNS on existing installations with `./mdns.sh enable|disable|status` instead of editing `COMPOSE_PROFILES` manually:
+  ```sh
+  ./mdns.sh enable|disable|status
+  ```
+  This only starts or stops the `mdns` container without touching `PUBLIC_URL`, `SITE_ADDRESS`, TLS, databases, or application services. `./mdns.sh enable` verifies the local image (pulling from registry only if missing), snapshots `.env`, probes for conflicts, and rolls back `.env` if startup fails or is interrupted. `./mdns.sh status` is lock-free and can run during maintenance.
+- **First-update repair for <=1.1.0 installs**: Installations from version 1.1.0 or older used an updater with a fixed file list that did not extract `mdns.sh`. To restore the helper and load matching images on an offline installation after its first update, run:
+  ```sh
+  ./update.sh --mdns-tools /path/to/matching-bundle.tar.gz
+  ```
+  This requires the verified offline bundle (`gachipad-<version>-linux-<arch>.tar.gz` containing `images.tar`, not the image-less deploy tarball) matching the installed `GACHIPAD_VERSION`. It loads images and installs `mdns.sh` atomically without altering `.env` or application services.
+- **Caveats**: Some Android versions and networks with multicast filtering (e.g. IGMP snooping) do not resolve `.local`; use the host's server IP address instead. For named HTTP or HTTPS sites, mDNS advertisement does not create an HTTP virtual host or TLS certificate; add a matching `SITE_ALIASES` entry and configure a certificate before relying on the name (see `tls/README.md`). Server IP addresses share this restriction.
 
 ## Offline bundle
 
